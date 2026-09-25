@@ -1,0 +1,18 @@
+{
+  "name": "@oxacan/engine",
+  "version": "0.1.0",
+  "description": "Moteur de chiffrage OXACAN — calculs déterministes (offre, situation de travaux, TVA, retenue, numérotation). Aucune dépendance runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --reporter=verbose"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
