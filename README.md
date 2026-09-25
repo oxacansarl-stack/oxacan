@@ -70,3 +70,12 @@ docs/             ARCHITECTURE.md, API.md, DATA-MODEL.md, ROADMAP.md, adr/ (déc
 ## Licence
 
 Propriété d'OXACAN. Code livré dans le cadre du contrat de développement. Aucune donnée CAN/CRB n'est incluse : les codes de structure (511, 574) et les prix du jeu de démonstration sont fictifs.
+
+## Captures (état du 25 septembre 2026)
+
+| | |
+|---|---|
+| ![Offre](docs/screenshots/offre-detail.png) | ![Chantier](docs/screenshots/chantier-situation.png) |
+| Détail d'offre : arborescence, totaux, marge | Chantier : lots, tâches, timbrage, quantités exécutées, situation S1 |
+| ![Catalogue](docs/screenshots/catalogue-import.png) | ![Facturation](docs/screenshots/facturation.png) |
+| Import CSV avec correspondance de colonnes | Facturation et portefeuille |
