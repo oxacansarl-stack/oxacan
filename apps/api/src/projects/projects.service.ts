@@ -12,7 +12,7 @@ export class ProjectsService {
   list(tenantId: string) { return this.prisma.project.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' }, include: { offer: { select: { reference: true, clientName: true } }, _count: { select: { lots: true, situations: true } } } }); }
 
   async get(tenantId: string, id: string) {
-    const p = await this.prisma.project.findFirst({ where: { id, tenantId }, include: { offer: { select: { reference: true, clientName: true, sellFactor: true, vatRate: true } }, lots: { include: { tasks: true } }, situations: { orderBy: { number: 'asc' } } } });
+    const p = await this.prisma.project.findFirst({ where: { id, tenantId }, include: { offer: { select: { reference: true, clientName: true, sellFactor: true, vatRate: true } }, lots: { include: { tasks: { include: { line: { select: { position: true, quantity: true, executed: true, unit: true } } }, orderBy: { line: { position: 'asc' } } } } }, situations: { orderBy: { number: 'asc' } } } });
     if (!p) throw new NotFoundException('project not found');
     return p;
   }
@@ -53,6 +53,7 @@ export class ProjectsService {
     const alreadyDeducted = previous.reduce((s, x) => s + x.depositsDeducted, 0);
     const executed = offer.zones.flatMap((z) => z.cfcs.flatMap((c) => c.chapters.flatMap((ch) => ch.lines.map((l) => ({ lineId: l.id, executedQuantity: Number(l.executed) })))));
     const totals = computeSituation(toEngineOffer(offer), { number: previous.length + 1, executed, previouslyClaimedExclVat: prevClaimed, depositsInvoicedExclVat: Math.max((deposits._sum.totalExclVat ?? 0) - alreadyDeducted, 0), retentionPercent: input.retentionPercent, previouslyRetained: prevRetained, vatRatePercent: Number(offer.vatRate) });
+    if (totals.periodExclVat === 0) throw new BadRequestException('aucune quantité exécutée nouvelle depuis la dernière situation — rien à facturer');
     return this.prisma.situation.create({ data: { projectId, number: totals.number, cumulativeExclVat: totals.cumulativeExclVat, periodExclVat: totals.periodExclVat, retentionThisPeriod: totals.retentionThisPeriod, depositsDeducted: totals.depositsDeducted, netExclVat: totals.netExclVat, vatAmount: totals.vatAmount, netInclVat: totals.netInclVat, snapshot: totals as object } });
   }
 }

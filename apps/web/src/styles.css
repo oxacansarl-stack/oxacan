@@ -1,0 +1,55 @@
+/* OXACAN — Direction A « Le Nœud » : graphite, craie, cuivre ; accent jaune volt. Space Grotesk. */
+:root {
+  --graphite: #1d1f22; --graphite-2: #2b2e33; --chalk: #f3f2ee; --chalk-2: #e6e4dd; --copper: #b5673a; --volt: #e8ff3a;
+  --ink: #16181b; --muted: #6b6f76; --line: #d7d4cb; --ok: #2f7d4f; --warn: #b8860b; --bad: #a83a2c;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace; --sans: 'Space Grotesk', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { font-family: var(--sans); color: var(--ink); background: var(--chalk); font-size: 15px; line-height: 1.45; }
+a { color: inherit; text-decoration: none; }
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100%; }
+.nav { background: var(--graphite); color: var(--chalk); padding: 20px 16px; display: flex; flex-direction: column; gap: 6px; }
+.brand { font-weight: 700; letter-spacing: .12em; font-size: 15px; padding: 6px 10px 18px; position: relative; }
+.brand::after { content: ''; position: absolute; left: 10px; bottom: 10px; width: 28px; height: 3px; background: var(--volt); }
+.nav a { padding: 9px 10px; border-radius: 6px; color: #c9cbd0; }
+.nav a.active { background: var(--graphite-2); color: var(--chalk); box-shadow: inset 3px 0 0 var(--volt); }
+.nav .who { margin-top: auto; color: #9a9ea6; font-size: 13px; padding: 10px; border-top: 1px solid #3a3d43; }
+.nav .who b { color: var(--chalk); display: block; }
+.main { padding: 28px 36px 60px; max-width: 1240px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.01em; }
+h2 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; }
+.sub { color: var(--muted); margin: 0 0 22px; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; }
+table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #faf9f6; }
+td { padding: 9px 12px; border-bottom: 1px solid #ebe9e2; vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13.5px; }
+.code { font-family: var(--mono); font-size: 13px; color: var(--copper); }
+.tree-zone td { background: var(--graphite); color: var(--chalk); font-weight: 600; }
+.tree-cfc td { background: #ecebe5; font-weight: 500; }
+.tree-ch td { background: #f6f5f1; }
+.tree-line.excluded td { color: var(--muted); text-decoration: line-through; }
+.btn { font: inherit; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--graphite); background: var(--graphite); color: var(--chalk); cursor: pointer; }
+.btn.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+.btn.volt { background: var(--volt); color: var(--ink); border-color: var(--volt); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+input, select, textarea { font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+textarea { width: 100%; min-height: 160px; font-family: var(--mono); font-size: 13px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 14px 0 6px; }
+.kpi { background: #fff; border: 1px solid var(--line); padding: 14px 16px; }
+.kpi small { display: block; color: var(--muted); font-size: 12.5px; }
+.kpi strong { font-size: 22px; font-weight: 600; font-family: var(--mono); letter-spacing: -.01em; }
+.kpi.accent { border-left: 4px solid var(--volt); }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--chalk-2); }
+.tag.ADJUGEE { background: #dff2e6; color: var(--ok); } .tag.ENVOYEE, .tag.NEGOCIATION { background: #fff4d6; color: var(--warn); } .tag.PERDUE { background: #f8dcd8; color: var(--bad); }
+.notice { border-left: 3px solid var(--copper); background: #fff; padding: 10px 14px; margin: 12px 0; font-size: 14px; }
+.error { color: var(--bad); }
+.login { min-height: 100%; display: grid; place-items: center; background: var(--graphite); }
+.login form { background: var(--chalk); padding: 32px; width: 360px; display: grid; gap: 12px; border-top: 4px solid var(--volt); }
+.login h1 { letter-spacing: .12em; font-size: 18px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); }
