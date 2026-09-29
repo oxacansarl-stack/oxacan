@@ -3,6 +3,12 @@
   "compilerOptions": {
     "jsx": "react-native",
     "strict": true,
-    "moduleResolution": "bundler"
-  }
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

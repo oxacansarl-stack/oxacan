@@ -22,6 +22,7 @@ import { AccessScopeService, ScopeUser, parsePaging } from './access-scope.servi
 import {
   ApproveTimeEntriesDto,
   ClockInDto,
+  ClockOutDto,
   RejectTimeEntriesDto,
   SubmitTimeEntriesDto,
   UpdateTimeEntryDto,
@@ -96,15 +97,16 @@ export class TimekeepingController {
     return this.service.clockIn(companyId, user.id, body);
   }
 
-  /** Takes no body: end time and minutes are computed server-side. Owner only. */
+  /** Owner only. The body is optional; offline clients send the original tap time. */
   @Post('clock-out/:id')
   @Roles(...ALL_ROLES)
   async clockOut(
     @CompanyId() companyId: string,
     @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ClockOutDto,
   ) {
-    return this.service.clockOut(companyId, user.id, id);
+    return this.service.clockOut(companyId, user.id, id, body?.occurredAt);
   }
 
   @Put(':id')

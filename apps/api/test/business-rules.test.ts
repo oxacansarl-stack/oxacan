@@ -252,3 +252,32 @@ describe('Data export (revFADP / GDPR)', () => {
     expect(rows[0].n).toBeGreaterThan(0);
   });
 });
+
+describe('Offline clock-in/out', () => {
+  const zurichTime = (d: Date) =>
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+
+  it('keeps the tap time of queued actions and rejects impossible times', async () => {
+    const projectId = await createProject(admin, 'Offline project');
+    const tappedIn = new Date(Date.now() - 3 * 3600_000);
+    const tappedOut = new Date(Date.now() - 3600_000);
+
+    expect(
+      (await admin.post('/timekeeping/clock-in', { projectId, occurredAt: new Date(Date.now() + 3600_000).toISOString() })).status,
+    ).toBe(400);
+
+    const entry = await ok(admin.post('/timekeeping/clock-in', { projectId, occurredAt: tappedIn.toISOString() }));
+    expect(entry.startTime.slice(0, 5)).toBe(zurichTime(tappedIn));
+    expect(entry.isOfflineEntry).toBe(true);
+
+    const early = await admin.post(`/timekeeping/clock-out/${entry.id}`, {
+      occurredAt: new Date(tappedIn.getTime() - 3600_000).toISOString(),
+    });
+    expect(early.status).toBe(400);
+
+    const out = await ok(admin.post(`/timekeeping/clock-out/${entry.id}`, { occurredAt: tappedOut.toISOString() }));
+    expect(out.endTime.slice(0, 5)).toBe(zurichTime(tappedOut));
+    expect(out.totalMinutes).toBe(120);
+    expect(out.syncedAt).toBeTruthy();
+  });
+});

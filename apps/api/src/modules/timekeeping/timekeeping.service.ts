@@ -24,7 +24,26 @@ const APP_TIME_ZONE = 'Europe/Zurich';
 const SUBMITTABLE = ['draft', 'rejected'];
 
 /** Current calendar date and wall-clock time on Swiss sites, independent of the server's zone. */
-function localNow(): { date: string; time: string } {
+/** How far a client-reported time may lie in the future (clock drift) or the past (offline). */
+const MAX_CLIENT_CLOCK_AHEAD_MS = 2 * 60 * 1000;
+const MAX_OFFLINE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const OFFLINE_THRESHOLD_MS = 60 * 1000;
+
+/** Validates a client-reported event time; returns it and whether it was recorded offline. */
+function resolveOccurredAt(occurredAt?: string): { at: Date; offline: boolean } {
+  const now = Date.now();
+  if (!occurredAt) return { at: new Date(now), offline: false };
+  const at = new Date(occurredAt);
+  if (at.getTime() > now + MAX_CLIENT_CLOCK_AHEAD_MS) {
+    throw new ValidationError('occurredAt is in the future. Check the device clock.');
+  }
+  if (at.getTime() < now - MAX_OFFLINE_AGE_MS) {
+    throw new ValidationError('occurredAt is more than 7 days old; ask your team leader to enter it manually.');
+  }
+  return { at, offline: now - at.getTime() > OFFLINE_THRESHOLD_MS };
+}
+
+function localNow(at: Date = new Date()): { date: string; time: string } {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', {
       timeZone: APP_TIME_ZONE,
@@ -36,7 +55,7 @@ function localNow(): { date: string; time: string } {
       second: '2-digit',
       hourCycle: 'h23',
     })
-      .formatToParts(new Date())
+      .formatToParts(at)
       .map((p) => [p.type, p.value]),
   );
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}:${parts.second}` };
@@ -141,7 +160,8 @@ export class TimekeepingService {
     await this.scope.assertProjectInCompany(companyId, dto.projectId);
     if (dto.taskId) await this.scope.assertTaskInCompany(companyId, dto.taskId);
 
-    const { date: dateStr, time: startTime } = localNow();
+    const occurred = resolveOccurredAt(dto.occurredAt);
+    const { date: dateStr, time: startTime } = localNow(occurred.at);
 
     // Validate no open entry exists for this user today
     const openEntry = await this.timeEntryRepo.findOne({
@@ -186,6 +206,8 @@ export class TimekeepingService {
       latitude: dto.latitude ?? null,
       longitude: dto.longitude ?? null,
       notes: dto.notes || null,
+      isOfflineEntry: occurred.offline,
+      syncedAt: occurred.offline ? new Date() : null,
     });
 
     return this.timeEntryRepo.save(entry);
@@ -193,7 +215,7 @@ export class TimekeepingService {
 
   /* ───────────── Clock Out ───────────── */
 
-  async clockOut(companyId: string, userId: string, id: string): Promise<TimeEntry> {
+  async clockOut(companyId: string, userId: string, id: string, occurredAt?: string): Promise<TimeEntry> {
     // Only the owner may clock out their own entry (others get 404).
     const entry = await this.timeEntryRepo.findOne({
       where: { id, companyId, userId },
@@ -207,7 +229,13 @@ export class TimekeepingService {
       );
     }
 
-    const { time: endTime } = localNow();
+    const occurred = resolveOccurredAt(occurredAt);
+    const { date: endDate, time: endTime } = localNow(occurred.at);
+    const entryDate = String(entry.date).slice(0, 10);
+    if (endDate < entryDate || (endDate === entryDate && endTime < entry.startTime)) {
+      throw new ValidationError('Clock-out cannot be earlier than clock-in.');
+    }
+    if (occurred.offline) entry.syncedAt = new Date();
 
     entry.endTime = endTime;
 

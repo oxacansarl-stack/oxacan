@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -47,6 +48,18 @@ export class ClockInDto {
   @IsString()
   @MaxLength(2000)
   notes?: string;
+
+  /** When the worker actually tapped clock-in (set by clients that queue offline). */
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  occurredAt?: string;
+}
+
+export class ClockOutDto {
+  /** When the worker actually tapped clock-out (set by clients that queue offline). */
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  occurredAt?: string;
 }
 
 export class UpdateTimeEntryDto {

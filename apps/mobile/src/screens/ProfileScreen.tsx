@@ -1,27 +1,53 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  Alert,
   StyleSheet,
   SafeAreaView,
 } from 'react-native';
+import { useAuth, useProfile } from '../auth/AuthContext';
+import { useField } from '../state/FieldContext';
+import { api } from '../lib/api';
+import { ROLE_LABELS, type Company } from '../lib/types';
 
 const PRIMARY = '#2563eb';
 
-interface SettingsItem {
-  label: string;
-  value?: string;
-}
-
-const SETTINGS_ITEMS: SettingsItem[] = [
-  { label: 'Notifications', value: 'On' },
-  { label: 'Language', value: 'FR' },
-  { label: 'Offline Mode', value: 'Auto' },
-  { label: 'GPS Tracking', value: 'On' },
-];
-
 export default function ProfileScreen() {
+  const profile = useProfile();
+  const { signOut } = useAuth();
+  const { queue } = useField();
+  const [company, setCompany] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<Company>('/companies/me')
+      .then((c) => setCompany(c.name))
+      .catch(() => setCompany(null));
+  }, []);
+
+  const initials = `${profile.firstName?.[0] ?? ''}${profile.lastName?.[0] ?? ''}`.toUpperCase() || '?';
+
+  const rows = [
+    { label: 'Email', value: profile.email },
+    { label: 'Company', value: company ?? '--' },
+  ];
+
+  function onSignOut() {
+    if (queue.length === 0) {
+      void signOut();
+      return;
+    }
+    Alert.alert(
+      'Unsynced actions',
+      `${queue.length} action${queue.length > 1 ? 's are' : ' is'} waiting to sync. They stay on this device and will be sent the next time you sign in.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log Out', style: 'destructive', onPress: () => void signOut() },
+      ],
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
@@ -30,33 +56,34 @@ export default function ProfileScreen() {
         {/* User info */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>ML</Text>
+            <Text style={styles.avatarText}>{initials}</Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>Marc Lefebvre</Text>
-            <Text style={styles.userRole}>Team Leader</Text>
+            <Text style={styles.userName}>
+              {profile.firstName} {profile.lastName}
+            </Text>
+            <Text style={styles.userRole}>{ROLE_LABELS[profile.role] ?? profile.role}</Text>
           </View>
         </View>
 
-        {/* Settings */}
-        <Text style={styles.sectionHeader}>Settings</Text>
+        {/* Account */}
+        <Text style={styles.sectionHeader}>Account</Text>
         <View style={styles.settingsCard}>
-          {SETTINGS_ITEMS.map((item, idx) => (
-            <TouchableOpacity
+          {rows.map((item, idx) => (
+            <View
               key={item.label}
-              style={[
-                styles.settingsRow,
-                idx < SETTINGS_ITEMS.length - 1 && styles.settingsRowBorder,
-              ]}
+              style={[styles.settingsRow, idx < rows.length - 1 && styles.settingsRowBorder]}
             >
               <Text style={styles.settingsLabel}>{item.label}</Text>
-              <Text style={styles.settingsValue}>{item.value}</Text>
-            </TouchableOpacity>
+              <Text style={styles.settingsValue} numberOfLines={1}>
+                {item.value}
+              </Text>
+            </View>
           ))}
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.logoutButton} activeOpacity={0.7} onPress={onSignOut}>
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
@@ -118,7 +145,7 @@ const styles = StyleSheet.create({
   },
   settingsRowBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   settingsLabel: { fontSize: 15, color: '#334155' },
-  settingsValue: { fontSize: 15, color: '#94a3b8' },
+  settingsValue: { fontSize: 15, color: '#94a3b8', flexShrink: 1, marginLeft: 12 },
 
   logoutButton: {
     borderRadius: 12,
