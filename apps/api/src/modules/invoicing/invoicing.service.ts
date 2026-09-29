@@ -111,7 +111,7 @@ export class InvoicingService {
       qb.andWhere('invoice.type = :type', { type });
     }
 
-    qb.orderBy('invoice.created_at', 'DESC')
+    qb.orderBy('invoice.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -554,7 +554,7 @@ export class InvoicingService {
       qb.andWhere('pv.status = :status', { status });
     }
 
-    qb.orderBy('pv.created_at', 'DESC')
+    qb.orderBy('pv.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

@@ -47,7 +47,7 @@ export class CrmService {
       );
     }
 
-    qb.orderBy('client.created_at', 'DESC')
+    qb.orderBy('client.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

@@ -35,6 +35,6 @@ export class MeetingAction {
   @Column({ type: 'text', default: 'open' })
   status: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

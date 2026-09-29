@@ -105,7 +105,7 @@ export class CatalogueService {
       qb.andWhere('a.is_active = :isActive', { isActive });
     }
 
-    qb.orderBy('a.npk_number', 'ASC', 'NULLS LAST')
+    qb.orderBy('a.npkNumber', 'ASC', 'NULLS LAST')
       .addOrderBy('a.description', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);

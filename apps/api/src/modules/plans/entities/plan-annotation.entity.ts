@@ -41,6 +41,6 @@ export class PlanAnnotation {
   @Column({ type: 'uuid', nullable: true })
   createdBy: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

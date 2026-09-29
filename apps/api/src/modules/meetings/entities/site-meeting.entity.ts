@@ -49,7 +49,7 @@ export class SiteMeeting {
   @Column({ type: 'text', nullable: true })
   pdfUrl: string | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
@@ -62,9 +62,9 @@ export class SiteMeeting {
   @OneToMany(() => MeetingAction, (action) => action.meeting)
   actions: MeetingAction[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

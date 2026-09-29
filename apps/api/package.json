@@ -8,10 +8,10 @@
     "start": "node dist/main.js",
     "start:prod": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "nest build && vitest run",
     "test:watch": "vitest",
-    "migration:run": "typeorm migration:run -d dist/config/data-source.js",
-    "migration:generate": "typeorm migration:generate -d dist/config/data-source.js"
+    "migration:run": "node dist/config/run-migrations.js",
+    "db:seed": "node dist/config/seed-dev.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

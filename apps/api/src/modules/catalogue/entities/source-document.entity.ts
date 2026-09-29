@@ -60,6 +60,6 @@ export class SourceDocument {
   @JoinColumn({ name: 'imported_by' })
   importedByUser: AppUser;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

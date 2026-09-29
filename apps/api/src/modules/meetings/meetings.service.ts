@@ -75,8 +75,8 @@ export class MeetingsService {
       qb.andWhere('meeting.status = :status', { status });
     }
 
-    qb.orderBy('meeting.meeting_date', 'DESC')
-      .addOrderBy('meeting.meeting_number', 'DESC')
+    qb.orderBy('meeting.meetingDate', 'DESC')
+      .addOrderBy('meeting.meetingNumber', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -116,7 +116,7 @@ export class MeetingsService {
       .createQueryBuilder('meeting')
       .where('meeting.company_id = :companyId', { companyId })
       .andWhere('meeting.project_id = :projectId', { projectId: dto.projectId })
-      .orderBy('meeting.meeting_number', 'DESC')
+      .orderBy('meeting.meetingNumber', 'DESC')
       .getOne();
 
     const meetingNumber = lastMeeting ? lastMeeting.meetingNumber + 1 : 1;

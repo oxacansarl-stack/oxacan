@@ -23,6 +23,7 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
       map((data) => ({
         data,
         meta: { timestamp: new Date().toISOString() },
+        error: null,
       })),
     );
   }

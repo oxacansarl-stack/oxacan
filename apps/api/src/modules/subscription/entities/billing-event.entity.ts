@@ -38,6 +38,6 @@ export class BillingEvent {
   @Column({ type: 'jsonb', default: '{}' })
   metadata: Record<string, unknown>;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

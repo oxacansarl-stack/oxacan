@@ -28,6 +28,6 @@ export class TeamMember {
   @Column({ type: 'uuid' })
   companyId: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   joinedAt: Date;
 }

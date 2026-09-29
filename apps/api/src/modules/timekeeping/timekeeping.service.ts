@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { TimeEntry } from './entities/time-entry.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
-import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
 
 interface TimeEntryFilters {
   page?: number;
@@ -73,7 +73,7 @@ export class TimekeepingService {
     }
 
     qb.orderBy('te.date', 'DESC')
-      .addOrderBy('te.start_time', 'DESC')
+      .addOrderBy('te.startTime', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -367,21 +367,31 @@ export class TimekeepingService {
 
   /* ───────────── Weekly Summary ───────────── */
 
-  async getWeeklySummary(companyId: string, userId: string, weekStartDate: string) {
-    // weekStartDate is Monday (ISO); get entries for 7 days
-    const weekStart = new Date(weekStartDate);
+  async getWeeklySummary(companyId: string, userId: string, weekStartDate?: string) {
+    let weekStart: Date;
+    if (weekStartDate) {
+      weekStart = new Date(`${weekStartDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate) || isNaN(weekStart.getTime())) {
+        throw new ValidationError('weekStart must be a date in YYYY-MM-DD format.');
+      }
+    } else {
+      const today = new Date();
+      weekStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+      weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7));
+    }
     const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    const weekStartStr = weekStart.toISOString().slice(0, 10);
     const weekEndStr = weekEnd.toISOString().slice(0, 10);
 
     const entries = await this.timeEntryRepo
       .createQueryBuilder('te')
       .where('te.company_id = :companyId', { companyId })
       .andWhere('te.user_id = :userId', { userId })
-      .andWhere('te.date >= :weekStart', { weekStart: weekStartDate })
+      .andWhere('te.date >= :weekStart', { weekStart: weekStartStr })
       .andWhere('te.date <= :weekEnd', { weekEnd: weekEndStr })
       .orderBy('te.date', 'ASC')
-      .addOrderBy('te.start_time', 'ASC')
+      .addOrderBy('te.startTime', 'ASC')
       .getMany();
 
     let totalNormal = 0;

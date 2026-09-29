@@ -91,9 +91,9 @@ export class Offer {
   @OneToMany(() => OfferAssumption, (assumption) => assumption.offer)
   assumptions: OfferAssumption[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

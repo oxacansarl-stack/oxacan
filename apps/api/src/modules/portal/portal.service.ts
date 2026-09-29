@@ -9,6 +9,7 @@ import { ProjectMilestone } from '../projects/entities/project-milestone.entity'
 import { Task } from '../projects/entities/task.entity';
 import { DailyReport } from '../timekeeping/entities/daily-report.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { runAsSystem, setTenant } from '../../common/tenant/tenant-context';
 
 interface TokenFilters {
   page?: number;
@@ -53,7 +54,7 @@ export class PortalService {
       qb.andWhere('token.project_id = :projectId', { projectId });
     }
 
-    qb.orderBy('token.created_at', 'DESC')
+    qb.orderBy('token.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -109,10 +110,9 @@ export class PortalService {
   /* ───────────── Validate Token (Public) ───────────── */
 
   async validateToken(token: string): Promise<{ valid: boolean; projectId?: string }> {
-    const portalToken = await this.tokenRepo.findOne({
-      where: { token },
-      relations: ['project'],
-    });
+    const portalToken = await runAsSystem(() =>
+      this.tokenRepo.findOne({ where: { token } }),
+    );
 
     if (!portalToken || !portalToken.isActive) {
       return { valid: false };
@@ -122,6 +122,7 @@ export class PortalService {
       return { valid: false };
     }
 
+    setTenant(portalToken.companyId);
     return { valid: true, projectId: portalToken.projectId };
   }
 

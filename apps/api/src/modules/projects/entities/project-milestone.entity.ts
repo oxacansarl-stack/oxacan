@@ -43,6 +43,6 @@ export class ProjectMilestone {
   @Column({ type: 'text', default: 'pending' })
   status: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

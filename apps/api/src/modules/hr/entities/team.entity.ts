@@ -32,9 +32,9 @@ export class Team {
   @OneToMany(() => TeamMember, (member) => member.team)
   members: TeamMember[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

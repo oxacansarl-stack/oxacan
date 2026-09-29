@@ -17,7 +17,7 @@ export class ClientInteraction {
   @Column({ type: 'uuid' })
   clientId: string;
 
-  @ManyToOne(() => Client, (client) => client.interactions)
+  @ManyToOne(() => Client, (client) => client.interactions, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'client_id' })
   client: Client;
 
@@ -43,6 +43,6 @@ export class ClientInteraction {
   @Column({ type: 'timestamptz', default: () => 'NOW()' })
   interactionDate: Date;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

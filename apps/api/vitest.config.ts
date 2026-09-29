@@ -4,9 +4,10 @@ export default defineConfig({
   test: {
     root: '.',
     include: ['test/**/*.test.ts'],
-    globals: true,
     environment: 'node',
-    setupFiles: ['./test/setup.ts'],
+    globalSetup: ['./test/global-setup.ts'],
+    fileParallelism: false,
     testTimeout: 30_000,
+    hookTimeout: 120_000,
   },
 });

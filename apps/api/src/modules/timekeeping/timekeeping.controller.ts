@@ -46,10 +46,13 @@ export class TimekeepingController {
   @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
   async getWeeklySummary(
     @CompanyId() companyId: string,
-    @Query('userId') userId: string,
-    @Query('weekStart') weekStart: string,
+    @CurrentUser() user: { id: string; role: string },
+    @Query('userId') userId?: string,
+    @Query('weekStart') weekStart?: string,
   ) {
-    return this.service.getWeeklySummary(companyId, userId, weekStart);
+    const canViewOthers = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'].includes(user.role);
+    const targetUserId = userId && canViewOthers ? userId : user.id;
+    return this.service.getWeeklySummary(companyId, targetUserId, weekStart);
   }
 
   @Get(':id')

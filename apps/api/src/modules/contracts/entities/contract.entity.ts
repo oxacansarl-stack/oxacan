@@ -72,9 +72,9 @@ export class Contract {
   @OneToMany(() => ContractAmendment, (amendment) => amendment.contract)
   amendments: ContractAmendment[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

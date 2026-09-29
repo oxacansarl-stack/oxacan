@@ -204,7 +204,7 @@ export class StockService {
       qb.andWhere('mov.project_id = :projectId', { projectId });
     }
 
-    qb.orderBy('mov.created_at', 'DESC')
+    qb.orderBy('mov.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

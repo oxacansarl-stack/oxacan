@@ -39,7 +39,7 @@ export class PlansService {
       qb.andWhere('plan.floor = :floor', { floor });
     }
 
-    qb.orderBy('plan.created_at', 'DESC');
+    qb.orderBy('plan.createdAt', 'DESC');
 
     return qb.getMany();
   }

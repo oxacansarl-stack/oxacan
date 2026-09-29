@@ -40,6 +40,6 @@ export class ContractAmendment {
   @Column({ type: 'timestamptz', nullable: true })
   signedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

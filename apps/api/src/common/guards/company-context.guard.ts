@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { setTenant } from '../tenant/tenant-context';
 
 @Injectable()
 export class CompanyContextGuard implements CanActivate {
@@ -20,6 +21,7 @@ export class CompanyContextGuard implements CanActivate {
     request.companyId = user.companyId;
     request.userId = user.id;
     request.userRole = user.role;
+    setTenant(user.companyId, user.id);
 
     return true;
   }

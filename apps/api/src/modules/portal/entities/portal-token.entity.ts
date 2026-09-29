@@ -33,13 +33,13 @@ export class PortalToken {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
   @JoinColumn({ name: 'created_by' })
   createdBy: AppUser | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

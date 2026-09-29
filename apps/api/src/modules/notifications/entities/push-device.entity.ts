@@ -37,6 +37,6 @@ export class PushDevice {
   @Column({ type: 'timestamptz', default: () => 'NOW()' })
   lastUsedAt: Date;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

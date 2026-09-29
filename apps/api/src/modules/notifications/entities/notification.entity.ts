@@ -50,6 +50,6 @@ export class Notification {
   @Column({ type: 'timestamptz', nullable: true })
   pushSentAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

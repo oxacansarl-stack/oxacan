@@ -46,9 +46,9 @@ export class Subscription {
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

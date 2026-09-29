@@ -58,9 +58,9 @@ export class Vehicle {
   @JoinColumn({ name: 'stock_location_id' })
   stockLocation: StockLocation | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

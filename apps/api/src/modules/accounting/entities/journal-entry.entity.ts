@@ -41,14 +41,14 @@ export class JournalEntry {
   @Column({ type: 'timestamptz', nullable: true })
   postedAt: Date | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'posted_by', nullable: true })
   postedById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
   @JoinColumn({ name: 'posted_by' })
   postedByUser: AppUser | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
@@ -58,6 +58,6 @@ export class JournalEntry {
   @OneToMany(() => JournalEntryLine, (line) => line.journalEntry)
   lines: JournalEntryLine[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

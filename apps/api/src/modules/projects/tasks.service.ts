@@ -83,7 +83,7 @@ export class TasksService {
       qb.andWhere('task.assigned_to = :assignedTo', { assignedTo });
     }
 
-    qb.orderBy('task.created_at', 'ASC')
+    qb.orderBy('task.createdAt', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 

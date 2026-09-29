@@ -40,6 +40,6 @@ export class JournalEntryLine {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

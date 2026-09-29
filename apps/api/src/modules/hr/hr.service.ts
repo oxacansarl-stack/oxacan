@@ -54,7 +54,7 @@ export class HrService {
       });
     }
 
-    qb.orderBy('team.created_at', 'DESC')
+    qb.orderBy('team.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -236,8 +236,8 @@ export class HrService {
       qb.andWhere('user.is_active = :isActive', { isActive });
     }
 
-    qb.orderBy('user.last_name', 'ASC')
-      .addOrderBy('user.first_name', 'ASC')
+    qb.orderBy('user.lastName', 'ASC')
+      .addOrderBy('user.firstName', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 

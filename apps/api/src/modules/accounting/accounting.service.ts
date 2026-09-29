@@ -93,7 +93,7 @@ export class AccountingService {
       qb.andWhere('account.is_active = :isActive', { isActive });
     }
 
-    qb.orderBy('account.account_number', 'ASC')
+    qb.orderBy('account.accountNumber', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -257,7 +257,7 @@ export class AccountingService {
       qb.andWhere('entry.reference_type = :referenceType', { referenceType });
     }
 
-    qb.orderBy('entry.entry_number', 'DESC')
+    qb.orderBy('entry.entryNumber', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -398,7 +398,7 @@ export class AccountingService {
       qb.andWhere('entry.entry_date <= :dateTo', { dateTo: filters.dateTo });
     }
 
-    qb.orderBy('entry.entry_date', 'ASC').addOrderBy('entry.entry_number', 'ASC');
+    qb.orderBy('entry.entryDate', 'ASC').addOrderBy('entry.entryNumber', 'ASC');
 
     const lines = await qb.getMany();
 
@@ -445,7 +445,7 @@ export class AccountingService {
       .addGroupBy('account.account_number')
       .addGroupBy('account.name')
       .addGroupBy('account.type')
-      .orderBy('account.account_number', 'ASC');
+      .orderBy('account.accountNumber', 'ASC');
 
     const rows = await qb.getRawMany();
 
@@ -487,7 +487,7 @@ export class AccountingService {
       .where('entry.company_id = :companyId', { companyId })
       .andWhere('entry.entry_date >= :dateFrom', { dateFrom })
       .andWhere('entry.entry_date <= :dateTo', { dateTo })
-      .orderBy('entry.entry_number', 'ASC')
+      .orderBy('entry.entryNumber', 'ASC')
       .getMany();
 
     let journalCsv = BOM + 'EntryNumber;Date;Description;AccountNumber;Debit;Credit\n';
@@ -528,7 +528,7 @@ export class AccountingService {
       .where('inv.company_id = :companyId', { companyId })
       .andWhere('inv.issue_date >= :dateFrom', { dateFrom })
       .andWhere('inv.issue_date <= :dateTo', { dateTo })
-      .orderBy('inv.invoice_number', 'ASC')
+      .orderBy('inv.invoiceNumber', 'ASC')
       .getMany();
 
     let clientCsv =

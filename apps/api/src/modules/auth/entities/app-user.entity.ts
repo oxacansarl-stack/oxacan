@@ -65,9 +65,9 @@ export class AppUser {
   @Column({ type: 'timestamptz', nullable: true })
   deactivatedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

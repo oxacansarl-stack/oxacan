@@ -36,9 +36,9 @@ export class RoomType {
   @Column({ type: 'integer', default: 0 })
   occurrenceCount: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

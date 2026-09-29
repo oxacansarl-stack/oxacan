@@ -46,6 +46,6 @@ export class PriceObservation {
   @Column({ type: 'boolean', default: false })
   isOutlier: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

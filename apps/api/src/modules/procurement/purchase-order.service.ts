@@ -63,7 +63,7 @@ export class PurchaseOrderService {
       qb.andWhere('po.status = :status', { status });
     }
 
-    qb.orderBy('po.created_at', 'DESC')
+    qb.orderBy('po.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

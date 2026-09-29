@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AppUser } from '../../modules/auth/entities/app-user.entity';
+import { runAsSystem } from '../tenant/tenant-context';
 
 export interface RequestUser {
   id: string;
@@ -50,9 +51,11 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid or expired token');
     }
 
-    const user = await this.userRepo.findOne({
-      where: { supabaseAuthId: payload.sub, isActive: true },
-    });
+    const user = await runAsSystem(() =>
+      this.userRepo.findOne({
+        where: { supabaseAuthId: payload.sub, isActive: true },
+      }),
+    );
     if (!user) {
       throw new UnauthorizedException('User not found or deactivated');
     }

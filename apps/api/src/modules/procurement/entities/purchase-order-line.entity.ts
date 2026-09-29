@@ -49,6 +49,6 @@ export class PurchaseOrderLine {
   @Column({ type: 'real', default: 0 })
   deliveredQuantity: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

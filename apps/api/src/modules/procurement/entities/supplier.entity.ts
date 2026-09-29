@@ -35,9 +35,9 @@ export class Supplier {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

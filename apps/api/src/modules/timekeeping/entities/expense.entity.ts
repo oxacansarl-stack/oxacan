@@ -71,9 +71,9 @@ export class Expense {
   @Column({ type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

@@ -16,7 +16,7 @@ export class ArticleAlias {
   @Column({ type: 'uuid' })
   canonicalArticleId: string;
 
-  @ManyToOne(() => CanonicalArticle)
+  @ManyToOne(() => CanonicalArticle, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'canonical_article_id' })
   canonicalArticle: CanonicalArticle;
 
@@ -32,6 +32,6 @@ export class ArticleAlias {
   @Column({ type: 'real', nullable: true })
   matchConfidence: number | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

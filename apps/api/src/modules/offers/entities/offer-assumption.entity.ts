@@ -35,6 +35,6 @@ export class OfferAssumption {
   @Column({ type: 'text', default: 'open' })
   status: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

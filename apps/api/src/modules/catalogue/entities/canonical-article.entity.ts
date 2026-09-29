@@ -65,9 +65,9 @@ export class CanonicalArticle {
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

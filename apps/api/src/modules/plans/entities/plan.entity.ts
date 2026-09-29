@@ -56,9 +56,9 @@ export class Plan {
   @OneToMany(() => PlanAnnotation, (annotation) => annotation.plan)
   annotations: PlanAnnotation[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

@@ -22,6 +22,6 @@ export class StockLocation {
   @Column({ type: 'text', nullable: true })
   address: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

@@ -65,7 +65,7 @@ export class ContractsService {
       qb.andWhere('contract.offer_id = :offerId', { offerId });
     }
 
-    qb.orderBy('contract.created_at', 'DESC')
+    qb.orderBy('contract.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

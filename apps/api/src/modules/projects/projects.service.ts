@@ -93,7 +93,7 @@ export class ProjectsService {
       qb.andWhere('project.manager_id = :managerId', { managerId });
     }
 
-    qb.orderBy('project.created_at', 'DESC')
+    qb.orderBy('project.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

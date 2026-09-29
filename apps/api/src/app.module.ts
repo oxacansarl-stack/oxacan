@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { CompanyContextGuard } from './common/guards/company-context.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { RlsContextMiddleware } from './common/middleware/rls-context.middleware';
+import { TenantConnectionHook } from './common/tenant/tenant-connection.hook';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
@@ -83,6 +84,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     NotificationsModule,
   ],
   providers: [
+    TenantConnectionHook,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: CompanyContextGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

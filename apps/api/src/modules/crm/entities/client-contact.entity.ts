@@ -16,7 +16,7 @@ export class ClientContact {
   @Column({ type: 'uuid' })
   clientId: string;
 
-  @ManyToOne(() => Client, (client) => client.contacts)
+  @ManyToOne(() => Client, (client) => client.contacts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'client_id' })
   client: Client;
 
@@ -41,6 +41,6 @@ export class ClientContact {
   @Column({ type: 'boolean', default: false })
   isPrimary: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

@@ -40,9 +40,9 @@ export class StockItem {
   @Column({ type: 'real', nullable: true })
   minThreshold: number | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

@@ -44,13 +44,13 @@ export class Payment {
   @JoinColumn({ name: 'journal_entry_id' })
   journalEntry: JournalEntry | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
   @JoinColumn({ name: 'created_by' })
   createdByUser: AppUser | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

@@ -101,9 +101,9 @@ export class TimeEntry {
   @Column({ type: 'timestamptz', nullable: true })
   syncedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

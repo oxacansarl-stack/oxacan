@@ -87,9 +87,9 @@ export class Task {
   @JoinColumn({ name: 'created_by' })
   createdByUser: AppUser | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

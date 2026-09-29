@@ -53,7 +53,7 @@ export class Invoice {
   @Column({ type: 'text', default: 'draft' })
   status: string;
 
-  @Column({ type: 'date' })
+  @Column({ type: 'date', default: () => 'CURRENT_DATE' })
   issueDate: Date;
 
   @Column({ type: 'date', nullable: true })
@@ -95,7 +95,7 @@ export class Invoice {
   @Column({ type: 'timestamptz', nullable: true })
   paidAt: Date | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
@@ -105,9 +105,9 @@ export class Invoice {
   @OneToMany(() => InvoiceLine, (line) => line.invoice)
   lines: InvoiceLine[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

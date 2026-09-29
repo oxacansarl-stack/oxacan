@@ -18,7 +18,7 @@ export class SourceOccurrence {
   @Column({ type: 'uuid' })
   sourceDocumentId: string;
 
-  @ManyToOne(() => SourceDocument)
+  @ManyToOne(() => SourceDocument, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'source_document_id' })
   sourceDocument: SourceDocument;
 
@@ -68,6 +68,6 @@ export class SourceOccurrence {
   @Column({ type: 'real', nullable: true })
   matchConfidence: number | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

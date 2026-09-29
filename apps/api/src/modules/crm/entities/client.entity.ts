@@ -69,9 +69,9 @@ export class Client {
   @OneToMany(() => ClientInteraction, (interaction) => interaction.client)
   interactions: ClientInteraction[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

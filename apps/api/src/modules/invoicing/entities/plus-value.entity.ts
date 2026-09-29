@@ -48,16 +48,16 @@ export class PlusValue {
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
   @JoinColumn({ name: 'created_by' })
   createdByUser: AppUser | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

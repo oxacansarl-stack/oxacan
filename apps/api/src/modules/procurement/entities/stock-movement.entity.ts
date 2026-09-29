@@ -63,6 +63,6 @@ export class StockMovement {
   @JoinColumn({ name: 'performed_by' })
   performer: AppUser | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

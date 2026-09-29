@@ -65,7 +65,7 @@ export class DailyReportService {
     }
 
     qb.orderBy('dr.date', 'DESC')
-      .addOrderBy('dr.created_at', 'DESC')
+      .addOrderBy('dr.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

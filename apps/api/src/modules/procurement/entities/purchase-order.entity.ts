@@ -50,7 +50,7 @@ export class PurchaseOrder {
   @Column({ type: 'date', nullable: true })
   expectedDelivery: Date | null;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', name: 'created_by', nullable: true })
   createdById: string | null;
 
   @ManyToOne(() => AppUser, { nullable: true })
@@ -60,9 +60,9 @@ export class PurchaseOrder {
   @OneToMany(() => PurchaseOrderLine, (line) => line.purchaseOrder)
   lines: PurchaseOrderLine[];
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

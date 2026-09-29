@@ -75,7 +75,7 @@ export class ExpenseService {
     }
 
     qb.orderBy('exp.date', 'DESC')
-      .addOrderBy('exp.created_at', 'DESC')
+      .addOrderBy('exp.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 

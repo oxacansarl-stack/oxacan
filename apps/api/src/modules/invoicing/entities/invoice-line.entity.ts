@@ -50,6 +50,6 @@ export class InvoiceLine {
   @Column({ type: 'integer', default: 0 })
   sortOrder: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

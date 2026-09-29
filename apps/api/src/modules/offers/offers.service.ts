@@ -115,7 +115,7 @@ export class OffersService {
       );
     }
 
-    qb.orderBy('offer.created_at', 'DESC')
+    qb.orderBy('offer.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
