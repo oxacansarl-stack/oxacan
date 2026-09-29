@@ -5,8 +5,9 @@ export const UNAUTHORIZED_EVENT = 'oxacan:unauthorized';
 
 const configuredUrl = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-// Dev goes through the Vite proxy (see vite.config.ts) so blocked networks can still sign in.
-const url = import.meta.env.DEV && configuredUrl ? `${window.location.origin}/supabase` : configuredUrl;
+// Optionally reached through our own origin (Vite proxy in dev, Caddy in production) so networks
+// that block *.supabase.co can still sign in.
+const url = import.meta.env.VITE_SUPABASE_VIA_PROXY && configuredUrl ? `${window.location.origin}/supabase` : configuredUrl;
 
 export const supabase: SupabaseClient | null =
   url && anonKey

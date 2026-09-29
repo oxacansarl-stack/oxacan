@@ -1,0 +1,19 @@
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+.git
+.env
+.env.*
+!.env.example
+env.oxacan
+.demo-credentials
+.claude-flow
+.swarm
+agentdb.rvf*
+ruvector.db
+supabase
+*.md
+# The mobile app is not deployed; only its manifest is needed so npm ci matches the lockfile.
+apps/mobile/*
+!apps/mobile/package.json

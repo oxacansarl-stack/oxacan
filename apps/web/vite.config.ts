@@ -10,6 +10,8 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.SUPABASE_URL ?? ''),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(env.SUPABASE_ANON_KEY ?? ''),
+      // Route Supabase Auth through /supabase on our own origin (dev server or Caddy in production).
+      'import.meta.env.VITE_SUPABASE_VIA_PROXY': JSON.stringify(mode === 'development' || env.SUPABASE_VIA_PROXY === 'true'),
     },
     server: {
       port: 3000,
