@@ -2,8 +2,14 @@ node_modules/
 dist/
 build/
 .env
+env.oxacan
 *.log
+.claude-flow/
+.swarm/
+agentdb.rvf*
+ruvector.db
 coverage/
 .turbo/
-apps/web/dist/
-apps/api/dist/
+.DS_Store
+*.tsbuildinfo
+.vite/

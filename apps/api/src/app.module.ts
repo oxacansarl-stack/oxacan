@@ -1,14 +1,99 @@
-import { Module } from '@nestjs/common';
-import { PrismaModule } from './prisma/prisma.module';
-import { AuthModule } from './auth/auth.module';
-import { CatalogueModule } from './catalogue/catalogue.module';
-import { OffersModule } from './offers/offers.module';
-import { ProjectsModule } from './projects/projects.module';
-import { InvoicesModule } from './invoices/invoices.module';
-import { HealthController } from './health/health.controller';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
+import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
+import { join } from 'path';
+
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { CompanyContextGuard } from './common/guards/company-context.guard';
+import { RolesGuard } from './common/guards/roles.guard';
+import { RlsContextMiddleware } from './common/middleware/rls-context.middleware';
+import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
+import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+
+import { AuthModule } from './modules/auth/auth.module';
+import { CompanyModule } from './modules/company/company.module';
+import { HealthModule } from './modules/health/health.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { PlansModule } from './modules/plans/plans.module';
+import { CatalogueModule } from './modules/catalogue/catalogue.module';
+import { CrmModule } from './modules/crm/crm.module';
+import { OffersModule } from './modules/offers/offers.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
+import { ProjectsModule } from './modules/projects/projects.module';
+import { TimekeepingModule } from './modules/timekeeping/timekeeping.module';
+import { HrModule } from './modules/hr/hr.module';
+import { ProcurementModule } from './modules/procurement/procurement.module';
+import { MeetingsModule } from './modules/meetings/meetings.module';
+import { InvoicingModule } from './modules/invoicing/invoicing.module';
+import { AccountingModule } from './modules/accounting/accounting.module';
+import { SubscriptionModule } from './modules/subscription/subscription.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, CatalogueModule, OffersModule, ProjectsModule, InvoicesModule],
-  controllers: [HealthController],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: join(__dirname, '../../../.env'),
+    }),
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'postgres' as const,
+        host: config.get<string>('DB_HOST'),
+        port: parseInt(config.get<string>('DB_PORT', '5432'), 10),
+        username: config.get<string>('DB_USERNAME'),
+        password: config.get<string>('DB_PASSWORD'),
+        database: config.get<string>('DB_NAME'),
+        ssl: config.get<string>('DB_HOST') !== 'localhost'
+          ? { rejectUnauthorized: false }
+          : false,
+        namingStrategy: new SnakeNamingStrategy(),
+        autoLoadEntities: true,
+        synchronize: false,
+        logging: config.get<string>('NODE_ENV') === 'development',
+        retryAttempts: 3,
+        retryDelay: 3000,
+      }),
+    }),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    AuthModule,
+    CompanyModule,
+    HealthModule,
+    AdminModule,
+    CatalogueModule,
+    CrmModule,
+    PlansModule,
+    OffersModule,
+    ContractsModule,
+    ProjectsModule,
+    TimekeepingModule,
+    HrModule,
+    ProcurementModule,
+    MeetingsModule,
+    InvoicingModule,
+    AccountingModule,
+    SubscriptionModule,
+    PortalModule,
+    NotificationsModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: CompanyContextGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
+    { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RlsContextMiddleware).forRoutes('*');
+  }
+}

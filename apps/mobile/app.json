@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "OXACAN Mobile",
+    "slug": "oxacan-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": { "backgroundColor": "#2563eb" },
+    "ios": { "bundleIdentifier": "com.oxacan.mobile" },
+    "android": { "package": "com.oxacan.mobile" }
+  }
+}

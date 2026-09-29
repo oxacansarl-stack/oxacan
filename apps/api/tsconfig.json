@@ -1,21 +1,13 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2022",
-    "moduleResolution": "node",
-    "declaration": false,
-    "removeComments": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "sourceMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
-    "strict": true,
-    "strictPropertyInitialization": false,
-    "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@oxacan/shared-types": ["../../packages/shared-types/dist"]
+    }
   },
-  "include": ["src", "prisma/seed.ts", "test"]
+  "include": ["src"]
 }
