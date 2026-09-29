@@ -133,7 +133,6 @@ export class ExpenseController {
     @CurrentUser() user: ScopeUser,
     @Body() body: RejectExpensesDto,
   ) {
-    // Note: the expense table has no column to store `reason`; it is accepted but not persisted.
-    return this.service.rejectExpenses({ ...user, companyId }, body.expenseIds);
+    return this.service.rejectExpenses({ ...user, companyId }, body.expenseIds, body.reason);
   }
 }

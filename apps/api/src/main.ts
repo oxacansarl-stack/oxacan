@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import './config/pg-types';
 import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';

@@ -32,10 +32,10 @@ export class InvoiceLine {
   @Column({ type: 'real' })
   quantity: number;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   unitPriceCents: number;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   totalPriceCents: number;
 
   @Column({ type: 'real', nullable: true })

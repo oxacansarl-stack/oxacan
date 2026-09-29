@@ -55,13 +55,13 @@ export class Offer {
   @Column({ type: 'integer', default: 120 })
   marginFactor: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   totalHtCents: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   totalVatCents: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   totalTtcCents: number;
 
   @Column({ type: 'integer', default: 810 })

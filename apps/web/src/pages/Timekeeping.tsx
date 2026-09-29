@@ -28,6 +28,7 @@ interface TimeEntry {
   overtimeMinutes: number;
   travelMinutes: number;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  rejectionReason?: string | null;
   costCents: number | null;
   notes?: string | null;
   createdAt: string;
@@ -191,10 +192,15 @@ export default function Timekeeping() {
   // ---- Load the caller's own drafts (active clock-in + submittable entries) ----
   const loadMyDrafts = useCallback(() => {
     if (!me) return;
-    apiGet<TimeEntry[]>(`/timekeeping?userId=${me.id}&status=draft&limit=100`)
-      .then((list) => {
-        setMyDrafts(list ?? []);
-        setActiveEntry((list ?? []).find((e) => !e.endTime) || null);
+    // Rejected entries go back to their owner to correct and resubmit.
+    Promise.all(
+      ['draft', 'rejected'].map((status) =>
+        apiGet<TimeEntry[]>(`/timekeeping?userId=${me.id}&status=${status}&limit=100`),
+      ),
+    )
+      .then(([drafts, rejected]) => {
+        setMyDrafts([...(drafts ?? []), ...(rejected ?? [])]);
+        setActiveEntry((drafts ?? []).find((e) => !e.endTime) || null);
       })
       .catch(() => {});
   }, [me]);
@@ -649,6 +655,11 @@ export default function Timekeeping() {
                     >
                       {statusLabel(entry.status)}
                     </span>
+                    {entry.status === 'rejected' && entry.rejectionReason && (
+                      <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 4, maxWidth: 260 }}>
+                        Reason: {entry.rejectionReason}
+                      </div>
+                    )}
                   </td>
                   {showCost && (
                     <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

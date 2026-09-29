@@ -25,7 +25,7 @@ export class Payment {
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   amountCents: number;
 
   @Column({ type: 'date' })

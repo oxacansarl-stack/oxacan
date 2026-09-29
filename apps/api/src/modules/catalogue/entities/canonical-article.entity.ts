@@ -44,13 +44,13 @@ export class CanonicalArticle {
     unitPriceCents: number;
   }> | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   medianPriceCents: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   minPriceCents: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   maxPriceCents: number | null;
 
   @Column({ type: 'integer', default: 0 })

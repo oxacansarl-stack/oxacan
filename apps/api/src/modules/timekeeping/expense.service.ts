@@ -189,13 +189,16 @@ export class ExpenseService {
     }
 
     for (const expense of expenses) {
-      if (expense.status !== 'draft') {
+      if (expense.status !== 'draft' && expense.status !== 'rejected') {
         throw new BusinessRuleError(
           'INVALID_STATUS',
-          `Expense ${expense.id} is not in 'draft' status.`,
+          `Expense ${expense.id} is not a draft or rejected expense.`,
         );
       }
       expense.status = 'submitted';
+      expense.rejectionReason = null;
+      expense.rejectedBy = null;
+      expense.rejectedAt = null;
     }
 
     return this.expenseRepo.save(expenses);
@@ -243,11 +246,15 @@ export class ExpenseService {
     return this.expenseRepo.save(expenses);
   }
 
-  async rejectExpenses(approver: ScopeUser, expenseIds: string[]) {
+  async rejectExpenses(approver: ScopeUser, expenseIds: string[], reason: string) {
     const expenses = await this.loadForApproval(approver, expenseIds);
 
+    const now = new Date();
     for (const expense of expenses) {
       expense.status = 'rejected';
+      expense.rejectionReason = reason;
+      expense.rejectedBy = approver.id;
+      expense.rejectedAt = now;
     }
 
     return this.expenseRepo.save(expenses);

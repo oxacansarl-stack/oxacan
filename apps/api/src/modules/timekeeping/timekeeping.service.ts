@@ -20,6 +20,8 @@ interface TimeEntryFilters {
 const NORMAL_DAY_MINUTES = 480; // 8h (CCT)
 
 const APP_TIME_ZONE = 'Europe/Zurich';
+/** A rejected entry goes back to its owner, who corrects and resubmits it. */
+const SUBMITTABLE = ['draft', 'rejected'];
 
 /** Current calendar date and wall-clock time on Swiss sites, independent of the server's zone. */
 function localNow(): { date: string; time: string } {
@@ -342,16 +344,16 @@ export class TimekeepingService {
       if (drafts.length !== ids.length) {
         throw new NotFoundError('TimeEntry', 'one or more entries');
       }
-      const notDraft = drafts.find((e) => e.status !== 'draft');
+      const notDraft = drafts.find((e) => !SUBMITTABLE.includes(e.status));
       if (notDraft) {
         throw new BusinessRuleError(
           'INVALID_STATUS',
-          `Time entry ${notDraft.id} is not in 'draft' status.`,
+          `Time entry ${notDraft.id} is not a draft or rejected entry.`,
         );
       }
     } else {
       drafts = await this.timeEntryRepo.find({
-        where: { companyId, userId, status: 'draft' },
+        where: { companyId, userId, status: In(SUBMITTABLE) },
       });
     }
 
@@ -372,6 +374,9 @@ export class TimekeepingService {
 
     for (const entry of drafts) {
       entry.status = 'submitted';
+      entry.rejectionReason = null;
+      entry.rejectedBy = null;
+      entry.rejectedAt = null;
     }
 
     return this.timeEntryRepo.save(drafts);
@@ -423,11 +428,12 @@ export class TimekeepingService {
   async rejectEntries(approver: ScopeUser, entryIds: string[], reason: string) {
     const entries = await this.loadForApproval(approver, entryIds);
 
+    const now = new Date();
     for (const entry of entries) {
       entry.status = 'rejected';
-      entry.notes = entry.notes
-        ? `${entry.notes}\n[Rejected by ${approver.id}]: ${reason}`
-        : `[Rejected]: ${reason}`;
+      entry.rejectionReason = reason;
+      entry.rejectedBy = approver.id;
+      entry.rejectedAt = now;
     }
 
     return this.timeEntryRepo.save(entries);

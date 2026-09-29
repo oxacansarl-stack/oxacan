@@ -29,7 +29,7 @@ export class PlusValue {
   @Column({ type: 'text' })
   description: string;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   amountCents: number;
 
   @Column({ type: 'text', default: 'detected' })

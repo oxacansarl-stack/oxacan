@@ -29,7 +29,7 @@ export class OfferAssumption {
   @Column({ type: 'text' })
   description: string;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   impactAmountCents: number | null;
 
   @Column({ type: 'text', default: 'open' })

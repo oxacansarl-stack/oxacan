@@ -44,7 +44,7 @@ export class AppUser {
   @Column({ type: 'text' })
   licenceTier: string;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   hourlyRateCents: number | null;
 
   @Column({ type: 'text', nullable: true })

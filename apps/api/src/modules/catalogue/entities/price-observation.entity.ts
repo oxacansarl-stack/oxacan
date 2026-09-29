@@ -31,7 +31,7 @@ export class PriceObservation {
   @JoinColumn({ name: 'source_occurrence_id' })
   sourceOccurrence: SourceOccurrence;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   unitPriceCents: number;
 
   @Column({ type: 'date' })

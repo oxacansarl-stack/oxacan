@@ -31,7 +31,7 @@ export class ContractAmendment {
   @Column({ type: 'text' })
   description: string;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   amountDeltaCents: number;
 
   @Column({ type: 'text', default: 'draft' })

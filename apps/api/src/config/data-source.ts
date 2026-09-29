@@ -1,3 +1,4 @@
+import './pg-types';
 import { DataSource } from 'typeorm';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 import { config } from 'dotenv';

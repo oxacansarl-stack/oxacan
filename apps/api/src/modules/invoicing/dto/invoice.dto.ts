@@ -45,8 +45,6 @@ export const PLUS_VALUE_STATUSES = ['detected', 'submitted', 'approved', 'reject
  */
 const RATE_MAX_BPS = 10_000;
 const MAX_QUANTITY = 1_000_000_000;
-/** invoice_line.unit_price_cents / total_price_cents are INT4 columns. */
-const INT4_MAX = 2_147_483_647;
 
 export class InvoiceLineDto {
   @IsString()
@@ -66,7 +64,6 @@ export class InvoiceLineDto {
   quantity!: number;
 
   @IsCents()
-  @Max(INT4_MAX)
   unitPriceCents!: number;
 
   /** Situations only: cumulative quantity executed to date. */
@@ -134,7 +131,6 @@ export class UpdateInvoiceStatusDto {
 export class RecordPaymentDto {
   @IsCents()
   @Min(1)
-  @Max(INT4_MAX)
   amountCents!: number;
 
   @IsIsoDate()
@@ -160,7 +156,6 @@ export class CreatePlusValueDto {
 
   @IsCents()
   @Min(1)
-  @Max(INT4_MAX)
   amountCents!: number;
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import {
-  apiClient, tokenFor, createProject, USER_A, COMPANY_A, TEST_DB,
+  apiClient, tokenFor, createProject, USER_A, COMPANY_A, TEST_DB, WORKER_1_A, PM_A,
 } from './setup';
 
 const admin = apiClient(tokenFor(USER_A.authId));
@@ -188,5 +188,67 @@ describe('Purchase order deliveries', () => {
       ),
     );
     expect(new Set(pos.map((p) => p.reference)).size).toBe(3);
+  });
+});
+
+describe('Large amounts', () => {
+  it('handles an invoice above CHF 21.4 million exactly', async () => {
+    const projectId = await createProject(admin, 'Large project');
+    const clientId = (await ok(admin.get(`/projects/${projectId}`))).clientId;
+    const inv = await ok(
+      admin.post('/invoices', {
+        projectId,
+        clientId,
+        type: 'invoice',
+        lines: [{ description: 'Gros-oeuvre', unit: 'forfait', quantity: 1, unitPriceCents: 3_000_000_000 }],
+      }),
+    );
+    expect(inv.subtotalHtCents).toBe(3_000_000_000);
+    expect(typeof inv.totalTtcCents).toBe('number');
+    expect(inv.totalTtcCents).toBeGreaterThan(3_000_000_000);
+    expect(inv.totalTtcCents % 5).toBe(0);
+  });
+});
+
+describe('Rejections', () => {
+  it('records who rejected, when and why, and lets the owner resubmit', async () => {
+    const projectId = await createProject(admin, 'Rejection project');
+    const worker = apiClient(tokenFor(WORKER_1_A.authId));
+    const exp = await ok(
+      worker.post('/expenses', { projectId, date: '2026-09-29', category: 'material', description: 'Vis', amountCents: 900 }),
+    );
+    await ok(worker.post('/expenses/submit', { expenseIds: [exp.id] }));
+    expect((await admin.post('/expenses/reject', { expenseIds: [exp.id] })).status).toBe(400);
+    await ok(admin.post('/expenses/reject', { expenseIds: [exp.id], reason: 'Receipt missing' }));
+
+    const rejected = await ok(worker.get(`/expenses/${exp.id}`));
+    expect(rejected.status).toBe('rejected');
+    expect(rejected.rejectionReason).toBe('Receipt missing');
+    expect(rejected.rejectedBy).toBe(USER_A.id);
+    expect(rejected.rejectedAt).toBeTruthy();
+
+    await ok(worker.post('/expenses/submit', { expenseIds: [exp.id] }));
+    const resubmitted = await ok(worker.get(`/expenses/${exp.id}`));
+    expect(resubmitted.status).toBe('submitted');
+    expect(resubmitted.rejectionReason).toBeNull();
+  });
+});
+
+describe('Data export (revFADP / GDPR)', () => {
+  it('exports every tenant table for admins only, with no other company data', async () => {
+    expect((await apiClient(tokenFor(PM_A.authId)).get('/settings/export')).status).toBe(403);
+    const exp = await ok(admin.get('/settings/export'));
+    expect(exp.company.id).toBe(COMPANY_A);
+    expect(Object.keys(exp.tables).length).toBeGreaterThan(40);
+    expect(exp.tables.invoice.length).toBeGreaterThan(0);
+    const leaked = Object.entries(exp.tables as Record<string, any[]>).filter(([, rows]) =>
+      rows.some((r) => r.company_id && r.company_id !== COMPANY_A),
+    );
+    expect(leaked.map(([t]) => t)).toEqual([]);
+    const { rows } = await db.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE company_id = $1 AND action = 'EXPORT'`,
+      [COMPANY_A],
+    );
+    expect(rows[0].n).toBeGreaterThan(0);
   });
 });

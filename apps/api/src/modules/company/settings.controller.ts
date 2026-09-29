@@ -1,13 +1,23 @@
 import { Controller, Get, Put, Body } from '@nestjs/common';
-import { CompanyId } from '../../common/decorators/current-user.decorator';
+import { CompanyId, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles, ADMIN_ONLY, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { CompanyService } from './company.service';
+import { DataExportService } from './data-export.service';
 import { Company } from './entities/company.entity';
 import { UpdateSettingsDto } from './dto/company.dto';
 
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly companyService: CompanyService) {}
+  constructor(
+    private readonly companyService: CompanyService,
+    private readonly dataExport: DataExportService,
+  ) {}
+
+  @Get('export')
+  @Roles(...ADMIN_ONLY)
+  async exportData(@CompanyId() companyId: string, @CurrentUser() user: { id: string }) {
+    return this.dataExport.exportCompany(companyId, user.id);
+  }
 
   @Get()
   @Roles(...OFFICE_ROLES)

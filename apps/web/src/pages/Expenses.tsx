@@ -23,6 +23,7 @@ interface Expense {
   receiptUrl?: string;
   isBillable: boolean;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  rejectionReason?: string | null;
   createdAt: string;
 }
 
@@ -233,10 +234,10 @@ export default function Expenses() {
     if (selected.size === 0) return;
     // Only the caller's own drafts can be submitted.
     const expenseIds = me
-      ? expenses.filter((e) => selected.has(e.id) && e.userId === me.id && e.status === 'draft').map((e) => e.id)
+      ? expenses.filter((e) => selected.has(e.id) && e.userId === me.id && (e.status === 'draft' || e.status === 'rejected')).map((e) => e.id)
       : Array.from(selected);
     if (expenseIds.length === 0) {
-      setError('Select at least one of your own draft expenses to submit.');
+      setError('Select at least one of your own draft or rejected expenses to submit.');
       return;
     }
     setActionLoading(true);
@@ -602,6 +603,11 @@ export default function Expenses() {
                     >
                       {statusLabel(expense.status)}
                     </span>
+                    {expense.status === 'rejected' && expense.rejectionReason && (
+                      <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 4, maxWidth: 260 }}>
+                        Reason: {expense.rejectionReason}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     {expense.status === 'draft' && (

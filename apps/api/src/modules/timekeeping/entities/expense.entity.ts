@@ -49,7 +49,7 @@ export class Expense {
   @Column({ type: 'text' })
   description: string;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   amountCents: number;
 
   @Column({ type: 'text', nullable: true })
@@ -70,6 +70,15 @@ export class Expense {
 
   @Column({ type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejectionReason: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  rejectedBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  rejectedAt: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

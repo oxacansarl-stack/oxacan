@@ -57,10 +57,10 @@ export class Project {
   @Column({ type: 'date', nullable: true })
   endDate: Date | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   budgetHtCents: number | null;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   actualCostCents: number;
 
   @Column({ type: 'integer', default: 0 })

@@ -19,8 +19,6 @@ import { IsCents, IsIsoDate } from '../../../common/validation/decorators';
 /** DB CHECK chart_of_accounts.type */
 export const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
 
-/** journal_entry_line.debit_cents / credit_cents are INT4 columns. */
-const INT4_MAX = 2_147_483_647;
 
 /**
  * On PUT, a field may be omitted but must not be null when the column is NOT NULL.
@@ -84,11 +82,9 @@ export class JournalEntryLineDto {
   accountId!: string;
 
   @IsCents()
-  @Max(INT4_MAX)
   debitCents!: number;
 
   @IsCents()
-  @Max(INT4_MAX)
   creditCents!: number;
 
   @IsOptional()

@@ -31,10 +31,10 @@ export class JournalEntryLine {
   @JoinColumn({ name: 'account_id' })
   account: ChartOfAccounts;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   debitCents: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   creditCents: number;
 
   @Column({ type: 'text', nullable: true })

@@ -44,10 +44,10 @@ export class OfferLine {
   @Column({ type: 'real' })
   quantity: number;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   unitPriceCents: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   totalPriceCents: number | null;
 
   @Column({ type: 'text', nullable: true })

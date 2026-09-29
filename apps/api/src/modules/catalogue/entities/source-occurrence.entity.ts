@@ -43,10 +43,10 @@ export class SourceOccurrence {
   @Column({ type: 'real', nullable: true })
   quantity: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   unitPriceCents: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   totalPriceCents: number | null;
 
   @Column({ type: 'text', nullable: true })

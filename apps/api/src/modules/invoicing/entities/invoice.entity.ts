@@ -62,22 +62,22 @@ export class Invoice {
   @Column({ type: 'integer' })
   vatRate: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   subtotalHtCents: number;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   vatAmountCents: number;
 
-  @Column({ type: 'integer', default: 0, nullable: true })
+  @Column({ type: 'bigint', default: 0, nullable: true })
   retentionAmountCents: number | null;
 
-  @Column({ type: 'integer', default: 0, nullable: true })
+  @Column({ type: 'bigint', default: 0, nullable: true })
   priorAcomptesCents: number | null;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({ type: 'bigint', default: 0 })
   totalTtcCents: number;
 
-  @Column({ type: 'integer', default: 0, nullable: true })
+  @Column({ type: 'bigint', default: 0, nullable: true })
   amountPaidCents: number | null;
 
   @Column({ type: 'text', nullable: true })

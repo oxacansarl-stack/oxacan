@@ -29,7 +29,7 @@ export class BillingEvent {
   @Column({ type: 'text', unique: true, nullable: true })
   stripeEventId: string | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   amountCents: number | null;
 
   @Column({ type: 'text', default: 'CHF' })

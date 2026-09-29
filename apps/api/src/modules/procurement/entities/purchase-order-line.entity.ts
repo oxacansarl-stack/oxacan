@@ -40,10 +40,10 @@ export class PurchaseOrderLine {
   @Column({ type: 'text' })
   unit: string;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   unitPriceCents: number;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   totalPriceCents: number;
 
   @Column({ type: 'real', default: 0 })

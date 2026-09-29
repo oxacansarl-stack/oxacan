@@ -29,7 +29,7 @@ export class ProjectLot {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   budgetCents: number | null;
 
   @Column({ type: 'integer', default: 0 })

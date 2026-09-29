@@ -64,10 +64,10 @@ export class TimeEntry {
   @Column({ type: 'integer', nullable: true })
   totalMinutes: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   hourlyRateCents: number | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ type: 'bigint', nullable: true })
   costCents: number | null;
 
   @Column({ type: 'text', default: 'normal' })
@@ -85,6 +85,15 @@ export class TimeEntry {
 
   @Column({ type: 'timestamptz', nullable: true })
   approvedAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  rejectionReason: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  rejectedBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  rejectedAt: Date | null;
 
   @Column({ type: 'real', nullable: true })
   latitude: number | null;

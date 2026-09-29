@@ -48,7 +48,7 @@ export class Contract {
   @Column({ type: 'timestamptz', nullable: true })
   signedAt: Date | null;
 
-  @Column({ type: 'integer' })
+  @Column({ type: 'bigint' })
   totalTtcCents: number;
 
   @Column({ type: 'integer', default: 500 })
