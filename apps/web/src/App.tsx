@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
@@ -25,50 +25,108 @@ import Portal from './pages/Portal';
 import PortalView from './pages/PortalView';
 import Notifications from './pages/Notifications';
 import DataExport from './pages/DataExport';
-import { apiGet } from './lib/api';
+import Login from './pages/Login';
+import { CurrentUser, CurrentUserContext, Role } from './lib/current-user';
+import { apiGet, ApiError } from './lib/api';
+import { getAccessToken, onSignedOut, signOut, UNAUTHORIZED_EVENT } from './lib/auth';
 
 const SIDEBAR_WIDTH = 240;
 
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/clients', label: 'Clients' },
-  { to: '/offers', label: 'Offers' },
-  { to: '/contracts', label: 'Contracts' },
-  { to: '/projects', label: 'Projects' },
-  { to: '/timekeeping', label: 'Timekeeping' },
-  { to: '/expenses', label: 'Expenses' },
-  { to: '/daily-reports', label: 'Daily Reports' },
-  { to: '/hr', label: 'HR & Teams' },
-  { to: '/suppliers', label: 'Suppliers' },
-  { to: '/purchase-orders', label: 'Purchase Orders' },
-  { to: '/stock', label: 'Stock' },
-  { to: '/vehicles', label: 'Vehicles' },
-  { to: '/meetings', label: 'Meetings' },
-  { to: '/invoices', label: 'Invoices' },
-  { to: '/accounting', label: 'Accounting' },
-  { to: '/catalogue', label: 'Catalogue' },
-  { to: '/plans', label: 'Plans' },
-  { to: '/settings', label: 'Settings' },
-  { to: '/portal', label: 'Portal' },
-  { to: '/notifications', label: 'Notifications' },
-  { to: '/data-export', label: 'Data Export' },
-] as const;
+
+const ALL: Role[] = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'];
+const SITE_LEAD: Role[] = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'];
+const OFFICE: Role[] = ['ADMIN', 'PROJECT_MANAGER'];
+const ADMIN: Role[] = ['ADMIN'];
+
+// Mirrors the API's @Roles policy (PRD §3.1–3.2); the API remains the source of truth.
+const navItems: { to: string; label: string; roles: Role[]; element: React.ReactNode }[] = [
+  { to: '/dashboard', label: 'Dashboard', roles: ALL, element: <Dashboard /> },
+  { to: '/clients', label: 'Clients', roles: OFFICE, element: <Clients /> },
+  { to: '/offers', label: 'Offers', roles: OFFICE, element: <Offers /> },
+  { to: '/contracts', label: 'Contracts', roles: OFFICE, element: <Contracts /> },
+  { to: '/projects', label: 'Projects', roles: ALL, element: <Projects /> },
+  { to: '/timekeeping', label: 'Timekeeping', roles: ALL, element: <Timekeeping /> },
+  { to: '/expenses', label: 'Expenses', roles: ALL, element: <Expenses /> },
+  { to: '/daily-reports', label: 'Daily Reports', roles: ALL, element: <DailyReports /> },
+  { to: '/hr', label: 'HR & Teams', roles: SITE_LEAD, element: <HR /> },
+  { to: '/suppliers', label: 'Suppliers', roles: OFFICE, element: <Suppliers /> },
+  { to: '/purchase-orders', label: 'Purchase Orders', roles: OFFICE, element: <PurchaseOrders /> },
+  { to: '/stock', label: 'Stock', roles: SITE_LEAD, element: <Stock /> },
+  { to: '/vehicles', label: 'Vehicles', roles: SITE_LEAD, element: <Vehicles /> },
+  { to: '/meetings', label: 'Meetings', roles: SITE_LEAD, element: <Meetings /> },
+  { to: '/invoices', label: 'Invoices', roles: OFFICE, element: <Invoices /> },
+  { to: '/accounting', label: 'Accounting', roles: OFFICE, element: <Accounting /> },
+  { to: '/catalogue', label: 'Catalogue', roles: ALL, element: <Catalogue /> },
+  { to: '/plans', label: 'Plans', roles: ALL, element: <Plans /> },
+  { to: '/settings', label: 'Settings', roles: OFFICE, element: <Settings /> },
+  { to: '/portal', label: 'Portal', roles: OFFICE, element: <Portal /> },
+  { to: '/notifications', label: 'Notifications', roles: ALL, element: <Notifications /> },
+  { to: '/data-export', label: 'Data Export', roles: ADMIN, element: <DataExport /> },
+];
+
+const detailRoutes: { path: string; roles: Role[]; element: React.ReactNode }[] = [
+  { path: '/offers/:id', roles: OFFICE, element: <OfferDetail /> },
+  { path: '/projects/:id', roles: ALL, element: <ProjectDetail /> },
+];
+
+const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: 'Administrator',
+  PROJECT_MANAGER: 'Project manager',
+  TEAM_LEADER: 'Team leader',
+  WORKER: 'Worker',
+};
+
+type Me = CurrentUser;
+
+function NoAccess() {
+  return <div style={{ color: '#6b7280', fontSize: 14 }}>You don't have access to this page.</div>;
+}
+
+type AuthState = { status: 'loading' } | { status: 'signed-out'; notice?: string } | { status: 'ready'; me: Me };
 
 export default function App() {
+  const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [unreadCount, setUnreadCount] = useState(0);
+  const isPortalView = window.location.pathname.startsWith('/portal/view/');
 
-  // Fetch unread notification count on mount
-  useEffect(() => {
-    apiGet<any>('/notifications/unread-count')
-      .then(res => {
-        const count = res?.data?.count ?? res?.count ?? 0;
-        setUnreadCount(count);
-      })
-      .catch(() => { /* ignore */ });
+  const loadProfile = useCallback(async () => {
+    if (!(await getAccessToken())) {
+      setAuth({ status: 'signed-out' });
+      return;
+    }
+    try {
+      setAuth({ status: 'ready', me: await apiGet<Me>('/auth/profile') });
+    } catch (err) {
+      await signOut();
+      setAuth({
+        status: 'signed-out',
+        notice:
+          err instanceof ApiError && err.status === 401
+            ? 'Your account is not set up in OXACAN yet, or your session expired. Ask your administrator if this persists.'
+            : 'Could not reach the server. Try again.',
+      });
+    }
   }, []);
 
-  // Portal view: render without sidebar
-  const isPortalView = window.location.pathname.startsWith('/portal/view/');
+  useEffect(() => {
+    if (isPortalView) return;
+    loadProfile();
+    const expired = () => setAuth({ status: 'signed-out', notice: 'Your session expired. Please sign in again.' });
+    window.addEventListener(UNAUTHORIZED_EVENT, expired);
+    const unsubscribe = onSignedOut(() => setAuth({ status: 'signed-out' }));
+    return () => {
+      window.removeEventListener(UNAUTHORIZED_EVENT, expired);
+      unsubscribe();
+    };
+  }, [isPortalView, loadProfile]);
+
+  useEffect(() => {
+    if (auth.status !== 'ready') return;
+    apiGet<{ count: number }>('/notifications/unread-count')
+      .then((res) => setUnreadCount(res?.count ?? 0))
+      .catch(() => {});
+  }, [auth.status]);
+
   if (isPortalView) {
     return (
       <Routes>
@@ -77,9 +135,20 @@ export default function App() {
     );
   }
 
+  if (auth.status === 'loading') return null;
+  if (auth.status === 'signed-out') return <Login notice={auth.notice} onSignedIn={loadProfile} />;
+
+  const { me } = auth;
+  const visibleNav = navItems.filter((item) => item.roles.includes(me.role));
+  const guard = (roles: Role[], element: React.ReactNode) => (roles.includes(me.role) ? element : <NoAccess />);
+
+  async function handleSignOut() {
+    await signOut();
+    setAuth({ status: 'signed-out' });
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      {/* Sidebar */}
       <aside
         style={{
           width: SIDEBAR_WIDTH,
@@ -90,24 +159,13 @@ export default function App() {
           flexDirection: 'column',
         }}
       >
-        {/* Logo */}
-        <div
-          style={{
-            padding: '20px 20px 16px',
-            borderBottom: '1px solid #e5e7eb',
-          }}
-        >
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#111827', letterSpacing: -0.5 }}>
-            OXACAN
-          </div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-            Swiss Construction ERP
-          </div>
+        <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid #e5e7eb' }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#111827', letterSpacing: -0.5 }}>OXACAN</div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Swiss Construction ERP</div>
         </div>
 
-        {/* Navigation */}
         <nav style={{ padding: '12px 10px', flex: 1, overflowY: 'auto' }}>
-          {navItems.map((item) => (
+          {visibleNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -128,20 +186,22 @@ export default function App() {
             >
               <span>{item.label}</span>
               {item.to === '/notifications' && unreadCount > 0 && (
-                <span style={{
-                  background: '#dc2626',
-                  color: '#fff',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  borderRadius: 9999,
-                  minWidth: 18,
-                  height: 18,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '0 5px',
-                  lineHeight: 1,
-                }}>
+                <span
+                  style={{
+                    background: '#dc2626',
+                    color: '#fff',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 9999,
+                    minWidth: 18,
+                    height: 18,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 5px',
+                    lineHeight: 1,
+                  }}
+                >
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
@@ -149,55 +209,41 @@ export default function App() {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div
-          style={{
-            padding: '12px 20px',
-            borderTop: '1px solid #e5e7eb',
-            fontSize: 11,
-            color: '#9ca3af',
-          }}
-        >
-          v0.1.0
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #e5e7eb', fontSize: 12, color: '#6b7280' }}>
+          <div style={{ fontWeight: 600, color: '#111827' }}>
+            {[me.firstName, me.lastName].filter(Boolean).join(' ') || me.email}
+          </div>
+          <div style={{ marginBottom: 8 }}>{ROLE_LABELS[me.role] ?? me.role}</div>
+          <button
+            onClick={handleSignOut}
+            style={{
+              padding: '4px 10px',
+              background: '#fff',
+              border: '1px solid #d1d5db',
+              borderRadius: 6,
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Sign out
+          </button>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#9ca3af' }}>v0.1.0</div>
         </div>
       </aside>
 
-      {/* Main content */}
-      <main
-        style={{
-          flex: 1,
-          background: '#fff',
-          padding: '24px 32px',
-          overflow: 'auto',
-        }}
-      >
+      <main style={{ flex: 1, background: '#fff', padding: '24px 32px', overflow: 'auto' }}>
+        <CurrentUserContext.Provider value={me}>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/clients" element={<Clients />} />
-          <Route path="/offers" element={<Offers />} />
-          <Route path="/offers/:id" element={<OfferDetail />} />
-          <Route path="/contracts" element={<Contracts />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route path="/timekeeping" element={<Timekeeping />} />
-          <Route path="/expenses" element={<Expenses />} />
-          <Route path="/daily-reports" element={<DailyReports />} />
-          <Route path="/hr" element={<HR />} />
-          <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/purchase-orders" element={<PurchaseOrders />} />
-          <Route path="/stock" element={<Stock />} />
-          <Route path="/vehicles" element={<Vehicles />} />
-          <Route path="/meetings" element={<Meetings />} />
-          <Route path="/invoices" element={<Invoices />} />
-          <Route path="/accounting" element={<Accounting />} />
-          <Route path="/catalogue" element={<Catalogue />} />
-          <Route path="/plans" element={<Plans />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/portal" element={<Portal />} />
-          <Route path="/notifications" element={<Notifications />} />
-          <Route path="/data-export" element={<DataExport />} />
+          {navItems.map((item) => (
+            <Route key={item.to} path={item.to} element={guard(item.roles, item.element)} />
+          ))}
+          {detailRoutes.map((r) => (
+            <Route key={r.path} path={r.path} element={guard(r.roles, r.element)} />
+          ))}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </CurrentUserContext.Provider>
       </main>
     </div>
   );

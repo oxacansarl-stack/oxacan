@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { apiGet, apiList, apiPost, apiPut, apiDelete } from '../lib/api';
 
 interface Vehicle {
   id: string;
@@ -7,9 +7,9 @@ interface Vehicle {
   make?: string;
   model?: string;
   assignedTeamId?: string;
-  team?: { name: string };
+  assignedTeam?: { name: string } | null;
   assignedProjectId?: string;
-  project?: { name: string };
+  assignedProject?: { name: string } | null;
   odometerKm?: number;
   nextServiceDate?: string;
   insuranceExpiry?: string;
@@ -106,14 +106,17 @@ export default function Vehicles() {
   const [deleting, setDeleting] = useState(false);
 
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   const fetchVehicles = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await apiGet<{ data: Vehicle[] } | Vehicle[]>(`/vehicles?page=${page}`);
-      const list = Array.isArray(res) ? res : (res as { data: Vehicle[] }).data ?? [];
-      setVehicles(list);
+      const { items, meta } = await apiList<Vehicle>(`/vehicles?page=${page}`);
+      setVehicles(items);
+      setTotal(meta?.total ?? items.length);
+      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (err: any) {
       setError(err.message || 'Failed to load vehicles');
     } finally {
@@ -124,13 +127,11 @@ export default function Vehicles() {
   const fetchDropdowns = useCallback(async () => {
     try {
       const [teamsRes, projectsRes] = await Promise.all([
-        apiGet<{ data: Team[] } | Team[]>('/hr/teams'),
-        apiGet<{ data: Project[] } | Project[]>('/projects'),
+        apiGet<Team[]>('/hr/teams'),
+        apiGet<Project[]>('/projects'),
       ]);
-      const teamList = Array.isArray(teamsRes) ? teamsRes : (teamsRes as { data: Team[] }).data ?? [];
-      const projList = Array.isArray(projectsRes) ? projectsRes : (projectsRes as { data: Project[] }).data ?? [];
-      setTeams(teamList);
-      setProjects(projList);
+      setTeams(teamsRes ?? []);
+      setProjects(projectsRes ?? []);
     } catch {
       // Dropdowns are non-critical; silently ignore
     }
@@ -188,7 +189,7 @@ export default function Vehicles() {
       if (form.assignedProjectId) body.assignedProjectId = form.assignedProjectId;
 
       if (editingId) {
-        if (form.odometerKm.trim()) body.odometerKm = Number(form.odometerKm);
+        if (form.odometerKm.trim()) body.odometerKm = Math.round(Number(form.odometerKm));
         if (form.nextServiceDate) body.nextServiceDate = form.nextServiceDate;
         if (form.insuranceExpiry) body.insuranceExpiry = form.insuranceExpiry;
         await apiPut(`/vehicles/${editingId}`, body);
@@ -272,7 +273,7 @@ export default function Vehicles() {
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>Vehicles</h1>
           <span style={{ fontSize: 14, color: '#6b7280' }}>
-            {vehicles.length} vehicle{vehicles.length !== 1 ? 's' : ''}
+            {total} vehicle{total !== 1 ? 's' : ''}
           </span>
         </div>
         <button style={btnPrimary} onClick={openCreate}>
@@ -524,16 +525,16 @@ export default function Vehicles() {
                 {/* Team */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
                   <span style={{ color: '#6b7280', minWidth: 60 }}>Team:</span>
-                  <span style={{ color: v.team ? '#111827' : '#9ca3af', fontWeight: v.team ? 500 : 400 }}>
-                    {v.team?.name ?? 'Unassigned'}
+                  <span style={{ color: v.assignedTeam ? '#111827' : '#9ca3af', fontWeight: v.assignedTeam ? 500 : 400 }}>
+                    {v.assignedTeam?.name ?? 'Unassigned'}
                   </span>
                 </div>
 
                 {/* Project */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
                   <span style={{ color: '#6b7280', minWidth: 60 }}>Project:</span>
-                  <span style={{ color: v.project ? '#111827' : '#9ca3af', fontWeight: v.project ? 500 : 400 }}>
-                    {v.project?.name ?? 'No project'}
+                  <span style={{ color: v.assignedProject ? '#111827' : '#9ca3af', fontWeight: v.assignedProject ? 500 : 400 }}>
+                    {v.assignedProject?.name ?? 'No project'}
                   </span>
                 </div>
 
@@ -626,7 +627,11 @@ export default function Vehicles() {
           >
             Page {page}
           </span>
-          <button style={btnOutline} onClick={() => setPage((p) => p + 1)}>
+          <button
+            style={{ ...btnOutline, opacity: page >= totalPages ? 0.5 : 1 }}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
             Next
           </button>
         </div>

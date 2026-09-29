@@ -1,22 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, api, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiPut, apiDelete, ApiError, formatCHF } from '../lib/api';
+import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+interface PublicUser {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  role?: string;
+}
+
 interface Team {
   id: string;
   name: string;
-  leaderId?: string;
-  leader?: { id: string; email: string; name?: string };
-  _count?: { members: number };
+  leaderId?: string | null;
+  leader?: PublicUser | null;
+  memberCount?: number;
   createdAt: string;
 }
 
 interface TeamMember {
   userId: string;
-  user: { id: string; email: string; name?: string; role?: string };
+  user: PublicUser;
 }
 
 interface TeamDetail extends Team {
@@ -26,10 +35,11 @@ interface TeamDetail extends Team {
 interface Employee {
   id: string;
   email: string;
-  name?: string;
+  firstName?: string;
+  lastName?: string;
   role: string;
-  hourlyRateCents: number;
-  cctCode?: string;
+  hourlyRateCents: number | null;
+  cctCode?: string | null;
   isActive: boolean;
   createdAt: string;
 }
@@ -97,20 +107,36 @@ const tdStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
-  admin: { bg: '#ede9fe', fg: '#7c3aed' },
-  manager: { bg: '#dbeafe', fg: '#2563eb' },
-  engineer: { bg: '#d1fae5', fg: '#059669' },
-  worker: { bg: '#fef3c7', fg: '#d97706' },
+  ADMIN: { bg: '#ede9fe', fg: '#7c3aed' },
+  PROJECT_MANAGER: { bg: '#dbeafe', fg: '#2563eb' },
+  TEAM_LEADER: { bg: '#d1fae5', fg: '#059669' },
+  WORKER: { bg: '#fef3c7', fg: '#d97706' },
 };
 
-const ROLES = ['admin', 'manager', 'engineer', 'worker'] as const;
+/** app_user.role CHECK values */
+const ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
 function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return s
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function displayName(u: { firstName?: string; lastName?: string; email: string }): string {
+  return [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return `Not allowed: ${err.message}`;
+    return err.message || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 function roleBadge(role: string): React.ReactNode {
@@ -155,6 +181,9 @@ function activeBadge(isActive: boolean): React.ReactNode {
 /* ------------------------------------------------------------------ */
 
 export default function HR() {
+  // The employee directory (with pay rates) is office-only; team leaders see their teams.
+  const { role } = useCurrentUser();
+  const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
   const [activeTab, setActiveTab] = useState<'teams' | 'employees'>('teams');
 
   /* ============ TEAMS STATE ============ */
@@ -203,49 +232,38 @@ export default function HR() {
   const fetchTeams = useCallback(() => {
     setTeamsLoading(true);
     setTeamsError('');
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100' });
     if (teamsSearch) params.set('search', teamsSearch);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    apiGet<{ data: Team[] }>(`/hr/teams${qs}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res as { data: Team[] }).data ?? [];
-        setTeams(list);
-      })
-      .catch((err) => setTeamsError(err.message ?? 'Failed to load teams'))
+    apiGet<Team[]>(`/hr/teams?${params.toString()}`)
+      .then((list) => setTeams(list ?? []))
+      .catch((err) => setTeamsError(errorMessage(err, 'Failed to load teams')))
       .finally(() => setTeamsLoading(false));
   }, [teamsSearch]);
 
   const fetchEmployees = useCallback(() => {
     setEmployeesLoading(true);
     setEmployeesError('');
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100' });
     if (empSearch) params.set('search', empSearch);
     if (roleFilter) params.set('role', roleFilter);
     if (activeFilter) params.set('isActive', activeFilter);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    apiGet<{ data: Employee[] }>(`/hr/employees${qs}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res as { data: Employee[] }).data ?? [];
-        setEmployees(list);
-      })
-      .catch((err) => setEmployeesError(err.message ?? 'Failed to load employees'))
+    apiGet<Employee[]>(`/hr/employees?${params.toString()}`)
+      .then((list) => setEmployees(list ?? []))
+      .catch((err) => setEmployeesError(errorMessage(err, 'Failed to load employees')))
       .finally(() => setEmployeesLoading(false));
   }, [empSearch, roleFilter, activeFilter]);
 
   const fetchAllEmployees = useCallback(() => {
-    apiGet<{ data: Employee[] }>('/hr/employees?isActive=true')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res as { data: Employee[] }).data ?? [];
-        setAllEmployees(list);
-      })
+    // Office roles only; a team leader gets 403 and the pickers stay empty.
+    apiGet<Employee[]>('/hr/employees?isActive=true&limit=200')
+      .then((list) => setAllEmployees(list ?? []))
       .catch(() => {});
   }, []);
 
   const fetchTeamDetail = useCallback((teamId: string) => {
     setTeamDetailLoading(true);
-    apiGet<{ data: TeamDetail }>(`/hr/teams/${teamId}`)
-      .then((res) => {
-        const detail = (res as { data: TeamDetail }).data ?? (res as unknown as TeamDetail);
+    apiGet<TeamDetail>(`/hr/teams/${teamId}`)
+      .then((detail) => {
         setTeamDetail(detail);
         setEditTeamName(detail.name);
         setEditTeamLeaderId(detail.leaderId ?? '');
@@ -257,9 +275,9 @@ export default function HR() {
   useEffect(() => {
     if (activeTab === 'teams') {
       fetchTeams();
-      fetchAllEmployees();
+      if (isOffice) fetchAllEmployees();
     }
-  }, [activeTab, fetchTeams, fetchAllEmployees]);
+  }, [activeTab, fetchTeams, fetchAllEmployees, isOffice]);
 
   useEffect(() => {
     if (activeTab === 'employees') {
@@ -282,20 +300,21 @@ export default function HR() {
         setShowCreateForm(false);
         fetchTeams();
       })
-      .catch((err) => setCreateError(err.message ?? 'Failed to create team'))
+      .catch((err) => setCreateError(errorMessage(err, 'Failed to create team')))
       .finally(() => setCreateLoading(false));
   };
 
   const handleUpdateTeam = (teamId: string) => {
     setEditTeamLoading(true);
-    const body: { name?: string; leaderId?: string } = {};
+    // null removes the leader
+    const body: { name?: string; leaderId: string | null } = { leaderId: editTeamLeaderId || null };
     if (editTeamName.trim()) body.name = editTeamName.trim();
-    body.leaderId = editTeamLeaderId || undefined;
     apiPut(`/hr/teams/${teamId}`, body)
       .then(() => {
         fetchTeams();
         fetchTeamDetail(teamId);
       })
+      .catch((err) => alert(errorMessage(err, 'Failed to update team')))
       .finally(() => setEditTeamLoading(false));
   };
 
@@ -307,7 +326,7 @@ export default function HR() {
         setTeamDetail(null);
         fetchTeams();
       })
-      .catch((err) => alert(err.message ?? 'Failed to delete team'));
+      .catch((err) => alert(errorMessage(err, 'Failed to delete team')));
   };
 
   const handleAddMember = (teamId: string) => {
@@ -319,7 +338,7 @@ export default function HR() {
         fetchTeamDetail(teamId);
         fetchTeams();
       })
-      .catch((err) => alert(err.message ?? 'Failed to add member'))
+      .catch((err) => alert(errorMessage(err, 'Failed to add member')))
       .finally(() => setAddMemberLoading(false));
   };
 
@@ -329,7 +348,7 @@ export default function HR() {
         fetchTeamDetail(teamId);
         fetchTeams();
       })
-      .catch((err) => alert(err.message ?? 'Failed to remove member'));
+      .catch((err) => alert(errorMessage(err, 'Failed to remove member')));
   };
 
   const handleExpandTeam = (teamId: string) => {
@@ -347,7 +366,8 @@ export default function HR() {
   const startEditing = (emp: Employee) => {
     setEditingId(emp.id);
     setEditRole(emp.role);
-    setEditHourlyRate(String(emp.hourlyRateCents));
+    // Edited in CHF, stored in centimes
+    setEditHourlyRate(emp.hourlyRateCents != null ? (emp.hourlyRateCents / 100).toFixed(2) : '');
     setEditIsActive(emp.isActive);
     setEditError('');
   };
@@ -358,10 +378,16 @@ export default function HR() {
   };
 
   const handleSaveEmployee = (userId: string) => {
+    // CHF → integer centimes; empty clears the rate
+    const hourlyRateCents = editHourlyRate.trim() === '' ? null : Math.round(parseFloat(editHourlyRate) * 100);
+    if (hourlyRateCents != null && (!Number.isFinite(hourlyRateCents) || hourlyRateCents < 0)) {
+      setEditError('Hourly rate must be a positive CHF amount.');
+      return;
+    }
     setEditLoading(true);
     setEditError('');
-    const body: { hourlyRateCents?: number; role?: string; isActive?: boolean } = {
-      hourlyRateCents: Number(editHourlyRate),
+    const body: { hourlyRateCents: number | null; role: string; isActive: boolean } = {
+      hourlyRateCents,
       role: editRole,
       isActive: editIsActive,
     };
@@ -371,7 +397,13 @@ export default function HR() {
         fetchEmployees();
         fetchAllEmployees();
       })
-      .catch((err) => setEditError(err.message ?? 'Failed to update employee'))
+      .catch((err) =>
+        setEditError(
+          err instanceof ApiError && err.status === 403
+            ? 'Only an administrator can change roles, pay rates and account status.'
+            : errorMessage(err, 'Failed to update employee'),
+        ),
+      )
       .finally(() => setEditLoading(false));
   };
 
@@ -401,9 +433,11 @@ export default function HR() {
         <button style={tabStyle('teams')} onClick={() => setActiveTab('teams')}>
           Teams
         </button>
-        <button style={tabStyle('employees')} onClick={() => setActiveTab('employees')}>
-          Employees
-        </button>
+        {isOffice && (
+          <button style={tabStyle('employees')} onClick={() => setActiveTab('employees')}>
+            Employees
+          </button>
+        )}
       </div>
 
       {/* ================= TEAMS TAB ================= */}
@@ -460,7 +494,7 @@ export default function HR() {
                     <option value="">No leader</option>
                     {allEmployees.map((emp) => (
                       <option key={emp.id} value={emp.id}>
-                        {emp.name ?? emp.email} ({statusLabel(emp.role)})
+                        {displayName(emp)} ({statusLabel(emp.role)})
                       </option>
                     ))}
                   </select>
@@ -521,7 +555,7 @@ export default function HR() {
                     </div>
                     <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
                       {team.leader
-                        ? `Leader: ${team.leader.name ?? team.leader.email}`
+                        ? `Leader: ${displayName(team.leader)}`
                         : 'No leader'}
                     </div>
                     <span
@@ -535,7 +569,7 @@ export default function HR() {
                         color: '#1e40af',
                       }}
                     >
-                      {team._count?.members ?? 0} member{(team._count?.members ?? 0) !== 1 ? 's' : ''}
+                      {team.memberCount ?? 0} member{(team.memberCount ?? 0) !== 1 ? 's' : ''}
                     </span>
                   </div>
 
@@ -578,7 +612,7 @@ export default function HR() {
                                 <option value="">No leader</option>
                                 {allEmployees.map((emp) => (
                                   <option key={emp.id} value={emp.id}>
-                                    {emp.name ?? emp.email}
+                                    {displayName(emp)}
                                   </option>
                                 ))}
                               </select>
@@ -622,7 +656,7 @@ export default function HR() {
                                 >
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                     <span style={{ fontWeight: 500, fontSize: 14, color: '#111827' }}>
-                                      {m.user.name ?? m.user.email}
+                                      {displayName(m.user)}
                                     </span>
                                     <span style={{ fontSize: 13, color: '#6b7280' }}>
                                       {m.user.email}
@@ -665,7 +699,7 @@ export default function HR() {
                                 )
                                 .map((emp) => (
                                   <option key={emp.id} value={emp.id}>
-                                    {emp.name ?? emp.email} ({statusLabel(emp.role)})
+                                    {displayName(emp)} ({statusLabel(emp.role)})
                                   </option>
                                 ))}
                             </select>
@@ -827,7 +861,7 @@ export default function HR() {
                     >
                       {/* Name */}
                       <td style={{ ...tdStyle, fontWeight: 500 }}>
-                        {emp.name ?? '-'}
+                        {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '-'}
                       </td>
 
                       {/* Email */}
@@ -863,13 +897,14 @@ export default function HR() {
                               style={{ ...inputStyle, width: 100 }}
                               type="number"
                               min="0"
+                              step="0.05"
                               value={editHourlyRate}
                               onChange={(e) => setEditHourlyRate(e.target.value)}
                             />
-                            <span style={{ fontSize: 11, color: '#9ca3af' }}>(cts)</span>
+                            <span style={{ fontSize: 11, color: '#9ca3af' }}>/h</span>
                           </div>
                         ) : (
-                          `CHF ${formatCHF(emp.hourlyRateCents)}`
+                          emp.hourlyRateCents != null ? `CHF ${formatCHF(emp.hourlyRateCents)}` : '-'
                         )}
                       </td>
 

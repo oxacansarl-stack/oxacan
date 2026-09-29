@@ -1,10 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { TaskDependency } from './entities/task-dependency.entity';
 import { Project } from './entities/project.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import {
+  CreateTaskDto,
+  UpdateTaskDto,
+  WORKER_TASK_FIELDS,
+  WORKER_TASK_STATUSES,
+} from './dto/task.dto';
 
 interface TaskFilters {
   page?: number;
@@ -14,34 +20,16 @@ interface TaskFilters {
   assignedTo?: string;
 }
 
-interface CreateTaskDto {
-  projectId: string;
-  lotId?: string;
-  parentTaskId?: string;
-  title: string;
-  description?: string;
-  status?: string;
-  priority?: string;
-  plannedStart?: Date;
-  plannedEnd?: Date;
-  estimatedHours?: number;
-  assignedTo?: string;
+interface Actor {
+  id: string;
+  role: string;
 }
 
-interface UpdateTaskDto {
-  title?: string;
-  description?: string;
-  status?: string;
-  priority?: string;
-  lotId?: string;
-  plannedStart?: Date | null;
-  plannedEnd?: Date | null;
-  actualStart?: Date | null;
-  actualEnd?: Date | null;
-  estimatedHours?: number | null;
-  actualHours?: number;
-  progressPercent?: number;
-  assignedTo?: string | null;
+/** DATE columns are exchanged as YYYY-MM-DD strings (the pg driver returns them as strings too). */
+const asDate = (v: string | null | undefined): Date | null => (v ? (v as unknown as Date) : null);
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 @Injectable()
@@ -109,15 +97,20 @@ export class TasksService {
     return task;
   }
 
-  async create(companyId: string, dto: CreateTaskDto): Promise<Task> {
+  async create(
+    companyId: string,
+    userId: string,
+    projectId: string,
+    dto: CreateTaskDto,
+  ): Promise<Task> {
     // Ensure project exists
     const project = await this.projectRepo.findOne({
-      where: { id: dto.projectId, companyId },
+      where: { id: projectId, companyId },
     });
-    if (!project) throw new NotFoundError('Project', dto.projectId);
+    if (!project) throw new NotFoundError('Project', projectId);
 
     const task = this.taskRepo.create({
-      projectId: dto.projectId,
+      projectId,
       companyId,
       lotId: dto.lotId || null,
       parentTaskId: dto.parentTaskId || null,
@@ -125,10 +118,11 @@ export class TasksService {
       description: dto.description || null,
       status: dto.status ?? 'todo',
       priority: dto.priority ?? 'normal',
-      plannedStart: dto.plannedStart || null,
-      plannedEnd: dto.plannedEnd || null,
+      plannedStart: asDate(dto.plannedStart),
+      plannedEnd: asDate(dto.plannedEnd),
       estimatedHours: dto.estimatedHours ?? null,
       assignedTo: dto.assignedTo || null,
+      createdBy: userId,
     });
 
     return this.taskRepo.save(task);
@@ -136,24 +130,51 @@ export class TasksService {
 
   async update(
     companyId: string,
+    projectId: string,
     id: string,
     dto: UpdateTaskDto,
+    actor?: Actor,
   ): Promise<Task> {
     const task = await this.findById(companyId, id);
+    if (task.projectId !== projectId) throw new NotFoundError('Task', id);
+
+    if (actor?.role === 'WORKER') this.assertWorkerMayUpdate(task, dto, actor.id);
 
     // If status changes to 'done', set actualEnd = today
     if (dto.status === 'done' && task.status !== 'done') {
-      dto.actualEnd = new Date();
+      dto.actualEnd = todayIso();
     }
 
     Object.assign(task, dto);
     return this.taskRepo.save(task);
   }
 
+  /** Workers may only report status/progress on tasks assigned to them. */
+  private assertWorkerMayUpdate(task: Task, dto: UpdateTaskDto, userId: string): void {
+    if (task.assignedTo !== userId) {
+      throw new ForbiddenException('Workers can only update tasks assigned to them');
+    }
+    const fields = Object.keys(dto).filter(
+      (k) => (dto as Record<string, unknown>)[k] !== undefined,
+    );
+    const disallowed = fields.filter((k) => !WORKER_TASK_FIELDS.includes(k));
+    if (disallowed.length > 0) {
+      throw new ForbiddenException(
+        `Workers may only change ${WORKER_TASK_FIELDS.join(', ')} (not ${disallowed.join(', ')})`,
+      );
+    }
+    if (dto.status !== undefined && !WORKER_TASK_STATUSES.includes(dto.status)) {
+      throw new ForbiddenException(
+        `Workers may only set status to ${WORKER_TASK_STATUSES.join(', ')}`,
+      );
+    }
+  }
+
   /* ───────────── Dependencies ───────────── */
 
   async addDependency(
     companyId: string,
+    projectId: string,
     predecessorId: string,
     successorId: string,
     type?: string,
@@ -169,12 +190,12 @@ export class TasksService {
 
     // Ensure both tasks exist and belong to company
     const predecessor = await this.taskRepo.findOne({
-      where: { id: predecessorId, companyId },
+      where: { id: predecessorId, companyId, projectId },
     });
     if (!predecessor) throw new NotFoundError('Task', predecessorId);
 
     const successor = await this.taskRepo.findOne({
-      where: { id: successorId, companyId },
+      where: { id: successorId, companyId, projectId },
     });
     if (!successor) throw new NotFoundError('Task', successorId);
 
@@ -201,12 +222,13 @@ export class TasksService {
 
   async removeDependency(
     companyId: string,
+    projectId: string,
     predecessorId: string,
     successorId: string,
   ): Promise<void> {
-    // Ensure both tasks belong to company
+    // Ensure the predecessor belongs to this company and project
     const predecessor = await this.taskRepo.findOne({
-      where: { id: predecessorId, companyId },
+      where: { id: predecessorId, companyId, projectId },
     });
     if (!predecessor) throw new NotFoundError('Task', predecessorId);
 

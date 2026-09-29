@@ -5,6 +5,16 @@ import { Team } from './entities/team.entity';
 import { TeamMember } from './entities/team-member.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { CreateTeamDto, UpdateEmployeeDto, UpdateTeamDto } from './dto/hr.dto';
+
+/** Columns of a user that are safe to show to TEAM_LEADERs (no pay rate, no auth ids). */
+const PUBLIC_USER_COLUMNS = (alias: string) => [
+  `${alias}.id`,
+  `${alias}.firstName`,
+  `${alias}.lastName`,
+  `${alias}.email`,
+  `${alias}.role`,
+];
 
 interface TeamFilters {
   page?: number;
@@ -20,12 +30,6 @@ interface EmployeeFilters {
   isActive?: boolean;
 }
 
-interface UpdateEmployeeDto {
-  hourlyRateCents?: number;
-  role?: string;
-  cctCode?: string;
-  isActive?: boolean;
-}
 
 @Injectable()
 export class HrService {
@@ -45,7 +49,9 @@ export class HrService {
 
     const qb = this.teamRepo
       .createQueryBuilder('team')
-      .leftJoinAndSelect('team.leader', 'leader')
+      .leftJoin('team.leader', 'leader')
+      .addSelect(PUBLIC_USER_COLUMNS('leader'))
+      .loadRelationCountAndMap('team.memberCount', 'team.members')
       .where('team.company_id = :companyId', { companyId });
 
     if (search) {
@@ -74,10 +80,23 @@ export class HrService {
   /* ───────────── Teams: Find by ID ───────────── */
 
   async findTeamById(companyId: string, id: string): Promise<Team> {
-    const team = await this.teamRepo.findOne({
-      where: { id, companyId },
-      relations: ['leader', 'members', 'members.user'],
-    });
+    const team = await this.teamRepo
+      .createQueryBuilder('team')
+      .leftJoin('team.leader', 'leader')
+      .addSelect(PUBLIC_USER_COLUMNS('leader'))
+      .leftJoinAndSelect('team.members', 'members', 'members.company_id = :companyId', { companyId })
+      .leftJoin('members.user', 'memberUser')
+      .addSelect(PUBLIC_USER_COLUMNS('memberUser'))
+      .where('team.company_id = :companyId', { companyId })
+      .andWhere('team.id = :id', { id })
+      .getOne();
+    if (!team) throw new NotFoundError('Team', id);
+    return team;
+  }
+
+  /** Relation-free load for mutations (loaded relations would override changed FK columns on save). */
+  private async loadTeam(companyId: string, id: string): Promise<Team> {
+    const team = await this.teamRepo.findOne({ where: { id, companyId } });
     if (!team) throw new NotFoundError('Team', id);
     return team;
   }
@@ -86,7 +105,7 @@ export class HrService {
 
   async createTeam(
     companyId: string,
-    dto: { name: string; leaderId?: string },
+    dto: CreateTeamDto,
   ): Promise<Team> {
     if (dto.leaderId) {
       const leader = await this.userRepo.findOne({
@@ -109,9 +128,9 @@ export class HrService {
   async updateTeam(
     companyId: string,
     id: string,
-    dto: { name?: string; leaderId?: string },
+    dto: UpdateTeamDto,
   ): Promise<Team> {
-    const team = await this.findTeamById(companyId, id);
+    const team = await this.loadTeam(companyId, id);
 
     if (dto.leaderId !== undefined) {
       if (dto.leaderId) {
@@ -133,7 +152,7 @@ export class HrService {
   /* ───────────── Teams: Delete ───────────── */
 
   async deleteTeam(companyId: string, id: string): Promise<void> {
-    const team = await this.findTeamById(companyId, id);
+    const team = await this.loadTeam(companyId, id);
 
     const memberCount = await this.teamMemberRepo.count({
       where: { teamId: team.id, companyId },
@@ -157,7 +176,7 @@ export class HrService {
     userId: string,
   ): Promise<TeamMember> {
     // Validate team exists
-    await this.findTeamById(companyId, teamId);
+    await this.loadTeam(companyId, teamId);
 
     // Validate user exists
     const user = await this.userRepo.findOne({
@@ -203,7 +222,7 @@ export class HrService {
   /* ───────────── Members: List ───────────── */
 
   async getTeamMembers(companyId: string, teamId: string): Promise<TeamMember[]> {
-    await this.findTeamById(companyId, teamId);
+    await this.loadTeam(companyId, teamId);
 
     return this.teamMemberRepo.find({
       where: { teamId, companyId },
@@ -268,7 +287,9 @@ export class HrService {
 
     if (dto.hourlyRateCents !== undefined) user.hourlyRateCents = dto.hourlyRateCents;
     if (dto.role !== undefined) user.role = dto.role;
+    if (dto.licenceTier !== undefined) user.licenceTier = dto.licenceTier;
     if (dto.cctCode !== undefined) user.cctCode = dto.cctCode;
+    if (dto.qualifications !== undefined) user.qualifications = dto.qualifications;
     if (dto.isActive !== undefined) {
       user.isActive = dto.isActive;
       user.deactivatedAt = dto.isActive ? null : new Date();

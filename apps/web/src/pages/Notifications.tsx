@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, api } from '../lib/api';
+import { apiList, apiPatch, apiPost } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -8,14 +8,9 @@ import { apiGet, api } from '../lib/api';
 interface Notification {
   id: string;
   title: string;
-  body: string;
+  body: string | null;
   isRead: boolean;
   createdAt: string;
-}
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -48,18 +43,6 @@ const btnOutline: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const apiPatch = <T = unknown>(path: string, body?: unknown) =>
-  api<T>(path, {
-    method: 'PATCH',
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-
-const apiPost = <T = unknown>(path: string, body?: unknown) =>
-  api<T>(path, {
-    method: 'POST',
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
@@ -89,16 +72,9 @@ export default function Notifications() {
     try {
       let path = `/notifications?page=${page}`;
       if (filter === 'unread') path += '&isRead=false';
-      const res = await apiGet<any>(path);
-      if (Array.isArray(res)) {
-        setNotifications(res);
-        setTotalPages(1);
-      } else if (res && typeof res === 'object' && 'data' in res) {
-        setNotifications(res.data);
-        setTotalPages(Math.ceil((res.meta?.total ?? res.data.length) / (res.meta?.pageSize ?? 25)));
-      } else {
-        setNotifications([]);
-      }
+      const { items, meta } = await apiList<Notification>(path);
+      setNotifications(items);
+      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e: any) {
       setError(e.message || 'Failed to load notifications');
       setNotifications([]);
@@ -113,7 +89,9 @@ export default function Notifications() {
     try {
       await apiPatch(`/notifications/${id}/read`);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      setError(e.message || 'Failed to mark notification as read');
+    }
   };
 
   const markAllRead = async () => {

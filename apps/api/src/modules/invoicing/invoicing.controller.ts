@@ -12,9 +12,29 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { OFFICE_ROLES, Roles } from '../../common/decorators/roles.decorator';
 import { InvoicingService } from './invoicing.service';
+import {
+  CreateInvoiceDto,
+  CreatePlusValueDto,
+  RecordPaymentDto,
+  UpdateInvoiceStatusDto,
+  UpdatePlusValueStatusDto,
+} from './dto/invoice.dto';
 
+const MAX_PAGE_SIZE = 500;
+
+/** Parses ?page / ?limit; invalid or missing values fall back to the service defaults. */
+function parsePaging(page?: string, limit?: string) {
+  const p = page ? parseInt(page, 10) : NaN;
+  const l = limit ? parseInt(limit, 10) : NaN;
+  return {
+    page: Number.isInteger(p) && p >= 1 ? p : undefined,
+    limit: Number.isInteger(l) && l >= 1 ? Math.min(l, MAX_PAGE_SIZE) : undefined,
+  };
+}
+
+/** PRD: project managers issue invoices / situations — all invoicing routes are office roles. */
 @Controller('invoices')
 export class InvoicingController {
   constructor(private readonly service: InvoicingService) {}
@@ -22,7 +42,7 @@ export class InvoicingController {
   /* ───────────── Project summary (before :id) ───────────── */
 
   @Get('project/:projectId/summary')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async getProjectInvoiceSummary(
     @CompanyId() companyId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -33,7 +53,7 @@ export class InvoicingController {
   /* ───────────── Plus-values (before :id) ───────────── */
 
   @Get('plus-values')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findAllPlusValues(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -42,34 +62,28 @@ export class InvoicingController {
     @Query('status') status?: string,
   ) {
     return this.service.findAllPlusValues(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      ...parsePaging(page, limit),
       projectId,
       status,
     });
   }
 
   @Post('plus-values')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async createPlusValue(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId: string;
-      description: string;
-      amountCents: number;
-    },
+    @Body() body: CreatePlusValueDto,
   ) {
     return this.service.createPlusValue(companyId, user.id, body);
   }
 
   @Patch('plus-values/:id/status')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updatePlusValueStatus(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { status: string; approvedByClient?: boolean },
+    @Body() body: UpdatePlusValueStatusDto,
   ) {
     return this.service.updatePlusValueStatus(
       companyId,
@@ -82,7 +96,7 @@ export class InvoicingController {
   /* ───────────── Invoices — CRUD ───────────── */
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findAll(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -93,8 +107,7 @@ export class InvoicingController {
     @Query('type') type?: string,
   ) {
     return this.service.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      ...parsePaging(page, limit),
       projectId,
       clientId,
       status,
@@ -103,7 +116,7 @@ export class InvoicingController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findById(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -112,44 +125,27 @@ export class InvoicingController {
   }
 
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async createInvoice(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId: string;
-      clientId: string;
-      type: string;
-      vatRate?: number;
-      retentionRate?: number;
-      lines: {
-        description: string;
-        unit?: string;
-        quantity: number;
-        unitPriceCents: number;
-        cumulativeQuantity?: number;
-        previousQuantity?: number;
-      }[];
-      notes?: string;
-      paymentTerms?: string;
-    },
+    @Body() body: CreateInvoiceDto,
   ) {
     return this.service.createInvoice(companyId, user.id, body);
   }
 
   @Patch(':id/status')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateStatus(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { status: string },
+    @Body() body: UpdateInvoiceStatusDto,
   ) {
     return this.service.updateStatus(companyId, id, body.status);
   }
 
   @Post(':id/credit-note')
-  @Roles('ADMIN')
+  @Roles(...OFFICE_ROLES)
   async createCreditNote(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
@@ -159,18 +155,12 @@ export class InvoicingController {
   }
 
   @Post(':id/payments')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async recordPayment(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      amountCents: number;
-      paymentDate: string;
-      paymentMethod: string;
-      reference?: string;
-    },
+    @Body() body: RecordPaymentDto,
   ) {
     return this.service.recordPayment(companyId, user.id, id, body);
   }

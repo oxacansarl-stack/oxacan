@@ -10,13 +10,17 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { CompanyId } from '../../common/decorators/current-user.decorator';
+import { Roles, ALL_ROLES, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { PlansService } from './plans.service';
+import { CreatePlanDto, UpdatePlanDto, CreateAnnotationDto } from './dto/plan.dto';
 
 @Controller('plans')
 export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 
+  /** Site staff read building plans, so reads are open to all roles. */
   @Get()
+  @Roles(...ALL_ROLES)
   async findAll(
     @CompanyId() companyId: string,
     @Query('projectId') projectId?: string,
@@ -31,6 +35,7 @@ export class PlansController {
   }
 
   @Get(':id')
+  @Roles(...ALL_ROLES)
   async findOne(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -39,23 +44,26 @@ export class PlansController {
   }
 
   @Post()
+  @Roles(...OFFICE_ROLES)
   async create(
     @CompanyId() companyId: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreatePlanDto,
   ) {
-    return this.plansService.create(companyId, body as Partial<any>);
+    return this.plansService.create(companyId, body);
   }
 
   @Patch(':id')
+  @Roles(...OFFICE_ROLES)
   async update(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: UpdatePlanDto,
   ) {
-    return this.plansService.update(companyId, id, body as Partial<any>);
+    return this.plansService.update(companyId, id, body);
   }
 
   @Delete(':id')
+  @Roles(...OFFICE_ROLES)
   async remove(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -65,15 +73,17 @@ export class PlansController {
   }
 
   @Post(':id/annotations')
+  @Roles(...OFFICE_ROLES)
   async addAnnotation(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreateAnnotationDto,
   ) {
-    return this.plansService.addAnnotation(companyId, id, body as Partial<any>);
+    return this.plansService.addAnnotation(companyId, id, body);
   }
 
   @Delete(':id/annotations/:annotationId')
+  @Roles(...OFFICE_ROLES)
   async removeAnnotation(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,

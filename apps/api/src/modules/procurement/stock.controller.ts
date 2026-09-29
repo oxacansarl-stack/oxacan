@@ -12,7 +12,17 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import {
+  OFFICE_ROLES,
+  Roles,
+  SITE_LEAD_ROLES,
+} from '../../common/decorators/roles.decorator';
+import {
+  CreateStockItemDto,
+  CreateStockLocationDto,
+  CreateStockMovementDto,
+  UpdateStockItemDto,
+} from './dto/stock.dto';
 import { StockService } from './stock.service';
 
 @Controller('stock')
@@ -22,7 +32,7 @@ export class StockController {
   /* ───────────── Locations ───────────── */
 
   @Get('locations')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...SITE_LEAD_ROLES)
   async findAllLocations(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -35,10 +45,10 @@ export class StockController {
   }
 
   @Post('locations')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async createLocation(
     @CompanyId() companyId: string,
-    @Body() body: { name: string; type: string; address?: string },
+    @Body() body: CreateStockLocationDto,
   ) {
     return this.service.createLocation(companyId, body);
   }
@@ -46,7 +56,7 @@ export class StockController {
   /* ───────────── Items ───────────── */
 
   @Get('items')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async findAllItems(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -65,26 +75,20 @@ export class StockController {
   }
 
   @Post('items')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...OFFICE_ROLES)
   async createItem(
     @CompanyId() companyId: string,
-    @Body()
-    body: {
-      canonicalArticleId: string;
-      locationId: string;
-      quantity?: number;
-      minThreshold?: number;
-    },
+    @Body() body: CreateStockItemDto,
   ) {
     return this.service.createItem(companyId, body);
   }
 
   @Put('items/:id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...OFFICE_ROLES)
   async updateItemQuantity(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { quantity?: number; minThreshold?: number },
+    @Body() body: UpdateStockItemDto,
   ) {
     return this.service.updateItemQuantity(companyId, id, body);
   }
@@ -92,7 +96,7 @@ export class StockController {
   /* ───────────── Movements ───────────── */
 
   @Get('movements')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async findAllMovements(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -111,20 +115,11 @@ export class StockController {
   }
 
   @Post('movements')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async createMovement(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      stockItemId: string;
-      type: 'in' | 'out' | 'transfer' | 'adjustment';
-      quantity: number;
-      fromLocationId?: string;
-      toLocationId?: string;
-      projectId?: string;
-      reference?: string;
-    },
+    @Body() body: CreateStockMovementDto,
   ) {
     return this.service.createMovement(companyId, user.id, body);
   }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPut, apiDelete, ApiError, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete, ApiError, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -9,13 +9,13 @@ import { apiGet, apiPost, apiPut, apiDelete, ApiError, formatCHF } from '../lib/
 
 interface OfferLine {
   id: string;
-  position: number;
+  positionNumber: number;
   description: string;
   unit: string;
   quantity: number;
   unitPriceCents: number | null;
-  totalCents: number;
-  pricingStrategy: string;
+  totalPriceCents: number | null;
+  pricingStrategy: string | null;
   variantType: string;
 }
 
@@ -23,7 +23,7 @@ interface Assumption {
   id: string;
   type: string;
   description: string;
-  impactAmountCents: number;
+  impactAmountCents: number | null;
   status: string;
 }
 
@@ -36,7 +36,7 @@ interface Offer {
   status: string;
   version: number;
   marginFactor: number;
-  vatRateBps: number;
+  vatRate: number;
   totalHtCents: number;
   totalVatCents: number;
   totalTtcCents: number;
@@ -67,9 +67,17 @@ const VARIANT_TYPES = [
   'EXCLU',
 ] as const;
 
-const PRICING_STRATEGIES = ['fixed', 'unit_rate', 'lump_sum', 'provisional'] as const;
+// DB CHECK offer_line.pricing_strategy
+const PRICING_STRATEGIES = ['MANUAL', 'LATEST', 'MEDIAN_N', 'INDEXED', 'COMPOSED'] as const;
 
-const ASSUMPTION_TYPES = ['technical', 'commercial', 'planning', 'regulatory'] as const;
+// DB CHECK offer_assumption.type
+const ASSUMPTION_TYPES = [
+  'HYPOTHESE_A_VALIDER',
+  'INFORMATION_MANQUANTE',
+  'VARIANTE',
+  'OPTION',
+  'EXCLU',
+] as const;
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   draft: { bg: '#f3f4f6', fg: '#374151' },
@@ -141,6 +149,26 @@ function variantLabel(v: string): string {
   return v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** CHF text input → integer centimes (null when blank). */
+function chfToCents(chf: string): number | null {
+  if (chf.trim() === '') return null;
+  const n = Number(chf);
+  return Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
+function centsToChfInput(cents: number | null | undefined): string {
+  return cents == null ? '' : (cents / 100).toFixed(2);
+}
+
+interface LinePayload {
+  description: string;
+  unit: string;
+  quantity: number;
+  unitPriceCents: number | null;
+  pricingStrategy?: string;
+  variantType: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -159,15 +187,15 @@ export default function OfferDetail() {
     description: '',
     unit: 'pce',
     quantity: 1,
-    unitPriceCents: '' as string | number,
-    pricingStrategy: 'fixed' as string,
+    unitPriceChf: '',
+    pricingStrategy: 'MANUAL' as string,
     variantType: 'BASE' as string,
   });
 
   const [assumptionForm, setAssumptionForm] = useState({
-    type: 'technical',
+    type: 'HYPOTHESE_A_VALIDER' as string,
     description: '',
-    impactAmountCents: 0,
+    impactChf: '',
   });
 
   /* --- Queries --- */
@@ -188,14 +216,7 @@ export default function OfferDetail() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['offer', id] });
 
   const addLineMutation = useMutation({
-    mutationFn: (data: {
-      description: string;
-      unit: string;
-      quantity: number;
-      unitPriceCents: number | null;
-      pricingStrategy: string;
-      variantType: string;
-    }) => apiPost(`/offers/${id}/lines`, data),
+    mutationFn: (data: LinePayload) => apiPost(`/offers/${id}/lines`, data),
     onSuccess: () => {
       invalidate();
       setShowLineForm(false);
@@ -204,17 +225,9 @@ export default function OfferDetail() {
   });
 
   const updateLineMutation = useMutation({
-    mutationFn: (data: {
-      lineId: string;
-      description: string;
-      unit: string;
-      quantity: number;
-      unitPriceCents: number | null;
-      pricingStrategy: string;
-      variantType: string;
-    }) => {
+    mutationFn: (data: LinePayload & { lineId: string }) => {
       const { lineId, ...body } = data;
-      return apiPut(`/offers/${id}/lines/${lineId}`, body);
+      return apiPatch(`/offers/${id}/lines/${lineId}`, body);
     },
     onSuccess: () => {
       invalidate();
@@ -229,11 +242,18 @@ export default function OfferDetail() {
   });
 
   const addAssumptionMutation = useMutation({
-    mutationFn: (data: typeof assumptionForm) => apiPost(`/offers/${id}/assumptions`, data),
+    mutationFn: (data: typeof assumptionForm) => {
+      const impactAmountCents = chfToCents(data.impactChf);
+      return apiPost(`/offers/${id}/assumptions`, {
+        type: data.type,
+        description: data.description.trim(),
+        ...(impactAmountCents != null ? { impactAmountCents } : {}),
+      });
+    },
     onSuccess: () => {
       invalidate();
       setShowAssumptionForm(false);
-      setAssumptionForm({ type: 'technical', description: '', impactAmountCents: 0 });
+      setAssumptionForm({ type: 'HYPOTHESE_A_VALIDER', description: '', impactChf: '' });
     },
   });
 
@@ -251,7 +271,7 @@ export default function OfferDetail() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: (status: string) => apiPut(`/offers/${id}`, { status }),
+    mutationFn: (status: string) => apiPatch(`/offers/${id}/status`, { status }),
     onSuccess: invalidate,
   });
 
@@ -262,8 +282,8 @@ export default function OfferDetail() {
       description: '',
       unit: 'pce',
       quantity: 1,
-      unitPriceCents: '',
-      pricingStrategy: 'fixed',
+      unitPriceChf: '',
+      pricingStrategy: 'MANUAL',
       variantType: 'BASE',
     });
   }
@@ -274,21 +294,21 @@ export default function OfferDetail() {
       description: line.description,
       unit: line.unit,
       quantity: line.quantity,
-      unitPriceCents: line.unitPriceCents ?? '',
-      pricingStrategy: line.pricingStrategy,
+      unitPriceChf: centsToChfInput(line.unitPriceCents),
+      pricingStrategy: line.pricingStrategy ?? '',
       variantType: line.variantType,
     });
     setShowLineForm(false);
   }
 
   function submitLineForm() {
-    const parsed = lineForm.unitPriceCents === '' ? null : Number(lineForm.unitPriceCents);
-    const payload = {
-      description: lineForm.description,
-      unit: lineForm.unit,
+    // Matches Add/UpdateOfferLineDto: CHF input → integer centimes, blank price → null ("prix à compléter").
+    const payload: LinePayload = {
+      description: lineForm.description.trim(),
+      unit: lineForm.unit.trim(),
       quantity: lineForm.quantity,
-      unitPriceCents: parsed,
-      pricingStrategy: lineForm.pricingStrategy,
+      unitPriceCents: chfToCents(lineForm.unitPriceChf),
+      ...(lineForm.pricingStrategy ? { pricingStrategy: lineForm.pricingStrategy } : {}),
       variantType: lineForm.variantType,
     };
 
@@ -301,7 +321,9 @@ export default function OfferDetail() {
 
   const lines = offer?.lines ?? [];
   const assumptions = offer?.assumptions ?? [];
-  const hasUnpricedLines = lines.some((l) => l.unitPriceCents === null && l.variantType !== 'EXCLU');
+  // Mirrors the server's submit rule (OffersService.updateStatus): only BASE lines must be priced.
+  const hasUnpricedLines = lines.some((l) => l.unitPriceCents == null && l.variantType === 'BASE');
+  const actionError = statusMutation.error || recalcMutation.error || duplicateMutation.error;
 
   /* --- Render --- */
 
@@ -416,6 +438,12 @@ export default function OfferDetail() {
         </div>
       </div>
 
+      {actionError && (
+        <div style={{ color: '#ef4444', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
+          {actionError.message}
+        </div>
+      )}
+
       {/* --- Summary cards --- */}
       <div
         style={{
@@ -435,8 +463,8 @@ export default function OfferDetail() {
         />
         <SummaryCard
           label="VAT Rate"
-          value={`${(offer.vatRateBps / 100).toFixed(2)}%`}
-          sub={`stored: ${offer.vatRateBps} bps`}
+          value={`${(offer.vatRate / 100).toFixed(2)}%`}
+          sub={`stored: ${offer.vatRate} bps`}
         />
       </div>
 
@@ -509,20 +537,18 @@ export default function OfferDetail() {
               <input
                 style={inputStyle}
                 type="number"
-                placeholder="Unit Price (centimes)"
-                value={lineForm.unitPriceCents}
-                onChange={(e) =>
-                  setLineForm({
-                    ...lineForm,
-                    unitPriceCents: e.target.value === '' ? '' : Number(e.target.value),
-                  })
-                }
+                step="0.05"
+                min="0"
+                placeholder="Unit Price (CHF)"
+                value={lineForm.unitPriceChf}
+                onChange={(e) => setLineForm({ ...lineForm, unitPriceChf: e.target.value })}
               />
               <select
                 style={inputStyle}
                 value={lineForm.pricingStrategy}
                 onChange={(e) => setLineForm({ ...lineForm, pricingStrategy: e.target.value })}
               >
+                <option value="">-</option>
                 {PRICING_STRATEGIES.map((s) => (
                   <option key={s} value={s}>
                     {s.replace(/_/g, ' ')}
@@ -634,14 +660,14 @@ export default function OfferDetail() {
 
               return (
                 <tr key={line.id}>
-                  <td style={cellStyle}>{line.position}</td>
+                  <td style={cellStyle}>{line.positionNumber}</td>
                   <td style={{ ...cellStyle, maxWidth: 240 }}>{line.description}</td>
                   <td style={cellStyle}>{line.unit}</td>
                   <td style={{ ...cellStyle, fontVariantNumeric: 'tabular-nums' }}>
                     {line.quantity}
                   </td>
                   <td style={{ ...cellStyle, fontVariantNumeric: 'tabular-nums' }}>
-                    {line.unitPriceCents !== null ? (
+                    {line.unitPriceCents != null ? (
                       formatCHF(line.unitPriceCents)
                     ) : (
                       <span
@@ -659,7 +685,7 @@ export default function OfferDetail() {
                     )}
                   </td>
                   <td style={{ ...cellStyle, fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
-                    {formatCHF(line.totalCents ?? 0)}
+                    {formatCHF(line.totalPriceCents ?? 0)}
                   </td>
                   <td style={{ ...cellStyle, fontSize: 12, color: '#6b7280' }}>
                     {line.pricingStrategy?.replace(/_/g, ' ') ?? '-'}
@@ -765,7 +791,7 @@ export default function OfferDetail() {
               >
                 {ASSUMPTION_TYPES.map((t) => (
                   <option key={t} value={t}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                    {variantLabel(t)}
                   </option>
                 ))}
               </select>
@@ -780,12 +806,13 @@ export default function OfferDetail() {
               <input
                 style={inputStyle}
                 type="number"
-                placeholder="Impact (centimes)"
-                value={assumptionForm.impactAmountCents}
+                step="0.05"
+                placeholder="Impact (CHF)"
+                value={assumptionForm.impactChf}
                 onChange={(e) =>
                   setAssumptionForm({
                     ...assumptionForm,
-                    impactAmountCents: Number(e.target.value),
+                    impactChf: e.target.value,
                   })
                 }
               />
@@ -793,7 +820,7 @@ export default function OfferDetail() {
             <button
               style={buttonStyle}
               onClick={() =>
-                assumptionForm.description && addAssumptionMutation.mutate(assumptionForm)
+                assumptionForm.description.trim() && addAssumptionMutation.mutate(assumptionForm)
               }
               disabled={addAssumptionMutation.isPending}
             >

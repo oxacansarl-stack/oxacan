@@ -5,6 +5,12 @@ import { Client } from './entities/client.entity';
 import { ClientContact } from './entities/client-contact.entity';
 import { ClientInteraction } from './entities/client-interaction.entity';
 import { NotFoundError } from '@oxacan/shared-types';
+import {
+  CreateClientDto,
+  UpdateClientDto,
+  CreateContactDto,
+  CreateInteractionDto,
+} from './dto/client.dto';
 
 interface ClientFilters {
   page?: number;
@@ -75,7 +81,7 @@ export class CrmService {
 
   async createClient(
     companyId: string,
-    data: Partial<Client>,
+    data: CreateClientDto,
   ): Promise<Client> {
     const client = this.clientRepo.create({
       ...data,
@@ -87,7 +93,7 @@ export class CrmService {
   async updateClient(
     companyId: string,
     id: string,
-    data: Partial<Client>,
+    data: UpdateClientDto,
   ): Promise<Client> {
     const client = await this.findClientById(companyId, id);
     Object.assign(client, data);
@@ -97,7 +103,7 @@ export class CrmService {
   async addContact(
     companyId: string,
     clientId: string,
-    data: Partial<ClientContact>,
+    data: CreateContactDto,
   ): Promise<ClientContact> {
     // Ensure client exists and belongs to company
     await this.findClientById(companyId, clientId);
@@ -114,13 +120,15 @@ export class CrmService {
     companyId: string,
     clientId: string,
     userId: string,
-    data: Partial<ClientInteraction>,
+    data: CreateInteractionDto,
   ): Promise<ClientInteraction> {
     // Ensure client exists and belongs to company
     await this.findClientById(companyId, clientId);
 
+    const { interactionDate, ...rest } = data;
     const interaction = this.interactionRepo.create({
-      ...data,
+      ...rest,
+      ...(interactionDate ? { interactionDate: new Date(interactionDate) } : {}),
       clientId,
       companyId,
       userId,

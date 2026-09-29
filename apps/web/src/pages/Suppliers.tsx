@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { apiList, apiPost, apiPut, apiDelete } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -78,6 +78,7 @@ const emptyForm: SupplierForm = {
 
 export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -106,10 +107,10 @@ export default function Suppliers() {
     const params = new URLSearchParams();
     if (search) params.set('search', search);
     const qs = params.toString();
-    apiGet<{ data: Supplier[] }>(`/suppliers${qs ? `?${qs}` : ''}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res as { data: Supplier[] }).data ?? [];
-        setSuppliers(list);
+    apiList<Supplier>(`/suppliers${qs ? `?${qs}` : ''}`)
+      .then(({ items, meta }) => {
+        setSuppliers(items);
+        setTotal(meta?.total ?? items.length);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load suppliers');
@@ -131,8 +132,7 @@ export default function Suppliers() {
     if (createForm.email.trim()) body.email = createForm.email.trim();
     if (createForm.phone.trim()) body.phone = createForm.phone.trim();
     if (createForm.address.trim()) body.address = createForm.address.trim();
-    if (createForm.paymentTermsDays !== 30) body.paymentTermsDays = createForm.paymentTermsDays;
-    else body.paymentTermsDays = 30;
+    body.paymentTermsDays = createForm.paymentTermsDays;
 
     apiPost<Supplier>('/suppliers', body)
       .then(() => {
@@ -213,7 +213,7 @@ export default function Suppliers() {
           </h1>
           {!loading && (
             <span style={{ fontSize: 14, color: '#6b7280' }}>
-              {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
+              {total} supplier{total !== 1 ? 's' : ''}
             </span>
           )}
         </div>

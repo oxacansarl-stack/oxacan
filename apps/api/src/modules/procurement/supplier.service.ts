@@ -3,21 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { CreateSupplierDto, UpdateSupplierDto } from './dto/supplier.dto';
 
 interface SupplierFilters {
   page?: number;
   limit?: number;
   search?: string;
-}
-
-interface CreateSupplierDto {
-  name: string;
-  contactPerson?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  paymentTermsDays?: number;
-  notes?: string;
 }
 
 @Injectable()
@@ -92,7 +83,7 @@ export class SupplierService {
   async update(
     companyId: string,
     id: string,
-    dto: Partial<CreateSupplierDto>,
+    dto: UpdateSupplierDto,
   ): Promise<Supplier> {
     const supplier = await this.findById(companyId, id);
 

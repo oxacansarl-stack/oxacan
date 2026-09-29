@@ -5,45 +5,22 @@ import { SiteMeeting } from './entities/site-meeting.entity';
 import { MeetingAttendee } from './entities/meeting-attendee.entity';
 import { MeetingAction } from './entities/meeting-action.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import {
+  AddActionDto,
+  AddAttendeeDto,
+  CreateMeetingDto,
+  UpdateActionDto,
+  UpdateMeetingDto,
+} from './dto/meeting.dto';
+import { Project } from '../projects/entities/project.entity';
+
+/** Meetings only need to identify their project — never expose its financials (budget, costs). */
+const PROJECT_SUMMARY = ['project.id', 'project.reference', 'project.name', 'project.status'];
 
 interface MeetingFilters {
   page?: number;
   limit?: number;
   projectId?: string;
-  status?: string;
-}
-
-interface CreateMeetingDto {
-  projectId: string;
-  meetingDate: string;
-  location?: string;
-  agenda?: string;
-}
-
-interface UpdateMeetingDto {
-  location?: string;
-  agenda?: string;
-  minutes?: string;
-  status?: string;
-}
-
-interface AddAttendeeDto {
-  name: string;
-  role?: string;
-  organization?: string;
-  attendance?: string;
-}
-
-interface AddActionDto {
-  description: string;
-  responsible: string;
-  dueDate?: string;
-}
-
-interface UpdateActionDto {
-  description?: string;
-  responsible?: string;
-  dueDate?: string;
   status?: string;
 }
 
@@ -56,6 +33,8 @@ export class MeetingsService {
     private readonly attendeeRepo: Repository<MeetingAttendee>,
     @InjectRepository(MeetingAction)
     private readonly actionRepo: Repository<MeetingAction>,
+    @InjectRepository(Project)
+    private readonly projectRepo: Repository<Project>,
   ) {}
 
   /* ───────────── List ───────────── */
@@ -65,7 +44,8 @@ export class MeetingsService {
 
     const qb = this.meetingRepo
       .createQueryBuilder('meeting')
-      .leftJoinAndSelect('meeting.project', 'project')
+      .leftJoin('meeting.project', 'project')
+      .addSelect(PROJECT_SUMMARY)
       .where('meeting.company_id = :companyId', { companyId });
 
     if (projectId) {
@@ -96,10 +76,15 @@ export class MeetingsService {
   /* ───────────── Find by ID ───────────── */
 
   async findById(companyId: string, id: string): Promise<SiteMeeting> {
-    const meeting = await this.meetingRepo.findOne({
-      where: { id, companyId },
-      relations: ['attendees', 'actions', 'project'],
-    });
+    const meeting = await this.meetingRepo
+      .createQueryBuilder('meeting')
+      .leftJoinAndSelect('meeting.attendees', 'attendees')
+      .leftJoinAndSelect('meeting.actions', 'actions')
+      .leftJoin('meeting.project', 'project')
+      .addSelect(PROJECT_SUMMARY)
+      .where('meeting.id = :id', { id })
+      .andWhere('meeting.company_id = :companyId', { companyId })
+      .getOne();
     if (!meeting) throw new NotFoundError('SiteMeeting', id);
     return meeting;
   }
@@ -111,6 +96,13 @@ export class MeetingsService {
     userId: string,
     dto: CreateMeetingDto,
   ): Promise<SiteMeeting> {
+    // The project must belong to the caller's company
+    const project = await this.projectRepo.findOne({
+      where: { id: dto.projectId, companyId },
+      select: ['id'],
+    });
+    if (!project) throw new NotFoundError('Project', dto.projectId);
+
     // Auto-increment meetingNumber per project
     const lastMeeting = await this.meetingRepo
       .createQueryBuilder('meeting')

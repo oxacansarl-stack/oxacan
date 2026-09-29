@@ -1,0 +1,174 @@
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { IsCents, IsIsoDate } from '../../../common/validation/decorators';
+
+/**
+ * Invoice types that may be created through POST /invoices.
+ * DB CHECK invoice.type also allows 'credit_note', but credit notes are only created through
+ * POST /invoices/:id/credit-note (which negates the original's amounts and links it).
+ */
+export const CREATABLE_INVOICE_TYPES = ['invoice', 'situation', 'acompte', 'final_invoice'] as const;
+
+/**
+ * Statuses a user may set through PATCH /invoices/:id/status (subset of DB CHECK invoice.status).
+ * 'paid' / 'partially_paid' are derived from recorded payments (POST /invoices/:id/payments);
+ * 'draft' is excluded so a sent invoice cannot be reverted to draft and then cancelled
+ * (sent invoices must be neutralised with a credit note).
+ */
+export const SETTABLE_INVOICE_STATUSES = ['sent', 'overdue', 'cancelled'] as const;
+
+/** DB CHECK payment.payment_method */
+export const PAYMENT_METHODS = ['bank_transfer', 'card', 'cash', 'other'] as const;
+
+/** DB CHECK plus_value.status */
+export const PLUS_VALUE_STATUSES = ['detected', 'submitted', 'approved', 'rejected', 'invoiced'] as const;
+
+/*
+ * vatRate / retentionRate are integer basis points: 810 = 8.10 %, 500 = 5.00 %
+ * (InvoicingService divides by 10 000; invoice.vat_rate is an INTEGER column).
+ */
+const RATE_MAX_BPS = 10_000;
+const MAX_QUANTITY = 1_000_000_000;
+/** invoice_line.unit_price_cents / total_price_cents are INT4 columns. */
+const INT4_MAX = 2_147_483_647;
+
+export class InvoiceLineDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  description!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  unit?: string;
+
+  /** May be decimal (m2, m3, h …). */
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(MAX_QUANTITY)
+  quantity!: number;
+
+  @IsCents()
+  @Max(INT4_MAX)
+  unitPriceCents!: number;
+
+  /** Situations only: cumulative quantity executed to date. */
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(MAX_QUANTITY)
+  cumulativeQuantity?: number;
+
+  /** Situations only: cumulative quantity already invoiced by previous situations. */
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(MAX_QUANTITY)
+  previousQuantity?: number;
+}
+
+export class CreateInvoiceDto {
+  @IsUUID()
+  projectId!: string;
+
+  @IsUUID()
+  clientId!: string;
+
+  @IsIn(CREATABLE_INVOICE_TYPES)
+  type!: string;
+
+  /** Basis points (810 = 8.10 %). Omitted → company default. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(RATE_MAX_BPS)
+  vatRate?: number;
+
+  /** Basis points (500 = 5.00 %). Omitted → company default. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(RATE_MAX_BPS)
+  retentionRate?: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1000)
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceLineDto)
+  lines!: InvoiceLineDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  paymentTerms?: string;
+}
+
+export class UpdateInvoiceStatusDto {
+  @IsIn(SETTABLE_INVOICE_STATUSES)
+  status!: string;
+}
+
+export class RecordPaymentDto {
+  @IsCents()
+  @Min(1)
+  @Max(INT4_MAX)
+  amountCents!: number;
+
+  @IsIsoDate()
+  paymentDate!: string;
+
+  @IsIn(PAYMENT_METHODS)
+  paymentMethod!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  reference?: string;
+}
+
+export class CreatePlusValueDto {
+  @IsUUID()
+  projectId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  description!: string;
+
+  @IsCents()
+  @Min(1)
+  @Max(INT4_MAX)
+  amountCents!: number;
+}
+
+export class UpdatePlusValueStatusDto {
+  @IsIn(PLUS_VALUE_STATUSES)
+  status!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  approvedByClient?: boolean;
+}

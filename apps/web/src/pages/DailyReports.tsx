@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -18,10 +18,11 @@ interface DailyReport {
   project?: { name: string; reference?: string };
   date: string;
   workDescription?: string;
-  weather?: string;
-  temperature?: number;
-  materialsUsed?: string[];
-  notes?: string;
+  weather?: string | null;
+  temperatureCelsius?: number | null;
+  /** JSONB array; this page writes { name } objects */
+  materialsUsed?: Record<string, unknown>[];
+  notes?: string | null;
   createdAt: string;
   updatedAt?: string;
 }
@@ -88,6 +89,25 @@ function formatDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-CH');
 }
 
+/** 'YYYY-MM-DD' → local Date without timezone shift */
+function parseDay(date: string): Date {
+  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function materialLabel(m: Record<string, unknown>): string {
+  const label = m.name ?? m.description ?? m.label;
+  return typeof label === 'string' ? label : JSON.stringify(m);
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return `Not allowed: ${err.message}`;
+    return err.message || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -119,30 +139,25 @@ export default function DailyReports() {
 
   // ---- Load projects ----
   useEffect(() => {
-    apiGet<{ data: Project[] } | Project[]>('/projects')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data;
-        setProjects(list);
-      })
+    apiGet<Project[]>('/projects')
+      .then((list) => setProjects(list ?? []))
       .catch(() => {});
   }, []);
 
   // ---- Load reports ----
   const loadReports = useCallback(() => {
     setLoading(true);
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100' });
     if (filterProject) params.set('projectId', filterProject);
     if (filterDateFrom) params.set('dateFrom', filterDateFrom);
     if (filterDateTo) params.set('dateTo', filterDateTo);
-    const qs = params.toString() ? `?${params.toString()}` : '';
 
-    apiGet<{ data: DailyReport[] }>(`/daily-reports${qs}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data ?? [];
-        setReports(list);
+    apiGet<DailyReport[]>(`/daily-reports?${params.toString()}`)
+      .then((list) => {
+        setReports(list ?? []);
         setError('');
       })
-      .catch((err) => setError(err.message || 'Failed to load reports'))
+      .catch((err) => setError(errorMessage(err, 'Failed to load reports')))
       .finally(() => setLoading(false));
   }, [filterProject, filterDateFrom, filterDateTo]);
 
@@ -166,34 +181,47 @@ export default function DailyReports() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formProjectId) return;
+
+    const temperatureCelsius = formTemperature ? parseFloat(formTemperature) : null;
+    if (temperatureCelsius != null && (!Number.isFinite(temperatureCelsius) || Math.abs(temperatureCelsius) > 60)) {
+      setError('Temperature must be between -60 and 60 °C.');
+      return;
+    }
     setFormLoading(true);
 
+    // One material per line → JSONB objects
     const materialsUsed = formMaterials
       .split('\n')
       .map((s) => s.trim())
-      .filter(Boolean);
-
-    const body = {
-      projectId: formProjectId,
-      date: formDate,
-      workDescription: formWorkDescription || undefined,
-      weather: formWeather || undefined,
-      temperature: formTemperature ? parseFloat(formTemperature) : undefined,
-      materialsUsed: materialsUsed.length > 0 ? materialsUsed : undefined,
-      notes: formNotes || undefined,
-    };
+      .filter(Boolean)
+      .map((name) => ({ name }));
 
     try {
       if (editId) {
-        await apiPut(`/daily-reports/${editId}`, body);
+        // Project and date are fixed once created; null clears a field.
+        await apiPut(`/daily-reports/${editId}`, {
+          workDescription: formWorkDescription || null,
+          weather: formWeather || null,
+          temperatureCelsius,
+          materialsUsed,
+          notes: formNotes || null,
+        });
       } else {
-        await apiPost('/daily-reports', body);
+        await apiPost('/daily-reports', {
+          projectId: formProjectId,
+          date: formDate,
+          workDescription: formWorkDescription || undefined,
+          weather: formWeather || undefined,
+          temperatureCelsius: temperatureCelsius ?? undefined,
+          materialsUsed: materialsUsed.length > 0 ? materialsUsed : undefined,
+          notes: formNotes || undefined,
+        });
       }
       resetForm();
       setShowForm(false);
       loadReports();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save report');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to save report'));
     } finally {
       setFormLoading(false);
     }
@@ -206,8 +234,8 @@ export default function DailyReports() {
     setFormDate(report.date ? report.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
     setFormWorkDescription(report.workDescription || '');
     setFormWeather(report.weather || '');
-    setFormTemperature(report.temperature != null ? String(report.temperature) : '');
-    setFormMaterials((report.materialsUsed || []).join('\n'));
+    setFormTemperature(report.temperatureCelsius != null ? String(report.temperatureCelsius) : '');
+    setFormMaterials((report.materialsUsed || []).map(materialLabel).join('\n'));
     setFormNotes(report.notes || '');
     setShowForm(true);
   };
@@ -218,8 +246,8 @@ export default function DailyReports() {
     try {
       await apiDelete(`/daily-reports/${id}`);
       loadReports();
-    } catch (err: any) {
-      setError(err.message || 'Delete failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Delete failed'));
     }
   };
 
@@ -264,7 +292,7 @@ export default function DailyReports() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Project *</label>
-              <select style={{ ...inputStyle }} value={formProjectId} onChange={(e) => setFormProjectId(e.target.value)} required>
+              <select style={{ ...inputStyle }} value={formProjectId} onChange={(e) => setFormProjectId(e.target.value)} required disabled={!!editId}>
                 <option value="">Select a project...</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
@@ -273,7 +301,7 @@ export default function DailyReports() {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Date *</label>
-              <input type="date" style={{ ...inputStyle }} value={formDate} onChange={(e) => setFormDate(e.target.value)} required />
+              <input type="date" style={{ ...inputStyle }} value={formDate} onChange={(e) => setFormDate(e.target.value)} required disabled={!!editId} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Weather</label>
@@ -409,11 +437,11 @@ export default function DailyReports() {
                       }}
                     >
                       <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>
-                        {report.date ? new Date(report.date).getDate() : '-'}
+                        {report.date ? parseDay(report.date).getDate() : '-'}
                       </div>
                       <div style={{ fontSize: 11, fontWeight: 500, marginTop: 2 }}>
                         {report.date
-                          ? new Date(report.date).toLocaleDateString('fr-CH', { month: 'short' })
+                          ? parseDay(report.date).toLocaleDateString('fr-CH', { month: 'short' })
                           : ''}
                       </div>
                     </div>
@@ -439,7 +467,7 @@ export default function DailyReports() {
                     {report.weather && (
                       <span style={{ fontSize: 13, color: '#6b7280', background: '#f3f4f6', padding: '4px 10px', borderRadius: 6 }}>
                         {report.weather}
-                        {report.temperature != null && ` ${report.temperature}°C`}
+                        {report.temperatureCelsius != null && ` ${report.temperatureCelsius}°C`}
                       </span>
                     )}
                     <span style={{ fontSize: 18, color: '#9ca3af', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
@@ -470,7 +498,7 @@ export default function DailyReports() {
                         {materials.length > 0 ? (
                           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: '#374151', lineHeight: 1.8 }}>
                             {materials.map((m, i) => (
-                              <li key={i}>{m}</li>
+                              <li key={i}>{materialLabel(m)}</li>
                             ))}
                           </ul>
                         ) : (
@@ -480,14 +508,14 @@ export default function DailyReports() {
                     </div>
 
                     {/* Weather details */}
-                    {(report.weather || report.temperature != null) && (
+                    {(report.weather || report.temperatureCelsius != null) && (
                       <div style={{ marginTop: 16 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                           Weather Conditions
                         </div>
                         <div style={{ fontSize: 14, color: '#374151' }}>
                           {report.weather || 'Not recorded'}
-                          {report.temperature != null && ` — ${report.temperature}°C`}
+                          {report.temperatureCelsius != null && ` — ${report.temperatureCelsius}°C`}
                         </div>
                       </div>
                     )}

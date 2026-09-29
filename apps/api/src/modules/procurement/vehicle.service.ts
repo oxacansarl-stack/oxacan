@@ -3,21 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vehicle } from './entities/vehicle.entity';
 import { NotFoundError } from '@oxacan/shared-types';
+import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
 
 interface VehicleFilters {
   page?: number;
   limit?: number;
-}
-
-interface CreateVehicleDto {
-  registration: string;
-  make?: string;
-  model?: string;
-  assignedTeamId?: string;
-  assignedProjectId?: string;
-  insuranceExpiry?: string;
-  nextServiceDate?: string;
-  odometerKm?: number;
 }
 
 @Injectable()
@@ -34,6 +24,8 @@ export class VehicleService {
 
     const qb = this.vehicleRepo
       .createQueryBuilder('vehicle')
+      .leftJoinAndSelect('vehicle.assignedTeam', 'team')
+      .leftJoinAndSelect('vehicle.assignedProject', 'project')
       .where('vehicle.company_id = :companyId', { companyId });
 
     qb.orderBy('vehicle.registration', 'ASC')
@@ -86,7 +78,7 @@ export class VehicleService {
   async update(
     companyId: string,
     id: string,
-    dto: Partial<CreateVehicleDto>,
+    dto: UpdateVehicleDto,
   ): Promise<Vehicle> {
     const vehicle = await this.findById(companyId, id);
 

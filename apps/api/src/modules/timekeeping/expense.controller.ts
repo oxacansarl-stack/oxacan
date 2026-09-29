@@ -13,40 +13,49 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import {
+  ALL_ROLES,
+  OFFICE_ROLES,
+  Roles,
+  SITE_LEAD_ROLES,
+} from '../../common/decorators/roles.decorator';
 import { ExpenseService } from './expense.service';
+import { ScopeUser, parsePaging } from './access-scope.service';
+import {
+  CreateExpenseDto,
+  ExpenseIdsDto,
+  RejectExpensesDto,
+  UpdateExpenseDto,
+} from './dto/expense.dto';
+
+const OPTIONAL_UUID = new ParseUUIDPipe({ optional: true });
 
 @Controller('expenses')
 export class ExpenseController {
   constructor(private readonly service: ExpenseService) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findAll(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('userId') userId?: string,
-    @Query('projectId') projectId?: string,
+    @Query('userId', OPTIONAL_UUID) userId?: string,
+    @Query('projectId', OPTIONAL_UUID) projectId?: string,
     @Query('status') status?: string,
     @Query('category') category?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
   ) {
-    return this.service.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-      userId,
-      projectId,
-      status,
-      category,
-      dateFrom,
-      dateTo,
-    });
+    return this.service.findAll(
+      { ...user, companyId },
+      { ...parsePaging(page, limit), userId, projectId, status, category, dateFrom, dateTo },
+    );
   }
 
   @Get('summary/project/:projectId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async getProjectExpenseSummary(
     @CompanyId() companyId: string,
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -55,91 +64,76 @@ export class ExpenseController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findById(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.service.findById(companyId, id);
+    return this.service.findById({ ...user, companyId }, id);
   }
 
+  /** The owner is always the caller (from the token), never the body. */
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async create(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId?: string;
-      taskId?: string;
-      date: string;
-      category: string;
-      description: string;
-      amountCents: number;
-      receiptUrl?: string;
-      isBillable?: boolean;
-    },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: CreateExpenseDto,
   ) {
     return this.service.create(companyId, user.id, body);
   }
 
   @Put(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async update(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      projectId?: string;
-      taskId?: string;
-      date?: string;
-      category?: string;
-      description?: string;
-      amountCents?: number;
-      receiptUrl?: string;
-      isBillable?: boolean;
-    },
+    @Body() body: UpdateExpenseDto,
   ) {
-    return this.service.update(companyId, id, body);
+    return this.service.update({ ...user, companyId }, id, body);
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async delete(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.service.delete(companyId, id);
+    await this.service.delete({ ...user, companyId }, id);
     return { deleted: true };
   }
 
   @Post('submit')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async submitForApproval(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body() body: { expenseIds: string[] },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: ExpenseIdsDto,
   ) {
     return this.service.submitForApproval(companyId, user.id, body.expenseIds);
   }
 
   @Post('approve')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async approveExpenses(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body() body: { expenseIds: string[] },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: ExpenseIdsDto,
   ) {
-    return this.service.approveExpenses(companyId, user.id, body.expenseIds);
+    return this.service.approveExpenses({ ...user, companyId }, body.expenseIds);
   }
 
   @Post('reject')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async rejectExpenses(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body() body: { expenseIds: string[]; reason: string },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: RejectExpensesDto,
   ) {
-    return this.service.rejectExpenses(companyId, user.id, body.expenseIds, body.reason);
+    // Note: the expense table has no column to store `reason`; it is accepted but not persisted.
+    return this.service.rejectExpenses({ ...user, companyId }, body.expenseIds);
   }
 }

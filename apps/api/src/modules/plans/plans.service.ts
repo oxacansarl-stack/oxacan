@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Plan } from './entities/plan.entity';
 import { PlanAnnotation } from './entities/plan-annotation.entity';
 import { NotFoundError } from '@oxacan/shared-types';
+import { CreatePlanDto, UpdatePlanDto, CreateAnnotationDto } from './dto/plan.dto';
 
 interface PlanFilters {
   projectId?: string;
@@ -53,7 +54,7 @@ export class PlansService {
     return plan;
   }
 
-  async create(companyId: string, data: Partial<Plan>): Promise<Plan> {
+  async create(companyId: string, data: CreatePlanDto): Promise<Plan> {
     const plan = this.planRepo.create({
       ...data,
       companyId,
@@ -64,7 +65,7 @@ export class PlansService {
   async update(
     companyId: string,
     id: string,
-    data: Partial<Plan>,
+    data: UpdatePlanDto,
   ): Promise<Plan> {
     const plan = await this.findById(companyId, id);
     Object.assign(plan, data);
@@ -79,7 +80,7 @@ export class PlansService {
   async addAnnotation(
     companyId: string,
     planId: string,
-    data: Partial<PlanAnnotation>,
+    data: CreateAnnotationDto,
   ): Promise<PlanAnnotation> {
     // Ensure plan exists and belongs to company
     await this.findById(companyId, planId);

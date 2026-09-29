@@ -5,6 +5,12 @@ import { StockLocation } from './entities/stock-location.entity';
 import { StockItem } from './entities/stock-item.entity';
 import { StockMovement } from './entities/stock-movement.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import {
+  CreateStockItemDto,
+  CreateStockLocationDto,
+  CreateStockMovementDto,
+  UpdateStockItemDto,
+} from './dto/stock.dto';
 
 interface LocationFilters {
   page?: number;
@@ -25,16 +31,6 @@ interface MovementFilters {
   stockItemId?: string;
   type?: string;
   projectId?: string;
-}
-
-interface CreateMovementDto {
-  stockItemId: string;
-  type: 'in' | 'out' | 'transfer' | 'adjustment';
-  quantity: number;
-  fromLocationId?: string;
-  toLocationId?: string;
-  projectId?: string;
-  reference?: string;
 }
 
 @Injectable()
@@ -78,7 +74,7 @@ export class StockService {
 
   async createLocation(
     companyId: string,
-    dto: { name: string; type: string; address?: string },
+    dto: CreateStockLocationDto,
   ): Promise<StockLocation> {
     const location = this.locationRepo.create({
       companyId,
@@ -132,12 +128,7 @@ export class StockService {
 
   async createItem(
     companyId: string,
-    dto: {
-      canonicalArticleId: string;
-      locationId: string;
-      quantity?: number;
-      minThreshold?: number;
-    },
+    dto: CreateStockItemDto,
   ): Promise<StockItem> {
     // Check for uniqueness (companyId, canonicalArticleId, locationId)
     const existing = await this.itemRepo.findOne({
@@ -171,7 +162,7 @@ export class StockService {
   async updateItemQuantity(
     companyId: string,
     itemId: string,
-    dto: { quantity?: number; minThreshold?: number },
+    dto: UpdateStockItemDto,
   ): Promise<StockItem> {
     const item = await this.itemRepo.findOne({
       where: { id: itemId, companyId },
@@ -192,6 +183,9 @@ export class StockService {
     const qb = this.movementRepo
       .createQueryBuilder('mov')
       .leftJoinAndSelect('mov.stockItem', 'stockItem')
+      .leftJoinAndSelect('stockItem.location', 'location')
+      .leftJoinAndSelect('stockItem.canonicalArticle', 'article')
+      .leftJoinAndSelect('mov.project', 'project')
       .where('mov.company_id = :companyId', { companyId });
 
     if (stockItemId) {
@@ -226,7 +220,7 @@ export class StockService {
   async createMovement(
     companyId: string,
     userId: string,
-    dto: CreateMovementDto,
+    dto: CreateStockMovementDto,
   ): Promise<StockMovement | StockMovement[]> {
     const stockItem = await this.itemRepo.findOne({
       where: { id: dto.stockItemId, companyId },

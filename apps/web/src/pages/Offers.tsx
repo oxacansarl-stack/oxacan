@@ -21,7 +21,7 @@ interface Offer {
   status: string;
   version: number;
   marginFactor: number;
-  vatRateBps: number;
+  vatRate: number;
   totalHtCents: number;
   totalVatCents: number;
   totalTtcCents: number;
@@ -91,7 +91,7 @@ export default function Offers() {
     clientId: '',
     reference: '',
     marginFactor: 120,
-    vatRateBps: 810,
+    vatRate: 810,
   });
 
   /* --- Queries --- */
@@ -118,11 +118,19 @@ export default function Offers() {
   /* --- Mutations --- */
 
   const createMutation = useMutation({
-    mutationFn: (data: typeof form) => apiPost<Offer>('/offers', data),
+    // Matches CreateOfferDto: marginFactor = integer percent (120 = 1.20x), vatRate = basis points (810 = 8.10%).
+    mutationFn: (data: typeof form) =>
+      apiPost<Offer>('/offers', {
+        projectName: data.projectName.trim(),
+        clientId: data.clientId,
+        ...(data.reference.trim() ? { reference: data.reference.trim() } : {}),
+        marginFactor: Math.round(data.marginFactor),
+        vatRate: Math.round(data.vatRate),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['offers'] });
       setShowForm(false);
-      setForm({ projectName: '', clientId: '', reference: '', marginFactor: 120, vatRateBps: 810 });
+      setForm({ projectName: '', clientId: '', reference: '', marginFactor: 120, vatRate: 810 });
     },
   });
 
@@ -229,8 +237,8 @@ export default function Offers() {
               <input
                 style={inputStyle}
                 type="number"
-                value={form.vatRateBps}
-                onChange={(e) => setForm({ ...form, vatRateBps: Number(e.target.value) })}
+                value={form.vatRate}
+                onChange={(e) => setForm({ ...form, vatRate: Number(e.target.value) })}
               />
             </div>
           </div>
@@ -276,6 +284,8 @@ export default function Offers() {
       {/* --- Table --- */}
       {isLoading ? (
         <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+      ) : error ? (
+        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>

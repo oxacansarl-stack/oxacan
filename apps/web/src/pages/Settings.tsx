@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPut, apiPost, api, formatCHF } from '../lib/api';
+import { apiGet, apiPut, apiPost, apiList } from '../lib/api';
+import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -7,9 +8,10 @@ import { apiGet, apiPut, apiPost, api, formatCHF } from '../lib/api';
 
 interface CompanySettings {
   companyName?: string;
-  legalName?: string;
-  address?: string;
-  vatNumber?: string;
+  legalName?: string | null;
+  address?: string | null;
+  vatNumber?: string | null;
+  logo?: string | null;
   defaultVatRate?: number;
   defaultRetentionRate?: number;
   defaultMarginFactor?: number;
@@ -37,11 +39,6 @@ interface BillingEvent {
   amountCents: number;
   stripeEventId?: string;
   createdAt: string;
-}
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -143,6 +140,8 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
 /* ------------------------------------------------------------------ */
 
 export default function Settings() {
+  // Project managers may view the defaults; changing them and the subscription is admin-only.
+  const isAdmin = useCurrentUser().role === 'ADMIN';
   const [settings, setSettings] = useState<CompanySettings>({});
   const [subscription, setSubscription] = useState<Subscription>({});
   const [seats, setSeats] = useState<SeatInfo>({ used: 0, total: 0 });
@@ -162,8 +161,7 @@ export default function Settings() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await apiGet<any>('/settings');
-      const data = res?.data ?? res;
+      const data = await apiGet<CompanySettings>('/settings');
       setSettings(data);
       setVatRate(data.defaultVatRate != null ? (data.defaultVatRate / 100).toFixed(2) : '8.10');
       setRetentionRate(data.defaultRetentionRate != null ? (data.defaultRetentionRate / 100).toFixed(2) : '5.00');
@@ -176,46 +174,49 @@ export default function Settings() {
 
   const fetchSubscription = useCallback(async () => {
     try {
-      const [subRes, seatsRes] = await Promise.all([
-        apiGet<any>('/subscription'),
-        apiGet<any>('/subscription/seats'),
+      const [sub, s] = await Promise.all([
+        apiGet<Subscription>('/subscription'),
+        apiGet<Partial<SeatInfo>>('/subscription/seats'),
       ]);
-      setSubscription(subRes?.data ?? subRes ?? {});
-      const s = seatsRes?.data ?? seatsRes ?? {};
-      setSeats({ used: s.used ?? 0, total: s.total ?? 0 });
+      setSubscription(sub ?? {});
+      setSeats({ used: s?.used ?? 0, total: s?.total ?? 0 });
     } catch { /* subscription may not exist */ }
   }, []);
 
   const fetchBilling = useCallback(async () => {
     try {
-      const res = await apiGet<PaginatedResponse<BillingEvent>>(`/subscription/billing?page=${billingPage}`);
-      if (res && typeof res === 'object' && 'data' in res) {
-        setBillingEvents(res.data);
-        setBillingTotalPages(Math.ceil((res.meta?.total ?? res.data.length) / (res.meta?.pageSize ?? 25)));
-      } else if (Array.isArray(res)) {
-        setBillingEvents(res);
-      }
+      const { items, meta } = await apiList<BillingEvent>(`/subscription/billing?page=${billingPage}`);
+      setBillingEvents(items);
+      setBillingTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch { /* ignore */ }
   }, [billingPage]);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchSettings(), fetchSubscription()]).finally(() => setLoading(false));
-  }, [fetchSettings, fetchSubscription]);
+    Promise.all([fetchSettings(), isAdmin ? fetchSubscription() : undefined]).finally(() => setLoading(false));
+  }, [fetchSettings, fetchSubscription, isAdmin]);
 
-  useEffect(() => { fetchBilling(); }, [fetchBilling]);
+  useEffect(() => { if (isAdmin) fetchBilling(); }, [fetchBilling, isAdmin]);
 
   const handleSaveDefaults = async () => {
     setSaving(true);
     setError('');
     setSuccess('');
+    // Percentages → basis points, factor → hundredths (integers, as the API expects).
+    const toHundredths = (v: string) => Math.round(parseFloat(v) * 100);
+    const payload = {
+      defaultVatRate: toHundredths(vatRate),
+      defaultRetentionRate: toHundredths(retentionRate),
+      defaultMarginFactor: toHundredths(marginFactor),
+      geolocationEnabled: geoEnabled,
+    };
+    if (![payload.defaultVatRate, payload.defaultRetentionRate, payload.defaultMarginFactor].every(Number.isFinite)) {
+      setError('Please enter valid numbers for all rates');
+      setSaving(false);
+      return;
+    }
     try {
-      await apiPut('/settings', {
-        defaultVatRate: Math.round(parseFloat(vatRate) * 100),
-        defaultRetentionRate: Math.round(parseFloat(retentionRate) * 100),
-        defaultMarginFactor: Math.round(parseFloat(marginFactor) * 100),
-        geolocationEnabled: geoEnabled,
-      });
+      await apiPut('/settings', payload);
       setSuccess('Settings saved successfully');
       fetchSettings();
     } catch (e: any) {
@@ -342,12 +343,15 @@ export default function Settings() {
           <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, marginLeft: 24 }}>Track GPS coordinates for timekeeping and daily reports</div>
         </div>
 
-        <button style={btnPrimary} onClick={handleSaveDefaults} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Defaults'}
-        </button>
+        {isAdmin && (
+          <button style={btnPrimary} onClick={handleSaveDefaults} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Defaults'}
+          </button>
+        )}
       </div>
 
       {/* Subscription */}
+      {isAdmin && (
       <div style={sectionStyle}>
         <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>Subscription</h2>
 
@@ -492,6 +496,7 @@ export default function Settings() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

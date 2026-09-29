@@ -12,131 +12,139 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { ALL_ROLES, Roles, SITE_LEAD_ROLES } from '../../common/decorators/roles.decorator';
 import { TimekeepingService } from './timekeeping.service';
+import { hidesMoneyFor, stripMoney } from '../../common/util/strip-money';
+
+/** Hourly rates and labour cost are pay data; only office roles see them. */
+const hidePay = <T>(user: { role: string }, value: T): T => (hidesMoneyFor(user.role) ? stripMoney(value) : value);
+import { AccessScopeService, ScopeUser, parsePaging } from './access-scope.service';
+import {
+  ApproveTimeEntriesDto,
+  ClockInDto,
+  RejectTimeEntriesDto,
+  SubmitTimeEntriesDto,
+  UpdateTimeEntryDto,
+} from './dto/time-entry.dto';
+
+const OPTIONAL_UUID = new ParseUUIDPipe({ optional: true });
 
 @Controller('timekeeping')
 export class TimekeepingController {
-  constructor(private readonly service: TimekeepingService) {}
+  constructor(
+    private readonly service: TimekeepingService,
+    private readonly scope: AccessScopeService,
+  ) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findAll(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('userId') userId?: string,
-    @Query('projectId') projectId?: string,
+    @Query('userId', OPTIONAL_UUID) userId?: string,
+    @Query('projectId', OPTIONAL_UUID) projectId?: string,
     @Query('status') status?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
   ) {
-    return this.service.findAllTimeEntries(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-      userId,
-      projectId,
-      status,
-      dateFrom,
-      dateTo,
-    });
+    return hidePay(
+      user,
+      await this.service.findAllTimeEntries(
+        { ...user, companyId },
+        { ...parsePaging(page, limit), userId, projectId, status, dateFrom, dateTo },
+      ),
+    );
   }
 
   @Get('summary/weekly')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async getWeeklySummary(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string; role: string },
-    @Query('userId') userId?: string,
+    @CurrentUser() user: ScopeUser,
+    @Query('userId', OPTIONAL_UUID) userId?: string,
     @Query('weekStart') weekStart?: string,
   ) {
-    const canViewOthers = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'].includes(user.role);
-    const targetUserId = userId && canViewOthers ? userId : user.id;
-    return this.service.getWeeklySummary(companyId, targetUserId, weekStart);
+    // Another user's week only when inside the caller's scope; otherwise the caller's own.
+    const caller = { ...user, companyId };
+    const targetUserId =
+      userId && userId !== user.id && (await this.scope.canSee(caller, userId)) ? userId : user.id;
+    const summary = await this.service.getWeeklySummary(companyId, targetUserId, weekStart);
+    if (!hidesMoneyFor(user.role)) return summary;
+    const { totalCost: _cost, ...rest } = stripMoney(summary);
+    return rest;
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findById(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.service.findTimeEntryById(companyId, id);
+    return hidePay(user, await this.service.findTimeEntryById({ ...user, companyId }, id));
   }
 
   @Post('clock-in')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async clockIn(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId: string;
-      taskId?: string;
-      category?: string;
-      latitude?: number;
-      longitude?: number;
-      notes?: string;
-    },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: ClockInDto,
   ) {
     return this.service.clockIn(companyId, user.id, body);
   }
 
+  /** Takes no body: end time and minutes are computed server-side. Owner only. */
   @Post('clock-out/:id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async clockOut(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.clockOut(companyId, user.id, id);
   }
 
   @Put(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async update(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      breakMinutes?: number;
-      notes?: string;
-      category?: string;
-      travelMinutes?: number;
-      taskId?: string;
-      latitude?: number;
-      longitude?: number;
-    },
+    @Body() body: UpdateTimeEntryDto,
   ) {
-    return this.service.updateTimeEntry(companyId, id, body);
+    return this.service.updateTimeEntry({ ...user, companyId }, id, body);
   }
 
   @Post('submit')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async submitForApproval(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: SubmitTimeEntriesDto,
   ) {
-    return this.service.submitForApproval(companyId, user.id);
+    return this.service.submitForApproval(companyId, user.id, body?.entryIds);
   }
 
   @Post('approve')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async approveEntries(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body() body: { entryIds: string[] },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: ApproveTimeEntriesDto,
   ) {
-    return this.service.approveEntries(companyId, user.id, body.entryIds);
+    return this.service.approveEntries({ ...user, companyId }, body.entryIds);
   }
 
   @Post('reject')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async rejectEntries(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body() body: { entryIds: string[]; reason: string },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: RejectTimeEntriesDto,
   ) {
-    return this.service.rejectEntries(companyId, user.id, body.entryIds, body.reason);
+    return this.service.rejectEntries({ ...user, companyId }, body.entryIds, body.reason);
   }
 }

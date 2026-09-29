@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, QueryRunner } from 'typeorm';
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceLine } from './entities/invoice-line.entity';
 import { PlusValue } from './entities/plus-value.entity';
@@ -9,8 +9,9 @@ import { JournalEntry } from '../accounting/entities/journal-entry.entity';
 import { JournalEntryLine } from '../accounting/entities/journal-entry-line.entity';
 import { ChartOfAccounts } from '../accounting/entities/chart-of-accounts.entity';
 import { Company } from '../company/entities/company.entity';
-import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
 import { DEFAULT_VAT_RATE, DEFAULT_RETENTION_RATE } from '@oxacan/shared-types';
+import { CreateInvoiceDto, CreatePlusValueDto, RecordPaymentDto } from './dto/invoice.dto';
 
 /* ─── helpers ─── */
 
@@ -19,33 +20,6 @@ function swissRound(cents: number): number {
 }
 
 /* ─── DTOs ─── */
-
-interface InvoiceLineDto {
-  description: string;
-  unit?: string;
-  quantity: number;
-  unitPriceCents: number;
-  cumulativeQuantity?: number;
-  previousQuantity?: number;
-}
-
-interface CreateInvoiceDto {
-  projectId: string;
-  clientId: string;
-  type: string;
-  vatRate?: number;
-  retentionRate?: number;
-  lines: InvoiceLineDto[];
-  notes?: string;
-  paymentTerms?: string;
-}
-
-interface RecordPaymentDto {
-  amountCents: number;
-  paymentDate: string;
-  paymentMethod: string;
-  reference?: string;
-}
 
 interface InvoiceFilters {
   page?: number;
@@ -63,10 +37,25 @@ interface PlusValueFilters {
   status?: string;
 }
 
-interface CreatePlusValueDto {
-  projectId: string;
-  description: string;
-  amountCents: number;
+const INVOICE_TRANSITIONS: Record<string, string[]> = {
+  draft: ['sent', 'cancelled'],
+  sent: ['overdue'],
+  partially_paid: ['overdue'],
+  overdue: [],
+  paid: [],
+  cancelled: [],
+};
+const PAYABLE_STATUSES = ['sent', 'partially_paid', 'overdue'];
+
+/** Next gapless number YYYY-NNN for the current year; caller must hold the company's invoice lock. */
+async function nextInvoiceNumber(queryRunner: QueryRunner, companyId: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const [{ max }] = await queryRunner.query(
+    `SELECT MAX(substring(invoice_number from '[0-9]+$')::int) AS max
+     FROM invoice WHERE company_id = $1 AND invoice_number LIKE $2`,
+    [companyId, `${year}-%`],
+  );
+  return `${year}-${String((max ?? 0) + 1).padStart(3, '0')}`;
 }
 
 @Injectable()
@@ -133,7 +122,11 @@ export class InvoicingService {
       relations: ['lines', 'project', 'client', 'referenceInvoice'],
     });
     if (!invoice) throw new NotFoundError('Invoice', id);
-    return invoice;
+    const payments = await this.dataSource.getRepository(Payment).find({
+      where: { invoiceId: id, companyId },
+      order: { paymentDate: 'ASC' },
+    });
+    return Object.assign(invoice, { payments });
   }
 
   /* ═══════════════════════════════════════════════
@@ -159,19 +152,7 @@ export class InvoicingService {
       const lockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0);
       await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
 
-      const currentYear = new Date().getFullYear();
-      const maxResult = await queryRunner.query(
-        `SELECT MAX(invoice_number) as max_num FROM invoice
-         WHERE company_id = $1 AND invoice_number LIKE $2`,
-        [companyId, `${currentYear}-%`],
-      );
-
-      let nextSeq = 1;
-      if (maxResult?.[0]?.max_num) {
-        const parts = (maxResult[0].max_num as string).split('-');
-        nextSeq = parseInt(parts[1], 10) + 1;
-      }
-      const invoiceNumber = `${currentYear}-${String(nextSeq).padStart(3, '0')}`;
+      const invoiceNumber = await nextInvoiceNumber(queryRunner, companyId);
 
       /* ── Build lines and compute totals ── */
       const isSituation = dto.type === 'situation';
@@ -185,6 +166,11 @@ export class InvoicingService {
 
         if (isSituation && l.cumulativeQuantity != null && l.previousQuantity != null) {
           periodQuantity = l.cumulativeQuantity - l.previousQuantity;
+          if (periodQuantity < 0) {
+            throw new ValidationError(
+              `Line ${i + 1}: cumulative quantity is lower than the previously invoiced quantity.`,
+            );
+          }
           totalPriceCents = Math.round(periodQuantity * l.unitPriceCents);
         } else {
           totalPriceCents = Math.round(l.quantity * l.unitPriceCents);
@@ -283,6 +269,12 @@ export class InvoicingService {
         'Cannot create a credit note for a credit note.',
       );
     }
+    if (original.status === 'draft' || original.status === 'cancelled') {
+      throw new BusinessRuleError(
+        'CREDIT_NOTE_NOT_ISSUED',
+        'Only issued invoices can be credited. Cancel a draft invoice instead.',
+      );
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -293,19 +285,19 @@ export class InvoicingService {
       const lockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0);
       await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
 
-      const currentYear = new Date().getFullYear();
-      const maxResult = await queryRunner.query(
-        `SELECT MAX(invoice_number) as max_num FROM invoice
-         WHERE company_id = $1 AND invoice_number LIKE $2`,
-        [companyId, `${currentYear}-%`],
-      );
+      const invoiceNumber = await nextInvoiceNumber(queryRunner, companyId);
 
-      let nextSeq = 1;
-      if (maxResult?.[0]?.max_num) {
-        const parts = (maxResult[0].max_num as string).split('-');
-        nextSeq = parseInt(parts[1], 10) + 1;
+      const [existingCredit] = await queryRunner.query(
+        `SELECT invoice_number FROM invoice
+         WHERE company_id = $1 AND reference_invoice_id = $2 AND type = 'credit_note'`,
+        [companyId, original.id],
+      );
+      if (existingCredit) {
+        throw new BusinessRuleError(
+          'CREDIT_NOTE_EXISTS',
+          `Invoice ${original.invoiceNumber} was already credited by ${existingCredit.invoice_number}.`,
+        );
       }
-      const invoiceNumber = `${currentYear}-${String(nextSeq).padStart(3, '0')}`;
 
       /* ── Negate amounts ── */
       const creditNote = queryRunner.manager.create(Invoice, {
@@ -388,6 +380,12 @@ export class InvoicingService {
         'Only draft invoices can be cancelled. Sent invoices require a credit note.',
       );
     }
+    if (!(INVOICE_TRANSITIONS[invoice.status] ?? []).includes(status)) {
+      throw new BusinessRuleError(
+        'INVALID_STATUS_TRANSITION',
+        `Cannot move an invoice from '${invoice.status}' to '${status}'.`,
+      );
+    }
 
     invoice.status = status;
 
@@ -409,13 +407,31 @@ export class InvoicingService {
     invoiceId: string,
     dto: RecordPaymentDto,
   ): Promise<Payment> {
-    const invoice = await this.findById(companyId, invoiceId);
-
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      // Row lock so concurrent payments can't overwrite each other's amountPaidCents.
+      const invoice = await queryRunner.manager.findOne(Invoice, {
+        where: { id: invoiceId, companyId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!invoice) throw new NotFoundError('Invoice', invoiceId);
+      if (invoice.type === 'credit_note' || !PAYABLE_STATUSES.includes(invoice.status)) {
+        throw new BusinessRuleError(
+          'INVOICE_NOT_PAYABLE',
+          `Payments can only be recorded on sent invoices (this one is '${invoice.status}').`,
+        );
+      }
+      const outstanding = invoice.totalTtcCents - (invoice.amountPaidCents || 0);
+      if (dto.amountCents > outstanding) {
+        throw new BusinessRuleError(
+          'OVERPAYMENT',
+          `Payment exceeds the outstanding amount of ${(outstanding / 100).toFixed(2)} CHF.`,
+        );
+      }
+
       /* ── Create journal entry for payment ── */
       const bankAccount = await queryRunner.manager.findOne(ChartOfAccounts, {
         where: { companyId, accountNumber: '1020' },
@@ -427,7 +443,9 @@ export class InvoicingService {
       let journalEntryId: string | null = null;
 
       if (bankAccount && receivableAccount) {
-        /* gapless entry number */
+        /* gapless entry number — same lock as manual journal entries */
+        const journalLockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0) + 1;
+        await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [journalLockKey]);
         const maxEntry = await queryRunner.query(
           `SELECT MAX(entry_number) as max_num FROM journal_entry WHERE company_id = $1`,
           [companyId],

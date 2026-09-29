@@ -1,12 +1,14 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Not, Repository } from 'typeorm';
 import { Contract } from './entities/contract.entity';
 import { ContractAmendment } from './entities/contract-amendment.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { Company } from '../company/entities/company.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { ProjectsService } from '../projects/projects.service';
+import type { UpdateContractDto } from './dto/contract.dto';
+import type { AddContractAmendmentDto as AddAmendmentDto } from './dto/contract-amendment.dto';
 
 interface ContractFilters {
   page?: number;
@@ -16,16 +18,14 @@ interface ContractFilters {
   offerId?: string;
 }
 
-interface UpdateContractDto {
-  notes?: string;
-  retentionRate?: number;
-}
-
-interface AddAmendmentDto {
-  description: string;
-  amountDeltaCents?: number;
-  status?: string;
-}
+const CONTRACT_TRANSITIONS: Record<string, string[]> = {
+  draft: ['sent', 'signed', 'terminated'],
+  sent: ['draft', 'signed', 'terminated'],
+  signed: ['active', 'terminated'],
+  active: ['completed', 'terminated'],
+  completed: [],
+  terminated: [],
+};
 
 @Injectable()
 export class ContractsService {
@@ -38,6 +38,7 @@ export class ContractsService {
     private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
+    private readonly dataSource: DataSource,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
   ) {}
@@ -82,13 +83,17 @@ export class ContractsService {
     };
   }
 
-  async findById(companyId: string, id: string): Promise<Contract> {
+  async findById(companyId: string, id: string): Promise<Contract & { projectId: string | null }> {
     const contract = await this.contractRepo.findOne({
       where: { id, companyId },
       relations: ['amendments', 'offer', 'client'],
     });
     if (!contract) throw new NotFoundError('Contract', id);
-    return contract;
+    const [project] = await this.dataSource.query(
+      'SELECT id FROM project WHERE contract_id = $1 AND company_id = $2',
+      [id, companyId],
+    );
+    return Object.assign(contract, { projectId: project?.id ?? null });
   }
 
   async createFromOffer(
@@ -111,33 +116,44 @@ export class ContractsService {
       );
     }
 
-    // 3. Generate reference: CTR-{YEAR}-{sequence}
-    const year = new Date().getFullYear();
-    const existingCount = await this.contractRepo.count({
-      where: { companyId },
-    });
-    const sequence = String(existingCount + 1).padStart(4, '0');
-    const reference = `CTR-${year}-${sequence}`;
-
-    // 4. Get company defaults for retention rate
-    const company = await this.companyRepo.findOne({
-      where: { id: companyId },
-    });
+    const company = await this.companyRepo.findOne({ where: { id: companyId } });
     const retentionRate = company?.defaultRetentionRate ?? 500;
 
-    // 5. Create contract
-    const contract = this.contractRepo.create({
-      companyId,
-      offerId: offer.id,
-      clientId: offer.clientId,
-      reference,
-      status: 'draft',
-      totalTtcCents: offer.totalTtcCents,
-      retentionRate,
-      createdBy: userId,
-    });
+    // Serialise per company so the one-contract-per-offer check and the yearly sequence can't race.
+    return this.dataSource.transaction(async (m) => {
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`contract:${companyId}`]);
 
-    return this.contractRepo.save(contract);
+      const existing = await m.findOne(Contract, {
+        where: { companyId, offerId: offer.id, status: Not('terminated') },
+      });
+      if (existing) {
+        throw new BusinessRuleError(
+          'CONTRACT_EXISTS',
+          `Offer already has contract ${existing.reference}.`,
+        );
+      }
+
+      const prefix = `CTR-${new Date().getFullYear()}-`;
+      const [{ max }] = await m.query(
+        `SELECT MAX(substring(reference from '[0-9]+$')::int) AS max
+         FROM contract WHERE company_id = $1 AND reference LIKE $2`,
+        [companyId, `${prefix}%`],
+      );
+      const reference = `${prefix}${String((max ?? 0) + 1).padStart(4, '0')}`;
+
+      return m.save(
+        m.create(Contract, {
+          companyId,
+          offerId: offer.id,
+          clientId: offer.clientId,
+          reference,
+          status: 'draft',
+          totalTtcCents: offer.totalTtcCents,
+          retentionRate,
+          createdBy: userId,
+        }),
+      );
+    });
   }
 
   async updateStatus(
@@ -147,21 +163,35 @@ export class ContractsService {
     newStatus: string,
   ): Promise<Contract> {
     const contract = await this.findById(companyId, id);
-
-    contract.status = newStatus;
-
-    if (newStatus === 'signed') {
-      contract.signedAt = new Date();
+    const allowed = CONTRACT_TRANSITIONS[contract.status] ?? [];
+    if (!allowed.includes(newStatus)) {
+      throw new BusinessRuleError(
+        'INVALID_STATUS_TRANSITION',
+        `Cannot move a contract from '${contract.status}' to '${newStatus}'.`,
+      );
     }
 
-    const saved = await this.contractRepo.save(contract);
-
-    // If signed, trigger project creation
-    if (newStatus === 'signed') {
-      await this.projectsService.createFromContract(companyId, saved.id, userId);
+    // Conditional update so concurrent requests can't both win the same transition.
+    const result = await this.contractRepo
+      .createQueryBuilder()
+      .update(Contract)
+      .set(newStatus === 'signed' ? { status: newStatus, signedAt: () => 'NOW()' } : { status: newStatus })
+      .where('id = :id AND company_id = :companyId AND status = :from', { id, companyId, from: contract.status })
+      .execute();
+    if (!result.affected) {
+      throw new BusinessRuleError('STATUS_CHANGED', 'The contract status was changed by someone else. Reload and retry.');
     }
 
-    return this.findById(companyId, saved.id);
+    if (newStatus === 'signed') {
+      try {
+        await this.projectsService.createFromContract(companyId, id, userId);
+      } catch (err) {
+        await this.contractRepo.update({ id, companyId }, { status: contract.status, signedAt: contract.signedAt });
+        throw err;
+      }
+    }
+
+    return this.findById(companyId, id);
   }
 
   async addAmendment(

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, apiPost, apiPut, ApiError, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiPatch, ApiError, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -41,7 +41,7 @@ interface Contract {
   status: string;
   totalTtcCents: number;
   retentionRate: number;
-  eSignatureStatus: string;
+  esignatureStatus: string;
   signedAt?: string;
   notes?: string;
   amendments?: Amendment[];
@@ -63,11 +63,11 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   terminated: { bg: '#fee2e2', fg: '#991b1b' },
 };
 
+// DB CHECK contract_amendment.status
 const AMENDMENT_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   draft: { bg: '#f3f4f6', fg: '#374151' },
-  pending: { bg: '#fef3c7', fg: '#92400e' },
-  approved: { bg: '#dcfce7', fg: '#166534' },
-  rejected: { bg: '#fee2e2', fg: '#991b1b' },
+  sent: { bg: '#fef3c7', fg: '#92400e' },
+  signed: { bg: '#dcfce7', fg: '#166534' },
 };
 
 /* ------------------------------------------------------------------ */
@@ -126,7 +126,7 @@ export default function Contracts() {
   const [showAmendmentForm, setShowAmendmentForm] = useState(false);
   const [amendmentForm, setAmendmentForm] = useState({
     description: '',
-    amountDeltaCents: 0,
+    amountDeltaChf: '',
   });
 
   /* Notes editing */
@@ -172,7 +172,7 @@ export default function Contracts() {
   };
 
   const createMutation = useMutation({
-    mutationFn: (data: { offerId: string }) => apiPost<Contract>('/contracts', data),
+    mutationFn: (data: { offerId: string }) => apiPost<Contract>('/contracts/from-offer', data),
     onSuccess: (newContract) => {
       queryClient.invalidateQueries({ queryKey: ['contracts'] });
       setShowForm(false);
@@ -182,22 +182,28 @@ export default function Contracts() {
   });
 
   const signMutation = useMutation({
-    mutationFn: () => apiPut(`/contracts/${selectedContractId}`, { status: 'signed' }),
+    mutationFn: () => apiPatch(`/contracts/${selectedContractId}/status`, { status: 'signed' }),
     onSuccess: invalidateContract,
   });
 
   const addAmendmentMutation = useMutation({
-    mutationFn: (data: typeof amendmentForm) =>
-      apiPost(`/contracts/${selectedContractId}/amendments`, data),
+    // Matches AddContractAmendmentDto: CHF input → signed integer centimes.
+    mutationFn: (data: typeof amendmentForm) => {
+      const chf = Number(data.amountDeltaChf);
+      return apiPost(`/contracts/${selectedContractId}/amendments`, {
+        description: data.description.trim(),
+        amountDeltaCents: Number.isFinite(chf) ? Math.round(chf * 100) : 0,
+      });
+    },
     onSuccess: () => {
       invalidateContract();
       setShowAmendmentForm(false);
-      setAmendmentForm({ description: '', amountDeltaCents: 0 });
+      setAmendmentForm({ description: '', amountDeltaChf: '' });
     },
   });
 
   const updateNotesMutation = useMutation({
-    mutationFn: (notes: string) => apiPut(`/contracts/${selectedContractId}`, { notes }),
+    mutationFn: (notes: string) => apiPatch(`/contracts/${selectedContractId}`, { notes }),
     onSuccess: () => {
       invalidateContract();
       setEditingNotes(false);
@@ -280,6 +286,12 @@ export default function Contracts() {
           </div>
         </div>
 
+        {(signMutation.error || updateNotesMutation.error) && (
+          <div style={{ color: '#ef4444', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
+            {(signMutation.error || updateNotesMutation.error)?.message}
+          </div>
+        )}
+
         {/* Info cards */}
         <div
           style={{
@@ -291,7 +303,7 @@ export default function Contracts() {
         >
           <SummaryCard label="Total TTC" value={`CHF ${formatCHF(c.totalTtcCents ?? 0)}`} highlight />
           <SummaryCard label="Retention Rate" value={`${(c.retentionRate / 100).toFixed(1)}%`} />
-          <SummaryCard label="E-Signature" value={statusLabel(c.eSignatureStatus ?? 'none')} />
+          <SummaryCard label="E-Signature" value={statusLabel(c.esignatureStatus ?? 'none')} />
           <SummaryCard
             label="Signed Date"
             value={c.signedAt ? new Date(c.signedAt).toLocaleDateString('fr-CH') : 'Not signed'}
@@ -368,12 +380,13 @@ export default function Contracts() {
                 <input
                   style={inputStyle}
                   type="number"
-                  placeholder="Amount Delta (centimes)"
-                  value={amendmentForm.amountDeltaCents}
+                  step="0.05"
+                  placeholder="Amount Delta (CHF)"
+                  value={amendmentForm.amountDeltaChf}
                   onChange={(e) =>
                     setAmendmentForm({
                       ...amendmentForm,
-                      amountDeltaCents: Number(e.target.value),
+                      amountDeltaChf: e.target.value,
                     })
                   }
                 />
@@ -381,7 +394,7 @@ export default function Contracts() {
               <button
                 style={buttonStyle}
                 onClick={() =>
-                  amendmentForm.description && addAmendmentMutation.mutate(amendmentForm)
+                  amendmentForm.description.trim() && addAmendmentMutation.mutate(amendmentForm)
                 }
                 disabled={addAmendmentMutation.isPending}
               >
@@ -624,6 +637,8 @@ export default function Contracts() {
       {/* Table */}
       {isLoading ? (
         <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+      ) : error ? (
+        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>

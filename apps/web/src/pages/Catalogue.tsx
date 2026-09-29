@@ -4,18 +4,39 @@ import { apiGet, apiPost, formatCHF, ApiError } from '../lib/api';
 
 interface Article {
   id: string;
-  npkNumber: string;
+  npkNumber: string | null;
   description: string;
   unit: string;
-  category: string;
-  medianPriceCentimes: number;
-  observations: string;
+  category: string | null;
+  medianPriceCents: number | null;
+  observationCount: number;
+}
+
+/** Response of POST /catalogue/import */
+interface ImportResponse {
+  totalRows: number;
+  matchedRows: number;
+  unmatchedRows: number;
 }
 
 interface ImportResult {
   matched: number;
-  created: number;
+  unmatched: number;
   errors: string[];
+}
+
+/** Row shape accepted by POST /catalogue/import (CsvRowDto). */
+interface ImportRow {
+  lineNumber: number;
+  rawText: string;
+  npkNumber?: string;
+  description?: string;
+  unit?: string;
+  quantity?: number;
+  unitPriceCents?: number;
+  totalPriceCents?: number;
+  roomType?: string;
+  floor?: string;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -37,18 +58,56 @@ const buttonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.split('\n').filter((l) => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(';').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
+// Header aliases (normalised: lower-case, no accents/spaces/punctuation) → import field.
+const HEADER_ALIASES: Record<string, keyof Omit<ImportRow, 'lineNumber' | 'rawText'>> = {
+  npk: 'npkNumber', npknumber: 'npkNumber', nonpk: 'npkNumber', position: 'npkNumber', pos: 'npkNumber',
+  description: 'description', designation: 'description', libelle: 'description', texte: 'description',
+  unit: 'unit', unite: 'unit', ut: 'unit', u: 'unit',
+  quantity: 'quantity', quantite: 'quantity', qte: 'quantity', qty: 'quantity',
+  unitprice: 'unitPriceCents', prixunitaire: 'unitPriceCents', pu: 'unitPriceCents', prix: 'unitPriceCents',
+  total: 'totalPriceCents', totalprice: 'totalPriceCents', montant: 'totalPriceCents', prixtotal: 'totalPriceCents',
+  room: 'roomType', roomtype: 'roomType', local: 'roomType', piece: 'roomType',
+  floor: 'floor', etage: 'floor', niveau: 'floor',
+};
+
+const normaliseHeader = (h: string) =>
+  h.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+
+/** Swiss number format: 1'234.50 / 1 234,50 → 1234.5 */
+function parseSwissNumber(v: string): number | undefined {
+  const cleaned = v.replace(/['’\s]/g, '').replace(',', '.');
+  if (!cleaned) return undefined;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Parses a ';'-separated CSV (prices in CHF) into import rows (prices in centimes). */
+function parseCSV(text: string): ImportRow[] {
+  const lines = text.split(/\r?\n/);
+  const headerIndex = lines.findIndex((l) => l.trim());
+  if (headerIndex < 0) return [];
+  const fields = lines[headerIndex].split(';').map((h) => HEADER_ALIASES[normaliseHeader(h)]);
+  const rows: ImportRow[] = [];
+  lines.forEach((line, idx) => {
+    if (idx <= headerIndex || !line.trim()) return;
     const values = line.split(';').map((v) => v.trim());
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      row[h] = values[i] ?? '';
+    const row: ImportRow = { lineNumber: idx + 1, rawText: line };
+    fields.forEach((field, i) => {
+      const value = values[i] ?? '';
+      if (!field || !value) return;
+      if (field === 'quantity') {
+        const n = parseSwissNumber(value);
+        if (n !== undefined) row.quantity = n;
+      } else if (field === 'unitPriceCents' || field === 'totalPriceCents') {
+        const n = parseSwissNumber(value);
+        if (n !== undefined) row[field] = Math.round(n * 100);
+      } else {
+        row[field] = value;
+      }
     });
-    return row;
+    rows.push(row);
   });
+  return rows;
 }
 
 export default function Catalogue() {
@@ -61,17 +120,16 @@ export default function Catalogue() {
   const { data: articles = [], isLoading, error } = useQuery<Article[], ApiError>({
     queryKey: ['catalogue', categoryFilter],
     queryFn: () => {
-      const params = categoryFilter ? `?category=${encodeURIComponent(categoryFilter)}` : '';
-      return apiGet<Article[]>(`/catalogue${params}`);
+      const params = categoryFilter ? `&category=${encodeURIComponent(categoryFilter)}` : '';
+      return apiGet<Article[]>(`/catalogue/articles?limit=200${params}`);
     },
     retry: false,
   });
 
-  const importMutation = useMutation({
-    mutationFn: (rows: Record<string, string>[]) =>
-      apiPost<ImportResult>('/catalogue/import', { rows }),
+  const importMutation = useMutation<ImportResponse, ApiError, { filename: string; rows: ImportRow[] }>({
+    mutationFn: (payload) => apiPost<ImportResponse>('/catalogue/import', payload),
     onSuccess: (result) => {
-      setImportResult(result);
+      setImportResult({ matched: result.matchedRows, unmatched: result.unmatchedRows, errors: [] });
       queryClient.invalidateQueries({ queryKey: ['catalogue'] });
     },
   });
@@ -82,24 +140,25 @@ export default function Catalogue() {
     const text = await file.text();
     const rows = parseCSV(text);
     if (rows.length === 0) {
-      setImportResult({ matched: 0, created: 0, errors: ['No valid rows found in CSV'] });
+      setImportResult({ matched: 0, unmatched: 0, errors: ['No valid rows found in CSV'] });
       return;
     }
-    importMutation.mutate(rows);
+    importMutation.mutate({ filename: file.name, rows });
     // Reset file input so same file can be selected again
     if (fileRef.current) fileRef.current.value = '';
   };
 
   // Collect unique categories for filter
-  const categories = [...new Set(articles.map((a) => a.category).filter(Boolean))].sort();
+  const categories = [
+    ...new Set(articles.map((a) => a.category).filter((c): c is string => !!c)),
+  ].sort();
 
   const filtered = articles.filter((a) => {
     if (!search) return true;
     const term = search.toLowerCase();
     return (
-      a.npkNumber.toLowerCase().includes(term) ||
-      a.description.toLowerCase().includes(term) ||
-      a.observations?.toLowerCase().includes(term)
+      (a.npkNumber ?? '').toLowerCase().includes(term) ||
+      a.description.toLowerCase().includes(term)
     );
   });
 
@@ -206,7 +265,7 @@ export default function Catalogue() {
           }}
         >
           <strong>Import complete:</strong> {importResult.matched} matched,{' '}
-          {importResult.created} created
+          {importResult.unmatched} unmatched
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '8px 0 0', paddingLeft: 16 }}>
               {importResult.errors.map((err, i) => (
@@ -412,7 +471,7 @@ export default function Catalogue() {
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {formatCHF(article.medianPriceCentimes)}
+                    {article.medianPriceCents != null ? formatCHF(article.medianPriceCents) : '—'}
                   </td>
                   <td
                     style={{
@@ -422,7 +481,7 @@ export default function Catalogue() {
                       fontSize: 13,
                     }}
                   >
-                    {article.observations}
+                    {article.observationCount}
                   </td>
                 </tr>
               ))}

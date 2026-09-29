@@ -23,7 +23,10 @@ export class CompanyService {
     companyId: string,
     data: Partial<Company>,
   ): Promise<Company> {
-    await this.companyRepo.update(companyId, data);
+    // An empty update makes TypeORM throw UpdateValuesMissingError (500).
+    if (Object.keys(data).length > 0) {
+      await this.companyRepo.update(companyId, data);
+    }
     return this.findById(companyId);
   }
 }

@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../decorators/roles.decorator';
+import { OFFICE_ROLES, ROLES_KEY } from '../decorators/roles.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -16,13 +16,13 @@ export class RolesGuard implements CanActivate {
       ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (!requiredRoles || requiredRoles.length === 0) return true;
-
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    if (!user) return false;
+    // Only @Public() routes reach here without a user; JwtAuthGuard rejects the rest.
+    if (!user) return true;
 
-    if (!requiredRoles.includes(user.role)) {
+    const allowed = requiredRoles?.length ? requiredRoles : OFFICE_ROLES;
+    if (!allowed.includes(user.role)) {
       throw new ForbiddenException('Insufficient role');
     }
 

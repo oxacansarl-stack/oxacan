@@ -13,88 +13,75 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { ALL_ROLES, Roles } from '../../common/decorators/roles.decorator';
 import { DailyReportService } from './daily-report.service';
+import { ScopeUser, parsePaging } from './access-scope.service';
+import { CreateDailyReportDto, UpdateDailyReportDto } from './dto/daily-report.dto';
+
+const OPTIONAL_UUID = new ParseUUIDPipe({ optional: true });
 
 @Controller('daily-reports')
 export class DailyReportController {
   constructor(private readonly service: DailyReportService) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findAll(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('userId') userId?: string,
-    @Query('projectId') projectId?: string,
+    @Query('userId', OPTIONAL_UUID) userId?: string,
+    @Query('projectId', OPTIONAL_UUID) projectId?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
   ) {
-    return this.service.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-      userId,
-      projectId,
-      dateFrom,
-      dateTo,
-    });
+    return this.service.findAll(
+      { ...user, companyId },
+      { ...parsePaging(page, limit), userId, projectId, dateFrom, dateTo },
+    );
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async findById(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.service.findById(companyId, id);
+    return this.service.findById({ ...user, companyId }, id);
   }
 
+  /** The author is always the caller (from the token), never the body. */
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async create(
     @CompanyId() companyId: string,
-    @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId: string;
-      date: string;
-      workDescription?: string;
-      materialsUsed?: Record<string, unknown>[];
-      weather?: string;
-      temperatureCelsius?: number;
-      notes?: string;
-      photos?: Record<string, unknown>[];
-    },
+    @CurrentUser() user: ScopeUser,
+    @Body() body: CreateDailyReportDto,
   ) {
     return this.service.create(companyId, user.id, body);
   }
 
   @Put(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async update(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      workDescription?: string;
-      materialsUsed?: Record<string, unknown>[];
-      weather?: string;
-      temperatureCelsius?: number;
-      notes?: string;
-      photos?: Record<string, unknown>[];
-    },
+    @Body() body: UpdateDailyReportDto,
   ) {
-    return this.service.update(companyId, id, body);
+    return this.service.update({ ...user, companyId }, id, body);
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER')
+  @Roles(...ALL_ROLES)
   async delete(
     @CompanyId() companyId: string,
+    @CurrentUser() user: ScopeUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.service.delete(companyId, id);
+    await this.service.delete({ ...user, companyId }, id);
     return { deleted: true };
   }
 }

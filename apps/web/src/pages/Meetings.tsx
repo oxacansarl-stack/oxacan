@@ -23,19 +23,19 @@ interface ActionItem {
   description: string;
   responsible: string;
   dueDate?: string;
-  status: 'open' | 'in_progress' | 'done';
+  status: 'open' | 'in_progress' | 'done' | 'cancelled';
 }
 
 interface Meeting {
   id: string;
-  number?: number;
+  meetingNumber?: number;
   projectId: string;
   project?: { name: string; reference?: string };
   meetingDate: string;
   location?: string;
   agenda?: string;
   minutes?: string;
-  status: 'scheduled' | 'completed';
+  status: 'scheduled' | 'in_progress' | 'completed';
   attendees?: Attendee[];
   actions?: ActionItem[];
   createdAt: string;
@@ -189,9 +189,7 @@ export default function Meetings() {
       if (projectFilter) params.set('projectId', projectFilter);
       if (statusFilter) params.set('status', statusFilter);
       const qs = params.toString() ? `?${params.toString()}` : '';
-      const res = await apiGet<Meeting[] | { data: Meeting[] }>(`/meetings${qs}`);
-      const list = Array.isArray(res) ? res : res.data ?? [];
-      setMeetings(list);
+      setMeetings(await apiGet<Meeting[]>(`/meetings${qs}`));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load meetings');
     } finally {
@@ -201,9 +199,7 @@ export default function Meetings() {
 
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await apiGet<Project[] | { data: Project[] }>('/projects');
-      const list = Array.isArray(res) ? res : res.data ?? [];
-      setProjects(list);
+      setProjects(await apiGet<Project[]>('/projects?limit=100'));
     } catch {
       /* projects dropdown is best-effort */
     }
@@ -251,8 +247,8 @@ export default function Meetings() {
         projectId: createForm.projectId,
         meetingDate: createForm.meetingDate,
       };
-      if (createForm.location) body.location = createForm.location;
-      if (createForm.agenda) body.agenda = createForm.agenda;
+      if (createForm.location.trim()) body.location = createForm.location.trim();
+      if (createForm.agenda.trim()) body.agenda = createForm.agenda;
       await apiPost('/meetings', body);
       setCreateForm({ projectId: '', meetingDate: '', location: '', agenda: '' });
       setShowCreate(false);
@@ -534,7 +530,7 @@ export default function Meetings() {
                     }}
                   >
                     <td style={{ ...tdStyle, fontWeight: 500 }}>
-                      {m.number ?? m.id.slice(0, 8)}
+                      {m.meetingNumber ?? m.id.slice(0, 8)}
                     </td>
                     <td style={tdStyle}>{formatDate(m.meetingDate)}</td>
                     <td style={tdStyle}>{m.project?.name ?? '-'}</td>

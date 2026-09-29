@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, formatCHF } from '../lib/api';
+import { apiGet, apiPost, ApiError, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -11,33 +11,43 @@ interface Project {
   reference?: string;
 }
 
+/** Row shape of GET /timekeeping (date is YYYY-MM-DD, times are HH:MM:SS). */
 interface TimeEntry {
   id: string;
   userId: string;
+  user?: { id: string; firstName: string; lastName: string };
   projectId: string;
   project?: { name: string; reference?: string };
-  taskId?: string;
-  category: 'normal' | 'travel';
-  clockIn: string;
-  clockOut?: string;
+  taskId?: string | null;
+  category: string;
+  date: string;
+  startTime: string;
+  endTime: string | null;
   breakMinutes: number;
-  normalMinutes: number;
+  normalMinutes: number | null;
   overtimeMinutes: number;
   travelMinutes: number;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
-  costCents: number;
-  notes?: string;
+  costCents: number | null;
+  notes?: string | null;
   createdAt: string;
 }
 
+/** GET /timekeeping/summary/weekly */
 interface WeeklySummary {
-  totalNormalMinutes: number;
-  totalOvertimeMinutes: number;
-  totalTravelMinutes: number;
-  totalBreakMinutes: number;
-  totalCostCents: number;
-  entriesCount: number;
+  totalNormal: number;
+  totalOvertime: number;
+  totalTravel: number;
+  totalCost: number;
+  entriesByDay: Record<string, TimeEntry[]>;
 }
+
+interface Profile {
+  id: string;
+  role: string;
+}
+
+const APPROVER_ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'];
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -109,15 +119,25 @@ function formatMinutes(mins: number): string {
   return `${h}:${m.toString().padStart(2, '0')}`;
 }
 
-function formatTime(iso: string): string {
-  if (!iso) return '-';
-  const d = new Date(iso);
-  return d.toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' });
+/** 'HH:MM:SS' → 'HH:MM' */
+function formatTime(time: string | null): string {
+  if (!time) return '-';
+  return time.slice(0, 5);
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('fr-CH');
+/** 'YYYY-MM-DD' → local date without timezone shift */
+function formatDate(date: string): string {
+  if (!date) return '-';
+  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('fr-CH');
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return `Not allowed: ${err.message}`;
+    return err.message || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 function statusLabel(s: string): string {
@@ -151,55 +171,74 @@ export default function Timekeeping() {
   // Weekly summary
   const [summary, setSummary] = useState<WeeklySummary | null>(null);
 
-  // ---- Load projects ----
+  // Caller (for own drafts / active entry and approve rights); null until loaded or if unavailable
+  const [me, setMe] = useState<Profile | null>(null);
+  const [myDrafts, setMyDrafts] = useState<TimeEntry[]>([]);
+  const canApprove = me ? APPROVER_ROLES.includes(me.role) : true;
+  // Labour cost reveals pay rates; the API only returns it to office roles.
+  const showCost = me ? ['ADMIN', 'PROJECT_MANAGER'].includes(me.role) : false;
+
+  // ---- Load profile & projects ----
   useEffect(() => {
-    apiGet<{ data: Project[] } | Project[]>('/projects')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data;
-        setProjects(list);
-      })
+    apiGet<Profile>('/auth/profile')
+      .then(setMe)
+      .catch(() => {});
+    apiGet<Project[]>('/projects')
+      .then((list) => setProjects(list ?? []))
       .catch(() => {});
   }, []);
+
+  // ---- Load the caller's own drafts (active clock-in + submittable entries) ----
+  const loadMyDrafts = useCallback(() => {
+    if (!me) return;
+    apiGet<TimeEntry[]>(`/timekeeping?userId=${me.id}&status=draft&limit=100`)
+      .then((list) => {
+        setMyDrafts(list ?? []);
+        setActiveEntry((list ?? []).find((e) => !e.endTime) || null);
+      })
+      .catch(() => {});
+  }, [me]);
+
 
   // ---- Load entries ----
   const loadEntries = useCallback(() => {
     setLoading(true);
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100' });
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
     if (dateFrom) params.set('dateFrom', dateFrom);
     if (dateTo) params.set('dateTo', dateTo);
-    const qs = params.toString() ? `?${params.toString()}` : '';
 
-    apiGet<{ data: TimeEntry[] }>(`/timekeeping${qs}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data ?? [];
-        setEntries(list);
-        // Check for active (clocked-in) entry
-        const active = list.find((e: TimeEntry) => !e.clockOut && e.status === 'draft');
-        setActiveEntry(active || null);
+    apiGet<TimeEntry[]>(`/timekeeping?${params.toString()}`)
+      .then((list) => {
+        setEntries(list ?? []);
+        // Without a profile, fall back to the first open draft in the list.
+        if (!me) setActiveEntry((list ?? []).find((e) => !e.endTime && e.status === 'draft') || null);
         setError('');
       })
-      .catch((err) => setError(err.message || 'Failed to load entries'))
+      .catch((err) => setError(errorMessage(err, 'Failed to load entries')))
       .finally(() => setLoading(false));
-  }, [statusFilter, dateFrom, dateTo]);
+    loadMyDrafts();
+  }, [statusFilter, dateFrom, dateTo, me, loadMyDrafts]);
 
   useEffect(() => {
     loadEntries();
   }, [loadEntries]);
 
-  // ---- Load weekly summary ----
+  // ---- Load weekly summary (the caller's own week) ----
   useEffect(() => {
-    apiGet<{ data: WeeklySummary }>('/timekeeping/summary/weekly')
-      .then((res) => {
-        setSummary(Array.isArray(res) ? null : res.data ?? (res as unknown as WeeklySummary));
-      })
+    apiGet<WeeklySummary>('/timekeeping/summary/weekly')
+      .then(setSummary)
       .catch(() => {});
   }, []);
 
+  const totalBreakMinutes = summary
+    ? Object.values(summary.entriesByDay ?? {}).flat().reduce((sum, e) => sum + (e.breakMinutes || 0), 0)
+    : 0;
+
   // ---- Timer ----
   useEffect(() => {
-    if (activeEntry && !activeEntry.clockOut) {
-      const start = new Date(activeEntry.clockIn).getTime();
+    if (activeEntry && !activeEntry.endTime) {
+      const start = new Date(`${activeEntry.date.slice(0, 10)}T${activeEntry.startTime}`).getTime();
       const tick = () => {
         setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
       };
@@ -226,8 +265,8 @@ export default function Timekeeping() {
       });
       setClockNotes('');
       loadEntries();
-    } catch (err: any) {
-      setError(err.message || 'Clock in failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Clock in failed'));
     } finally {
       setActionLoading(false);
     }
@@ -240,20 +279,27 @@ export default function Timekeeping() {
       await apiPost(`/timekeeping/clock-out/${activeEntry.id}`);
       setActiveEntry(null);
       loadEntries();
-    } catch (err: any) {
-      setError(err.message || 'Clock out failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Clock out failed'));
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleSubmitDrafts = async () => {
+    // Only the caller's own, clocked-out drafts can be submitted.
+    const entryIds = myDrafts.filter((e) => e.endTime).map((e) => e.id);
+    if (me && entryIds.length === 0) {
+      setError('No completed draft entries to submit.');
+      return;
+    }
     setActionLoading(true);
     try {
-      await apiPost('/timekeeping/submit');
+      // Without a profile the ids are unknown: omit them and the API submits all own drafts.
+      await apiPost('/timekeeping/submit', me ? { entryIds } : {});
       loadEntries();
-    } catch (err: any) {
-      setError(err.message || 'Submit failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Submit failed'));
     } finally {
       setActionLoading(false);
     }
@@ -266,8 +312,12 @@ export default function Timekeeping() {
       await apiPost('/timekeeping/approve', { entryIds: Array.from(selected) });
       setSelected(new Set());
       loadEntries();
-    } catch (err: any) {
-      setError(err.message || 'Approve failed');
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 403
+          ? 'You can only approve time entries of your own team members (not your own).'
+          : errorMessage(err, 'Approve failed'),
+      );
     } finally {
       setActionLoading(false);
     }
@@ -282,8 +332,12 @@ export default function Timekeeping() {
       await apiPost('/timekeeping/reject', { entryIds: Array.from(selected), reason });
       setSelected(new Set());
       loadEntries();
-    } catch (err: any) {
-      setError(err.message || 'Reject failed');
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 403
+          ? 'You can only reject time entries of your own team members (not your own).'
+          : errorMessage(err, 'Reject failed'),
+      );
     } finally {
       setActionLoading(false);
     }
@@ -346,7 +400,7 @@ export default function Timekeeping() {
                 </span>
               </div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                Started at {formatTime(activeEntry.clockIn)}
+                Started at {formatTime(activeEntry.startTime)}
               </div>
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -414,12 +468,12 @@ export default function Timekeeping() {
       {summary && (
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
           {[
-            { label: 'Normal Hours', value: formatMinutes(summary.totalNormalMinutes), color: '#2563eb' },
-            { label: 'Overtime', value: formatMinutes(summary.totalOvertimeMinutes), color: '#f59e0b' },
-            { label: 'Travel', value: formatMinutes(summary.totalTravelMinutes), color: '#8b5cf6' },
-            { label: 'Break', value: formatMinutes(summary.totalBreakMinutes), color: '#6b7280' },
-            { label: 'Total Cost', value: `CHF ${formatCHF(summary.totalCostCents)}`, color: '#16a34a' },
-          ].map((item) => (
+            { label: 'Normal Hours', value: formatMinutes(summary.totalNormal), color: '#2563eb' },
+            { label: 'Overtime', value: formatMinutes(summary.totalOvertime), color: '#f59e0b' },
+            { label: 'Travel', value: formatMinutes(summary.totalTravel), color: '#8b5cf6' },
+            { label: 'Break', value: formatMinutes(totalBreakMinutes), color: '#6b7280' },
+            { label: 'Total Cost', value: `CHF ${formatCHF(summary.totalCost)}`, color: '#16a34a' },
+          ].filter((item) => showCost || item.label !== 'Total Cost').map((item) => (
             <div
               key={item.label}
               style={{
@@ -486,7 +540,7 @@ export default function Timekeeping() {
         <button style={{ ...btnPrimary }} onClick={handleSubmitDrafts} disabled={actionLoading}>
           Submit All Drafts
         </button>
-        {selected.size > 0 && (
+        {canApprove && selected.size > 0 && (
           <>
             <button style={{ ...btnSuccess }} onClick={handleApprove} disabled={actionLoading}>
               Approve ({selected.size})
@@ -512,7 +566,7 @@ export default function Timekeeping() {
                   onChange={toggleSelectAll}
                 />
               </th>
-              {['Date', 'Project', 'Start', 'End', 'Break', 'Normal', 'Overtime', 'Travel', 'Status', 'Cost'].map((h) => (
+              {['Date', 'Project', 'Start', 'End', 'Break', 'Normal', 'Overtime', 'Travel', 'Status', ...(showCost ? ['Cost'] : [])].map((h) => (
                 <th
                   key={h}
                   style={{
@@ -556,16 +610,16 @@ export default function Timekeeping() {
                     />
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                    {formatDate(entry.clockIn)}
+                    {formatDate(entry.date)}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14 }}>
                     {entry.project?.name || '-'}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                    {formatTime(entry.clockIn)}
+                    {formatTime(entry.startTime)}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                    {entry.clockOut ? formatTime(entry.clockOut) : (
+                    {entry.endTime ? formatTime(entry.endTime) : (
                       <span style={{ color: '#16a34a', fontWeight: 500, fontSize: 12 }}>Active</span>
                     )}
                   </td>
@@ -573,7 +627,7 @@ export default function Timekeeping() {
                     {formatMinutes(entry.breakMinutes)}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                    {formatMinutes(entry.normalMinutes)}
+                    {formatMinutes(entry.normalMinutes ?? 0)}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
                     {formatMinutes(entry.overtimeMinutes)}
@@ -596,9 +650,11 @@ export default function Timekeeping() {
                       {statusLabel(entry.status)}
                     </span>
                   </td>
-                  <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    CHF {formatCHF(entry.costCents ?? 0)}
-                  </td>
+                  {showCost && (
+                    <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      CHF {formatCHF(entry.costCents ?? 0)}
+                    </td>
+                  )}
                 </tr>
               );
             })}

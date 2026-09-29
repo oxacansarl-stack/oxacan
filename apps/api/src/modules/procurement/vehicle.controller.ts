@@ -10,7 +10,8 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { CompanyId } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { OFFICE_ROLES, Roles, SITE_LEAD_ROLES } from '../../common/decorators/roles.decorator';
+import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicle.dto';
 import { VehicleService } from './vehicle.service';
 
 @Controller('vehicles')
@@ -18,7 +19,7 @@ export class VehicleController {
   constructor(private readonly service: VehicleService) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...SITE_LEAD_ROLES)
   async findAll(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -31,7 +32,7 @@ export class VehicleController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...SITE_LEAD_ROLES)
   async findById(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -40,46 +41,26 @@ export class VehicleController {
   }
 
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async create(
     @CompanyId() companyId: string,
-    @Body()
-    body: {
-      registration: string;
-      make?: string;
-      model?: string;
-      assignedTeamId?: string;
-      assignedProjectId?: string;
-      insuranceExpiry?: string;
-      nextServiceDate?: string;
-      odometerKm?: number;
-    },
+    @Body() body: CreateVehicleDto,
   ) {
     return this.service.create(companyId, body);
   }
 
   @Put(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async update(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      registration?: string;
-      make?: string;
-      model?: string;
-      assignedTeamId?: string;
-      assignedProjectId?: string;
-      insuranceExpiry?: string;
-      nextServiceDate?: string;
-      odometerKm?: number;
-    },
+    @Body() body: UpdateVehicleDto,
   ) {
     return this.service.update(companyId, id, body);
   }
 
   @Delete(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async delete(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPut, ApiError, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiPatch, ApiError, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -15,9 +15,15 @@ interface Client {
 interface Lot {
   id: string;
   name: string;
-  description?: string;
-  budgetCents: number;
-  taskCount?: number;
+  description?: string | null;
+  /** Absent for field roles (financials are stripped server-side). */
+  budgetCents?: number | null;
+}
+
+interface UserRef {
+  id: string;
+  firstName: string;
+  lastName: string;
 }
 
 interface Milestone {
@@ -36,17 +42,23 @@ interface TaskDependency {
 interface Task {
   id: string;
   title: string;
-  description?: string;
-  lotId: string;
-  lotName?: string;
+  description?: string | null;
+  lotId: string | null;
   status: string;
   priority: string;
-  assignedTo?: string;
-  plannedStart?: string;
-  plannedEnd?: string;
-  estimatedHours?: number;
-  progress: number;
+  assignedTo?: string | null;
+  assignee?: UserRef | null;
+  plannedStart?: string | null;
+  plannedEnd?: string | null;
+  estimatedHours?: number | null;
+  progressPercent: number;
   dependencies?: TaskDependency[];
+}
+
+/** Raw shape of GET /projects/:id/gantt. */
+interface GanttApiResponse {
+  tasks: (Task & { lot?: { id: string; name: string } | null })[];
+  dependencies: { predecessorId: string; successorId: string; type: string; lagDays: number }[];
 }
 
 interface GanttTask {
@@ -78,10 +90,11 @@ interface Project {
   clientId: string;
   client?: Client;
   status: string;
-  progress: number;
-  budgetHtCents: number;
+  progressPercent: number;
+  /** Absent for field roles (financials are stripped server-side). */
+  budgetHtCents?: number | null;
   actualCostCents?: number;
-  manager?: string;
+  manager?: UserRef | null;
   startDate?: string;
   endDate?: string;
   lots?: Lot[];
@@ -108,14 +121,14 @@ const TASK_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   in_progress: { bg: '#dbeafe', fg: '#1e40af' },
   done: { bg: '#dcfce7', fg: '#166534' },
   validated: { bg: '#d1fae5', fg: '#065f46' },
-  blocked: { bg: '#fee2e2', fg: '#991b1b' },
+  cancelled: { bg: '#fee2e2', fg: '#991b1b' },
 };
 
 const PRIORITY_COLORS: Record<string, { bg: string; fg: string }> = {
   low: { bg: '#f3f4f6', fg: '#6b7280' },
-  medium: { bg: '#fef3c7', fg: '#92400e' },
+  normal: { bg: '#fef3c7', fg: '#92400e' },
   high: { bg: '#fed7aa', fg: '#9a3412' },
-  critical: { bg: '#fee2e2', fg: '#991b1b' },
+  urgent: { bg: '#fee2e2', fg: '#991b1b' },
 };
 
 const MILESTONE_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
@@ -125,15 +138,16 @@ const MILESTONE_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   overdue: { bg: '#fee2e2', fg: '#991b1b' },
 };
 
-const TASK_STATUSES = ['todo', 'in_progress', 'done', 'validated', 'blocked'] as const;
-const TASK_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+// Must match the DB CHECK constraints on task.status / task.priority.
+const TASK_STATUSES = ['todo', 'in_progress', 'done', 'validated', 'cancelled'] as const;
+const TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
 const GANTT_BAR_COLORS: Record<string, string> = {
   todo: '#9ca3af',
   in_progress: '#3b82f6',
   done: '#22c55e',
   validated: '#059669',
-  blocked: '#ef4444',
+  cancelled: '#ef4444',
 };
 
 /* ------------------------------------------------------------------ */
@@ -175,6 +189,29 @@ function statusLabel(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function userName(u?: UserRef | null): string {
+  return u ? `${u.firstName} ${u.lastName}`.trim() : '';
+}
+
+/** CHF amount as integer centimes, or undefined when not a positive number. */
+function chfToCents(chf: string): number | undefined {
+  const n = Number(chf);
+  return chf.trim() !== '' && Number.isFinite(n) && n > 0 ? Math.round(n * 100) : undefined;
+}
+
+function todayIso(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Drops keys whose value is '' / null / undefined so optional DTO fields are simply omitted. */
+function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== '' && v !== null && v !== undefined),
+  ) as Partial<T>;
+}
+
 function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
@@ -205,7 +242,7 @@ export default function ProjectDetail() {
 
   /* --- Form states --- */
   const [showLotForm, setShowLotForm] = useState(false);
-  const [lotForm, setLotForm] = useState({ name: '', description: '', budgetCents: 0 });
+  const [lotForm, setLotForm] = useState({ name: '', description: '', budgetChf: '' });
 
   const [showMilestoneForm, setShowMilestoneForm] = useState(false);
   const [milestoneForm, setMilestoneForm] = useState({ name: '', targetDate: '' });
@@ -215,7 +252,7 @@ export default function ProjectDetail() {
     title: '',
     description: '',
     lotId: '',
-    priority: 'medium',
+    priority: 'normal',
     plannedStart: '',
     plannedEnd: '',
     estimatedHours: '' as string | number,
@@ -239,7 +276,28 @@ export default function ProjectDetail() {
 
   const { data: ganttData } = useQuery<GanttData, ApiError>({
     queryKey: ['project-gantt', id],
-    queryFn: () => apiGet<GanttData>(`/projects/${id}/gantt`),
+    queryFn: async () => {
+      const raw = await apiGet<GanttApiResponse>(`/projects/${id}/gantt`);
+      return {
+        tasks: raw.tasks
+          .filter((t) => t.plannedStart && t.plannedEnd)
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            lotId: t.lotId ?? '',
+            lotName: t.lot?.name ?? '',
+            status: t.status,
+            plannedStart: t.plannedStart as string,
+            plannedEnd: t.plannedEnd as string,
+            dependencies: raw.dependencies
+              .filter((d) => d.successorId === t.id)
+              .map((d) => d.predecessorId),
+          })),
+        milestones: (project?.milestones ?? [])
+          .filter((m) => m.targetDate)
+          .map((m) => ({ id: m.id, name: m.name, date: m.targetDate })),
+      };
+    },
     enabled: !!id && activeTab === 'gantt',
     retry: false,
   });
@@ -249,16 +307,25 @@ export default function ProjectDetail() {
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['project', id] });
 
   const addLotMutation = useMutation({
-    mutationFn: (data: typeof lotForm) => apiPost(`/projects/${id}/lots`, data),
+    mutationFn: (data: typeof lotForm) =>
+      apiPost(
+        `/projects/${id}/lots`,
+        compact({
+          name: data.name.trim(),
+          description: data.description.trim(),
+          budgetCents: chfToCents(data.budgetChf),
+        }),
+      ),
     onSuccess: () => {
       invalidate();
       setShowLotForm(false);
-      setLotForm({ name: '', description: '', budgetCents: 0 });
+      setLotForm({ name: '', description: '', budgetChf: '' });
     },
   });
 
   const addMilestoneMutation = useMutation({
-    mutationFn: (data: typeof milestoneForm) => apiPost(`/projects/${id}/milestones`, data),
+    mutationFn: (data: typeof milestoneForm) =>
+      apiPost(`/projects/${id}/milestones`, { name: data.name.trim(), targetDate: data.targetDate }),
     onSuccess: () => {
       invalidate();
       setShowMilestoneForm(false);
@@ -268,7 +335,10 @@ export default function ProjectDetail() {
 
   const completeMilestoneMutation = useMutation({
     mutationFn: (milestoneId: string) =>
-      apiPut(`/projects/${id}/milestones/${milestoneId}`, { status: 'completed' }),
+      apiPatch(`/projects/${id}/milestones/${milestoneId}`, {
+        status: 'completed',
+        completedDate: todayIso(),
+      }),
     onSuccess: invalidate,
   });
 
@@ -282,7 +352,7 @@ export default function ProjectDetail() {
       plannedEnd: string;
       estimatedHours: number | null;
       assignedTo: string;
-    }) => apiPost(`/projects/${id}/tasks`, data),
+    }) => apiPost(`/projects/${id}/tasks`, compact(data)),
     onSuccess: () => {
       invalidate();
       setShowTaskForm(false);
@@ -290,7 +360,7 @@ export default function ProjectDetail() {
         title: '',
         description: '',
         lotId: '',
-        priority: 'medium',
+        priority: 'normal',
         plannedStart: '',
         plannedEnd: '',
         estimatedHours: '',
@@ -301,8 +371,11 @@ export default function ProjectDetail() {
 
   const updateTaskStatusMutation = useMutation({
     mutationFn: (data: { taskId: string; status: string }) =>
-      apiPut(`/projects/${id}/tasks/${data.taskId}`, { status: data.status }),
-    onSuccess: invalidate,
+      apiPatch(`/projects/${id}/tasks/${data.taskId}`, { status: data.status }),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ['project-gantt', id] });
+    },
   });
 
   /* --- Derived --- */
@@ -326,6 +399,12 @@ export default function ProjectDetail() {
     return map;
   }, [filteredTasks]);
 
+  const lotTaskCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tasks) if (t.lotId) m.set(t.lotId, (m.get(t.lotId) ?? 0) + 1);
+    return m;
+  }, [tasks]);
+
   const lotNameMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const l of lots) m.set(l.id, l.name);
@@ -342,12 +421,16 @@ export default function ProjectDetail() {
     return <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>;
   }
 
+  if (error && error.status !== 404) {
+    return <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>;
+  }
+
   if (!project) {
     return <div style={{ color: '#ef4444', padding: 20 }}>Project not found</div>;
   }
 
   const colors = STATUS_COLORS[project.status] ?? STATUS_COLORS.planning;
-  const progressPct = Math.min(100, Math.max(0, project.progress ?? 0));
+  const progressPct = Math.min(100, Math.max(0, project.progressPercent ?? 0));
   const progressColor =
     progressPct >= 100 ? '#22c55e' : progressPct >= 50 ? '#2563eb' : '#f59e0b';
 
@@ -440,9 +523,16 @@ export default function ProjectDetail() {
           marginBottom: 32,
         }}
       >
-        <SummaryCard label="Budget HT" value={`CHF ${formatCHF(project.budgetHtCents ?? 0)}`} highlight />
-        <SummaryCard label="Actual Cost" value={`CHF ${formatCHF(project.actualCostCents ?? 0)}`} />
-        <SummaryCard label="Manager" value={project.manager ?? '-'} />
+        <SummaryCard
+          label="Budget HT"
+          value={project.budgetHtCents != null ? `CHF ${formatCHF(project.budgetHtCents)}` : '—'}
+          highlight
+        />
+        <SummaryCard
+          label="Actual Cost"
+          value={project.actualCostCents != null ? `CHF ${formatCHF(project.actualCostCents)}` : '—'}
+        />
+        <SummaryCard label="Manager" value={userName(project.manager) || '-'} />
         <SummaryCard
           label="Start"
           value={project.startDate ? new Date(project.startDate).toLocaleDateString('fr-CH') : '-'}
@@ -539,9 +629,11 @@ export default function ProjectDetail() {
                 <input
                   style={inputStyle}
                   type="number"
-                  placeholder="Budget (centimes)"
-                  value={lotForm.budgetCents}
-                  onChange={(e) => setLotForm({ ...lotForm, budgetCents: Number(e.target.value) })}
+                  min={0}
+                  step="0.05"
+                  placeholder="Budget (CHF)"
+                  value={lotForm.budgetChf}
+                  onChange={(e) => setLotForm({ ...lotForm, budgetChf: e.target.value })}
                 />
               </div>
               <button
@@ -594,10 +686,10 @@ export default function ProjectDetail() {
                       {lot.description || '-'}
                     </td>
                     <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                      CHF {formatCHF(lot.budgetCents ?? 0)}
+                      {lot.budgetCents != null ? `CHF ${formatCHF(lot.budgetCents)}` : '—'}
                     </td>
                     <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                      {lot.taskCount ?? 0}
+                      {lotTaskCounts.get(lot.id) ?? 0}
                     </td>
                   </tr>
                 ))}
@@ -674,6 +766,12 @@ export default function ProjectDetail() {
                   {addMilestoneMutation.error.message}
                 </span>
               )}
+            </div>
+          )}
+
+          {completeMilestoneMutation.error && (
+            <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
+              {completeMilestoneMutation.error.message}
             </div>
           )}
 
@@ -892,7 +990,7 @@ export default function ProjectDetail() {
                 />
                 <input
                   style={inputStyle}
-                  placeholder="Assigned To"
+                  placeholder="Assignee (user ID)"
                   value={taskForm.assignedTo}
                   onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
                 />
@@ -921,6 +1019,12 @@ export default function ProjectDetail() {
                   {addTaskMutation.error.message}
                 </span>
               )}
+            </div>
+          )}
+
+          {updateTaskStatusMutation.error && (
+            <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
+              {updateTaskStatusMutation.error.message}
             </div>
           )}
 
@@ -969,8 +1073,8 @@ export default function ProjectDetail() {
                   <tbody>
                     {lotTasks.map((t) => {
                       const tColors = TASK_STATUS_COLORS[t.status] ?? TASK_STATUS_COLORS.todo;
-                      const pColors = PRIORITY_COLORS[t.priority] ?? PRIORITY_COLORS.medium;
-                      const taskProg = Math.min(100, Math.max(0, t.progress ?? 0));
+                      const pColors = PRIORITY_COLORS[t.priority] ?? PRIORITY_COLORS.normal;
+                      const taskProg = Math.min(100, Math.max(0, t.progressPercent ?? 0));
                       return (
                         <tr key={t.id}>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13, fontWeight: 500 }}>
@@ -1019,7 +1123,7 @@ export default function ProjectDetail() {
                             </span>
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-                            {t.assignedTo || '-'}
+                            {userName(t.assignee) || '-'}
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
                             {t.plannedStart ? new Date(t.plannedStart).toLocaleDateString('fr-CH') : '-'}

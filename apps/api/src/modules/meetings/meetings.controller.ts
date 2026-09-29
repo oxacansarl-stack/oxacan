@@ -13,15 +13,30 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Roles, SITE_LEAD_ROLES } from '../../common/decorators/roles.decorator';
 import { MeetingsService } from './meetings.service';
+import {
+  AddActionDto,
+  AddAttendeeDto,
+  CreateMeetingDto,
+  UpdateActionDto,
+  UpdateMeetingDto,
+} from './dto/meeting.dto';
 
+function toPositiveInt(value: string | undefined, max?: number): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return max ? Math.min(n, max) : n;
+}
+
+// PRD §3.2: team leaders run site meetings and write their minutes.
 @Controller('meetings')
+@Roles(...SITE_LEAD_ROLES)
 export class MeetingsController {
   constructor(private readonly service: MeetingsService) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
   async findAll(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -30,15 +45,14 @@ export class MeetingsController {
     @Query('status') status?: string,
   ) {
     return this.service.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: toPositiveInt(page),
+      limit: toPositiveInt(limit, 200),
       projectId,
       status,
     });
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
   async findById(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -47,33 +61,19 @@ export class MeetingsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async create(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectId: string;
-      meetingDate: string;
-      location?: string;
-      agenda?: string;
-    },
+    @Body() body: CreateMeetingDto,
   ) {
     return this.service.create(companyId, user.id, body);
   }
 
   @Put(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async update(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      location?: string;
-      agenda?: string;
-      minutes?: string;
-      status?: string;
-    },
+    @Body() body: UpdateMeetingDto,
   ) {
     return this.service.update(companyId, id, body);
   }
@@ -81,23 +81,15 @@ export class MeetingsController {
   /* ───────────── Attendees ───────────── */
 
   @Post(':id/attendees')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async addAttendee(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      name: string;
-      role?: string;
-      organization?: string;
-      attendance?: string;
-    },
+    @Body() body: AddAttendeeDto,
   ) {
     return this.service.addAttendee(companyId, id, body);
   }
 
   @Delete(':id/attendees/:attendeeId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async removeAttendee(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -110,33 +102,20 @@ export class MeetingsController {
   /* ───────────── Actions ───────────── */
 
   @Post(':id/actions')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async addAction(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      description: string;
-      responsible: string;
-      dueDate?: string;
-    },
+    @Body() body: AddActionDto,
   ) {
     return this.service.addAction(companyId, id, body);
   }
 
   @Put(':id/actions/:actionId')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
   async updateAction(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('actionId', ParseUUIDPipe) actionId: string,
-    @Body()
-    body: {
-      description?: string;
-      responsible?: string;
-      dueDate?: string;
-      status?: string;
-    },
+    @Body() body: UpdateActionDto,
   ) {
     return this.service.updateAction(companyId, id, actionId, body);
   }
@@ -144,7 +123,6 @@ export class MeetingsController {
   /* ───────────── Complete ───────────── */
 
   @Post(':id/complete')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
   async completeMeeting(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,

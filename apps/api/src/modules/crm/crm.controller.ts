@@ -9,13 +9,22 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { CompanyId, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { CrmService } from './crm.service';
+import {
+  CreateClientDto,
+  UpdateClientDto,
+  CreateContactDto,
+  CreateInteractionDto,
+  UpdateStageDto,
+} from './dto/client.dto';
 
 @Controller('clients')
 export class CrmController {
   constructor(private readonly crmService: CrmService) {}
 
   @Get()
+  @Roles(...OFFICE_ROLES)
   async findAll(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -34,6 +43,7 @@ export class CrmController {
   }
 
   @Get(':id')
+  @Roles(...OFFICE_ROLES)
   async findOne(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -42,47 +52,52 @@ export class CrmController {
   }
 
   @Post()
+  @Roles(...OFFICE_ROLES)
   async create(
     @CompanyId() companyId: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreateClientDto,
   ) {
-    return this.crmService.createClient(companyId, body as Partial<any>);
+    return this.crmService.createClient(companyId, body);
   }
 
   @Patch(':id')
+  @Roles(...OFFICE_ROLES)
   async update(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: UpdateClientDto,
   ) {
-    return this.crmService.updateClient(companyId, id, body as Partial<any>);
+    return this.crmService.updateClient(companyId, id, body);
   }
 
   @Post(':id/contacts')
+  @Roles(...OFFICE_ROLES)
   async addContact(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreateContactDto,
   ) {
-    return this.crmService.addContact(companyId, id, body as Partial<any>);
+    return this.crmService.addContact(companyId, id, body);
   }
 
   @Post(':id/interactions')
+  @Roles(...OFFICE_ROLES)
   async addInteraction(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { id: string },
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreateInteractionDto,
   ) {
-    return this.crmService.addInteraction(companyId, id, user.id, body as Partial<any>);
+    return this.crmService.addInteraction(companyId, id, user.id, body);
   }
 
   @Patch(':id/stage')
+  @Roles(...OFFICE_ROLES)
   async updateStage(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body('stage') stage: string,
+    @Body() body: UpdateStageDto,
   ) {
-    return this.crmService.updatePipelineStage(companyId, id, stage);
+    return this.crmService.updatePipelineStage(companyId, id, body.stage);
   }
 }

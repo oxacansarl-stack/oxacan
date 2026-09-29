@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, api, formatCHF } from '../lib/api';
+import { apiGet, apiList, apiPost, apiPatch, ApiError } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -23,7 +23,7 @@ interface InvoiceLine {
   unit: string;
   quantity: number;
   unitPriceCents: number;
-  totalCents?: number;
+  totalPriceCents?: number;
   cumulativeQuantity?: number;
   previousQuantity?: number;
 }
@@ -48,13 +48,14 @@ interface Invoice {
   status: 'draft' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';
   issueDate: string;
   dueDate?: string;
-  vatRateBps: number;
+  /** Basis points: 810 = 8.10 % */
+  vatRate: number;
   subtotalHtCents: number;
-  vatCents: number;
-  retentionCents: number;
-  priorAcomptesCents: number;
+  vatAmountCents: number;
+  retentionAmountCents: number | null;
+  priorAcomptesCents: number | null;
   totalTtcCents: number;
-  paidCents: number;
+  amountPaidCents: number | null;
   notes?: string;
   lines?: InvoiceLine[];
   payments?: Payment[];
@@ -67,13 +68,8 @@ interface PlusValue {
   project?: { name: string };
   description: string;
   amountCents: number;
-  status: 'pending' | 'submitted' | 'approved' | 'rejected';
+  status: 'detected' | 'submitted' | 'approved' | 'rejected' | 'invoiced';
   createdAt: string;
-}
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -108,28 +104,30 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string; strike?: boolean }
 const STATUS_TABS = ['all', 'draft', 'sent', 'partially_paid', 'paid', 'overdue', 'cancelled'] as const;
 
 const PV_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  pending: { bg: '#f3f4f6', fg: '#4b5563' },
+  detected: { bg: '#f3f4f6', fg: '#4b5563' },
   submitted: { bg: '#fef3c7', fg: '#92400e' },
   approved: { bg: '#dcfce7', fg: '#166534' },
   rejected: { bg: '#fee2e2', fg: '#991b1b' },
+  invoiced: { bg: '#dbeafe', fg: '#1d4ed8' },
 };
 
-const PAYMENT_METHODS = ['bank_transfer', 'check', 'cash', 'card', 'other'] as const;
+/** DB CHECK payment.payment_method */
+const PAYMENT_METHODS = ['bank_transfer', 'card', 'cash', 'other'] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const displayCHF = (cents: number): string => {
-  const rounded = Math.round(cents / 5) * 5;
-  return `CHF ${(rounded / 100).toFixed(2)}`;
-};
+// Exact to the centime: stored totals are already 5-ct rounded by the API; unit prices and HT are not.
+const displayCHF = (cents: number): string => `CHF ${(cents / 100).toFixed(2)}`;
 
-const apiPatch = <T = unknown>(path: string, body?: unknown) =>
-  api<T>(path, {
-    method: 'PATCH',
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
+const errorMessage = (e: unknown, fallback: string): string =>
+  e instanceof ApiError || e instanceof Error ? e.message || fallback : fallback;
+
+/** "8.10" (percent) → 810 (basis points), as the API expects. */
+const percentToBps = (value: string): number => Math.round(parseFloat(value) * 100);
+
+const swissRound = (cents: number): number => Math.round(cents / 5) * 5;
 
 /* ------------------------------------------------------------------ */
 /*  Shared styles                                                      */
@@ -258,19 +256,11 @@ export default function Invoices() {
       let path = `/invoices?page=${page}`;
       if (statusFilter !== 'all') path += `&status=${statusFilter}`;
       if (typeFilter) path += `&type=${typeFilter}`;
-      const res = await apiGet<PaginatedResponse<Invoice>>(path);
-      // Handle both wrapped and direct array responses
-      if (Array.isArray(res)) {
-        setInvoices(res);
-        setTotalPages(1);
-      } else if (res && typeof res === 'object' && 'data' in res) {
-        setInvoices(res.data);
-        setTotalPages(Math.ceil((res.meta?.total ?? res.data.length) / (res.meta?.pageSize ?? 25)));
-      } else {
-        setInvoices([]);
-      }
-    } catch (e: any) {
-      setError(e.message || 'Failed to load invoices');
+      const { items, meta } = await apiList<Invoice>(path);
+      setInvoices(items);
+      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load invoices'));
       setInvoices([]);
     } finally {
       setLoading(false);
@@ -295,10 +285,11 @@ export default function Invoices() {
   const fetchPlusValues = useCallback(async () => {
     setPvLoading(true);
     try {
-      const res = await apiGet<any>('/invoices/plus-values');
-      const items = Array.isArray(res) ? res : res?.data ?? [];
-      setPlusValues(items);
-    } catch { /* ignore */ }
+      const items = await apiGet<PlusValue[]>('/invoices/plus-values?limit=500');
+      setPlusValues(Array.isArray(items) ? items : []);
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load plus-values'));
+    }
     finally { setPvLoading(false); }
   }, []);
 
@@ -310,11 +301,10 @@ export default function Invoices() {
   const openDetail = async (inv: Invoice) => {
     setDetailLoading(true);
     try {
-      const res = await apiGet<any>(`/invoices/${inv.id}`);
-      const detail = res?.data ?? res;
+      const detail = await apiGet<Invoice>(`/invoices/${inv.id}`);
       setSelectedInvoice(detail);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load invoice');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load invoice'));
     } finally {
       setDetailLoading(false);
     }
@@ -326,18 +316,25 @@ export default function Invoices() {
     if (!createForm.projectId) { setCreateError('Project is required'); return; }
     if (!createForm.clientId) { setCreateError('Client is required'); return; }
     if (createLines.length === 0) { setCreateError('At least one line is required'); return; }
-    const hasEmpty = createLines.some(l => !l.description || l.unitPriceCents <= 0);
+    const hasEmpty = createLines.some(l => !l.description.trim() || !Number.isInteger(l.unitPriceCents) || l.unitPriceCents <= 0);
     if (hasEmpty) { setCreateError('All lines must have description and price'); return; }
+    if (createLines.some(l => l.quantity < 0 || (l.cumulativeQuantity ?? 0) < 0 || (l.previousQuantity ?? 0) < 0)) {
+      setCreateError('Quantities cannot be negative'); return;
+    }
+    const vatRateBps = percentToBps(createForm.vatRate);
+    if (!Number.isFinite(vatRateBps) || vatRateBps < 0 || vatRateBps > 10000) {
+      setCreateError('VAT rate must be between 0 and 100 %'); return;
+    }
 
     try {
       await apiPost('/invoices', {
         projectId: createForm.projectId,
         clientId: createForm.clientId,
         type: createForm.type,
-        vatRate: parseFloat(createForm.vatRate),
+        vatRate: vatRateBps,
         lines: createLines.map(l => ({
-          description: l.description,
-          unit: l.unit,
+          description: l.description.trim(),
+          ...(l.unit.trim() ? { unit: l.unit.trim() } : {}),
           quantity: l.quantity,
           unitPriceCents: l.unitPriceCents,
           ...(createForm.type === 'situation' ? {
@@ -345,14 +342,14 @@ export default function Invoices() {
             previousQuantity: l.previousQuantity ?? 0,
           } : {}),
         })),
-        notes: createForm.notes || undefined,
+        ...(createForm.notes.trim() ? { notes: createForm.notes.trim() } : {}),
       });
       setShowCreate(false);
       setCreateForm({ projectId: '', clientId: '', type: 'invoice', vatRate: '8.10', notes: '' });
       setCreateLines([{ description: '', unit: 'u', quantity: 1, unitPriceCents: 0 }]);
       fetchInvoices();
-    } catch (e: any) {
-      setCreateError(e.message || 'Failed to create invoice');
+    } catch (e) {
+      setCreateError(errorMessage(e, 'Failed to create invoice'));
     }
   };
 
@@ -376,8 +373,8 @@ export default function Invoices() {
       if (selectedInvoice?.id === id) {
         openDetail(selectedInvoice);
       }
-    } catch (e: any) {
-      setError(e.message || 'Failed to update status');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to update status'));
     }
   };
 
@@ -388,41 +385,48 @@ export default function Invoices() {
       await apiPost(`/invoices/${id}/credit-note`);
       fetchInvoices();
       setSelectedInvoice(null);
-    } catch (e: any) {
-      setError(e.message || 'Failed to create credit note');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to create credit note'));
     }
   };
 
   /* --- Record payment --- */
   const recordPayment = async () => {
     if (!selectedInvoice) return;
-    if (paymentForm.amountCents <= 0) return;
+    if (!Number.isInteger(paymentForm.amountCents) || paymentForm.amountCents <= 0) {
+      setError('Payment amount must be greater than zero'); return;
+    }
+    if (!paymentForm.paymentDate) { setError('Payment date is required'); return; }
     try {
       await apiPost(`/invoices/${selectedInvoice.id}/payments`, {
         amountCents: paymentForm.amountCents,
         paymentDate: paymentForm.paymentDate,
         paymentMethod: paymentForm.paymentMethod,
-        reference: paymentForm.reference || undefined,
+        ...(paymentForm.reference.trim() ? { reference: paymentForm.reference.trim() } : {}),
       });
       setShowPayment(false);
       setPaymentForm({ amountCents: 0, paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: 'bank_transfer', reference: '' });
       openDetail(selectedInvoice);
       fetchInvoices();
-    } catch (e: any) {
-      setError(e.message || 'Failed to record payment');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to record payment'));
     }
   };
 
   /* --- Plus-value create --- */
   const createPlusValue = async () => {
-    if (!pvForm.projectId || !pvForm.description || pvForm.amountCents <= 0) return;
+    if (!pvForm.projectId || !pvForm.description.trim() || !Number.isInteger(pvForm.amountCents) || pvForm.amountCents <= 0) return;
     try {
-      await apiPost('/invoices/plus-values', pvForm);
+      await apiPost('/invoices/plus-values', {
+        projectId: pvForm.projectId,
+        description: pvForm.description.trim(),
+        amountCents: pvForm.amountCents,
+      });
       setShowPvCreate(false);
       setPvForm({ projectId: '', description: '', amountCents: 0 });
       fetchPlusValues();
-    } catch (e: any) {
-      setError(e.message || 'Failed to create plus-value');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to create plus-value'));
     }
   };
 
@@ -431,8 +435,8 @@ export default function Invoices() {
     try {
       await apiPatch(`/invoices/plus-values/${id}/status`, { status });
       fetchPlusValues();
-    } catch (e: any) {
-      setError(e.message || 'Failed to update status');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to update status'));
     }
   };
 
@@ -450,11 +454,16 @@ export default function Invoices() {
   };
 
   /* --- Computed --- */
-  const subtotalHt = createLines.reduce((sum, l) => sum + l.quantity * l.unitPriceCents, 0);
+  // Preview mirrors InvoicingService.createInvoice (situation lines bill the period quantity).
+  const lineTotal = (l: InvoiceLine): number =>
+    createForm.type === 'situation'
+      ? Math.round(((l.cumulativeQuantity ?? 0) - (l.previousQuantity ?? 0)) * l.unitPriceCents)
+      : Math.round(l.quantity * l.unitPriceCents);
+  const subtotalHt = createLines.reduce((sum, l) => sum + lineTotal(l), 0);
   const vatRate = parseFloat(createForm.vatRate) || 8.10;
-  const vatAmount = Math.round(subtotalHt * vatRate / 100);
-  const retentionAmount = Math.round(subtotalHt * 5 / 100);
-  const totalTtc = subtotalHt + vatAmount - retentionAmount;
+  const vatAmount = swissRound(Math.round(subtotalHt * Math.round(vatRate * 100) / 10000));
+  const retentionAmount = swissRound(Math.round(subtotalHt * 500 / 10000));
+  const totalTtc = swissRound(subtotalHt + vatAmount - retentionAmount);
 
   const filteredInvoices = searchTerm
     ? invoices.filter(inv => inv.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -466,7 +475,7 @@ export default function Invoices() {
 
   if (selectedInvoice) {
     const inv = selectedInvoice;
-    const paidPct = inv.totalTtcCents > 0 ? Math.min(100, Math.round((inv.paidCents / inv.totalTtcCents) * 100)) : 0;
+    const paidPct = inv.totalTtcCents > 0 ? Math.min(100, Math.round(((inv.amountPaidCents ?? 0) / inv.totalTtcCents) * 100)) : 0;
 
     return (
       <div>
@@ -498,8 +507,8 @@ export default function Invoices() {
         {/* Summary cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
           <SummaryCard label="Subtotal HT" value={displayCHF(inv.subtotalHtCents)} />
-          <SummaryCard label={`VAT (${(inv.vatRateBps / 100).toFixed(2)}%)`} value={displayCHF(inv.vatCents)} />
-          <SummaryCard label="Retention (-5%)" value={`- ${displayCHF(inv.retentionCents)}`} />
+          <SummaryCard label={`VAT (${(inv.vatRate / 100).toFixed(2)}%)`} value={displayCHF(inv.vatAmountCents)} />
+          <SummaryCard label="Retention (-5%)" value={`- ${displayCHF(inv.retentionAmountCents ?? 0)}`} />
           <div style={{
             background: '#f0f9ff', borderRadius: 8, padding: 16, border: '1px solid #bae6fd',
           }}>
@@ -542,7 +551,7 @@ export default function Invoices() {
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{line.quantity}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{displayCHF(line.unitPriceCents)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                    {displayCHF(line.totalCents ?? line.quantity * line.unitPriceCents)}
+                    {displayCHF(line.totalPriceCents ?? line.quantity * line.unitPriceCents)}
                   </td>
                   {inv.type === 'situation' && (
                     <>
@@ -563,7 +572,7 @@ export default function Invoices() {
         <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Payments</h3>
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
-            <span>Paid: {displayCHF(inv.paidCents || 0)}</span>
+            <span>Paid: {displayCHF(inv.amountPaidCents ?? 0)}</span>
             <span>{paidPct}%</span>
           </div>
           <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
@@ -854,7 +863,7 @@ export default function Invoices() {
                             />
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
-                            {displayCHF(line.quantity * line.unitPriceCents)}
+                            {displayCHF(lineTotal(line))}
                           </td>
                           {createForm.type === 'situation' && (
                             <>
@@ -1033,7 +1042,7 @@ export default function Invoices() {
                           {inv.status.replace('_', ' ')}
                         </Badge>
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{displayCHF(inv.paidCents || 0)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{displayCHF(inv.amountPaidCents ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1137,7 +1146,7 @@ export default function Invoices() {
                       </td>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          {pv.status === 'pending' && (
+                          {pv.status === 'detected' && (
                             <button
                               style={{ ...btnOutline, padding: '4px 10px', fontSize: 12 }}
                               onClick={() => updatePvStatus(pv.id, 'submitted')}

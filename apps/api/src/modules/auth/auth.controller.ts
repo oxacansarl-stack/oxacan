@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles, ALL_ROLES } from '../../common/decorators/roles.decorator';
 import { RequestUser } from '../../common/guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 
@@ -8,6 +9,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Get('profile')
+  @Roles(...ALL_ROLES)
   async getProfile(@CurrentUser() user: RequestUser) {
     const appUser = await this.authService.findById(user.id);
     return {

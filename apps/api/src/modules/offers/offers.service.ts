@@ -9,6 +9,12 @@ import {
   BusinessRuleError,
   SWISS_ROUNDING_STEP,
 } from '@oxacan/shared-types';
+import type { CreateOfferDto, UpdateOfferDto } from './dto/offer.dto';
+import type {
+  AddOfferLineDto as AddLineDto,
+  UpdateOfferLineDto as UpdateLineDto,
+} from './dto/offer-line.dto';
+import type { AddOfferAssumptionDto as AddAssumptionDto } from './dto/offer-assumption.dto';
 
 interface OfferFilters {
   page?: number;
@@ -16,59 +22,6 @@ interface OfferFilters {
   status?: string;
   clientId?: string;
   search?: string;
-}
-
-interface CreateOfferDto {
-  projectName: string;
-  clientId: string;
-  projectTypeId?: string;
-  reference?: string;
-  marginFactor?: number;
-  vatRate?: number;
-  validityDays?: number;
-  notes?: string;
-}
-
-interface UpdateOfferDto {
-  projectName?: string;
-  clientId?: string;
-  projectTypeId?: string;
-  reference?: string;
-  marginFactor?: number;
-  vatRate?: number;
-  validityDays?: number;
-  notes?: string;
-}
-
-interface AddLineDto {
-  canonicalArticleId?: string;
-  description: string;
-  unit: string;
-  quantity: number;
-  unitPriceCents?: number | null;
-  pricingStrategy?: string;
-  roomType?: string;
-  variantType?: string;
-  sortOrder?: number;
-}
-
-interface UpdateLineDto {
-  description?: string;
-  unit?: string;
-  quantity?: number;
-  unitPriceCents?: number | null;
-  pricingStrategy?: string;
-  roomType?: string;
-  variantType?: string;
-  sortOrder?: number;
-  positionNumber?: number;
-}
-
-interface AddAssumptionDto {
-  type: string;
-  description: string;
-  impactAmountCents?: number;
-  status?: string;
 }
 
 /**

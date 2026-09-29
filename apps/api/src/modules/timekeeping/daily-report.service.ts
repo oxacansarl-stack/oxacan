@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DailyReport } from './entities/daily-report.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { CreateDailyReportDto, UpdateDailyReportDto } from './dto/daily-report.dto';
 
 interface DailyReportFilters {
   page?: number;
@@ -13,44 +15,46 @@ interface DailyReportFilters {
   dateTo?: string;
 }
 
-interface CreateDailyReportDto {
-  projectId: string;
-  date: string;
-  workDescription?: string;
-  materialsUsed?: Record<string, unknown>[];
-  weather?: string;
-  temperatureCelsius?: number;
-  notes?: string;
-  photos?: Record<string, unknown>[];
-}
-
-interface UpdateDailyReportDto {
-  workDescription?: string;
-  materialsUsed?: Record<string, unknown>[];
-  weather?: string;
-  temperatureCelsius?: number;
-  notes?: string;
-  photos?: Record<string, unknown>[];
-}
-
 @Injectable()
 export class DailyReportService {
   constructor(
     @InjectRepository(DailyReport)
     private readonly reportRepo: Repository<DailyReport>,
+    private readonly scope: AccessScopeService,
   ) {}
+
+  /** Reports with user/project reduced to non-sensitive columns. */
+  private listQuery(companyId: string) {
+    return this.reportRepo
+      .createQueryBuilder('dr')
+      .leftJoin('dr.user', 'user')
+      .addSelect(['user.id', 'user.firstName', 'user.lastName'])
+      .leftJoin('dr.project', 'project')
+      .addSelect(['project.id', 'project.name', 'project.reference'])
+      .where('dr.company_id = :companyId', { companyId });
+  }
+
+  /** Relation-free load for mutations; 404 outside the caller's scope. */
+  private async loadScoped(caller: ScopeUser, id: string): Promise<DailyReport> {
+    const report = await this.reportRepo.findOne({ where: { id, companyId: caller.companyId } });
+    if (!report || !(await this.scope.canSee(caller, report.userId))) {
+      throw new NotFoundError('DailyReport', id);
+    }
+    return report;
+  }
 
   /* ───────────── List ───────────── */
 
-  async findAll(companyId: string, filters: DailyReportFilters = {}) {
+  async findAll(caller: ScopeUser, filters: DailyReportFilters = {}) {
     const { page = 1, limit = 25, userId, projectId, dateFrom, dateTo } = filters;
 
-    const qb = this.reportRepo
-      .createQueryBuilder('dr')
-      .leftJoinAndSelect('dr.user', 'user')
-      .leftJoinAndSelect('dr.project', 'project')
-      .where('dr.company_id = :companyId', { companyId });
+    const qb = this.listQuery(caller.companyId);
 
+    // Visibility scope first; a ?userId outside it can only narrow to nothing.
+    const visible = await this.scope.visibleUserIds(caller);
+    if (visible) {
+      qb.andWhere('dr.user_id IN (:...visible)', { visible });
+    }
     if (userId) {
       qb.andWhere('dr.user_id = :userId', { userId });
     }
@@ -84,18 +88,21 @@ export class DailyReportService {
 
   /* ───────────── Find by ID ───────────── */
 
-  async findById(companyId: string, id: string): Promise<DailyReport> {
-    const report = await this.reportRepo.findOne({
-      where: { id, companyId },
-      relations: ['user', 'project'],
-    });
-    if (!report) throw new NotFoundError('DailyReport', id);
+  async findById(caller: ScopeUser, id: string): Promise<DailyReport> {
+    const report = await this.listQuery(caller.companyId)
+      .andWhere('dr.id = :id', { id })
+      .getOne();
+    if (!report || !(await this.scope.canSee(caller, report.userId))) {
+      throw new NotFoundError('DailyReport', id);
+    }
     return report;
   }
 
   /* ───────────── Create ───────────── */
 
   async create(companyId: string, userId: string, dto: CreateDailyReportDto): Promise<DailyReport> {
+    await this.scope.assertProjectInCompany(companyId, dto.projectId);
+
     // Enforce UNIQUE(company_id, user_id, project_id, date)
     const existing = await this.reportRepo.findOne({
       where: {
@@ -131,8 +138,8 @@ export class DailyReportService {
 
   /* ───────────── Update ───────────── */
 
-  async update(companyId: string, id: string, dto: UpdateDailyReportDto): Promise<DailyReport> {
-    const report = await this.findById(companyId, id);
+  async update(caller: ScopeUser, id: string, dto: UpdateDailyReportDto): Promise<DailyReport> {
+    const report = await this.loadScoped(caller, id);
 
     if (dto.workDescription !== undefined) report.workDescription = dto.workDescription;
     if (dto.materialsUsed !== undefined) report.materialsUsed = dto.materialsUsed;
@@ -146,8 +153,8 @@ export class DailyReportService {
 
   /* ───────────── Delete ───────────── */
 
-  async delete(companyId: string, id: string): Promise<void> {
-    const report = await this.findById(companyId, id);
+  async delete(caller: ScopeUser, id: string): Promise<void> {
+    const report = await this.loadScoped(caller, id);
     await this.reportRepo.remove(report);
   }
 }

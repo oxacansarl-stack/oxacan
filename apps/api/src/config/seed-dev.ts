@@ -35,10 +35,11 @@ async function main() {
   await dataSource.destroy();
 
   console.log('Seeded company "Demo Bau AG" with one user per role.');
-  console.log('Dev tokens (12h). In the browser console on the web app run:');
+  console.log('Dev tokens (12h, need ALLOW_DEV_TOKENS=true on the API). Paste one into');
+  console.log('"Developer sign-in" on the web login page:');
   for (const u of USERS) {
     const token = sign({ sub: u.authId }, process.env.JWT_SECRET!, { expiresIn: '12h' });
-    console.log(`\n# ${u.role} (${u.email})\nlocalStorage.setItem('oxacan_token', '${token}')`);
+    console.log(`\n# ${u.role} (${u.email})\n${token}`);
   }
 }
 

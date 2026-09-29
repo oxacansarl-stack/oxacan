@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { TimeEntry } from './entities/time-entry.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
+import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { ClockInDto, UpdateTimeEntryDto } from './dto/time-entry.dto';
 
 interface TimeEntryFilters {
   page?: number;
@@ -15,26 +17,28 @@ interface TimeEntryFilters {
   dateTo?: string;
 }
 
-interface ClockInDto {
-  projectId: string;
-  taskId?: string;
-  category?: string;
-  latitude?: number;
-  longitude?: number;
-  notes?: string;
-}
-
-interface UpdateTimeEntryDto {
-  breakMinutes?: number;
-  notes?: string;
-  category?: string;
-  travelMinutes?: number;
-  taskId?: string;
-  latitude?: number;
-  longitude?: number;
-}
-
 const NORMAL_DAY_MINUTES = 480; // 8h (CCT)
+
+const APP_TIME_ZONE = 'Europe/Zurich';
+
+/** Current calendar date and wall-clock time on Swiss sites, independent of the server's zone. */
+function localNow(): { date: string; time: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date())
+      .map((p) => [p.type, p.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}:${parts.second}` };
+}
 
 @Injectable()
 export class TimekeepingService {
@@ -43,19 +47,32 @@ export class TimekeepingService {
     private readonly timeEntryRepo: Repository<TimeEntry>,
     @InjectRepository(AppUser)
     private readonly userRepo: Repository<AppUser>,
+    private readonly scope: AccessScopeService,
   ) {}
+
+  /** Entries with their user/project reduced to non-sensitive columns (no rates, no budgets). */
+  private listQuery(companyId: string) {
+    return this.timeEntryRepo
+      .createQueryBuilder('te')
+      .leftJoin('te.user', 'user')
+      .addSelect(['user.id', 'user.firstName', 'user.lastName'])
+      .leftJoin('te.project', 'project')
+      .addSelect(['project.id', 'project.name', 'project.reference'])
+      .where('te.company_id = :companyId', { companyId });
+  }
 
   /* ───────────── List ───────────── */
 
-  async findAllTimeEntries(companyId: string, filters: TimeEntryFilters = {}) {
+  async findAllTimeEntries(caller: ScopeUser, filters: TimeEntryFilters = {}) {
     const { page = 1, limit = 25, userId, projectId, status, dateFrom, dateTo } = filters;
 
-    const qb = this.timeEntryRepo
-      .createQueryBuilder('te')
-      .leftJoinAndSelect('te.user', 'user')
-      .leftJoinAndSelect('te.project', 'project')
-      .where('te.company_id = :companyId', { companyId });
+    const qb = this.listQuery(caller.companyId);
 
+    // Visibility scope first; a ?userId outside it can only narrow to nothing.
+    const visible = await this.scope.visibleUserIds(caller);
+    if (visible) {
+      qb.andWhere('te.user_id IN (:...visible)', { visible });
+    }
     if (userId) {
       qb.andWhere('te.user_id = :userId', { userId });
     }
@@ -92,20 +109,37 @@ export class TimekeepingService {
 
   /* ───────────── Find by ID ───────────── */
 
-  async findTimeEntryById(companyId: string, id: string): Promise<TimeEntry> {
-    const entry = await this.timeEntryRepo.findOne({
-      where: { id, companyId },
-      relations: ['user', 'project', 'task', 'approver'],
-    });
-    if (!entry) throw new NotFoundError('TimeEntry', id);
+  /** 404 when the entry does not exist in the company or is outside the caller's scope. */
+  async findTimeEntryById(caller: ScopeUser, id: string): Promise<TimeEntry> {
+    const entry = await this.listQuery(caller.companyId)
+      .leftJoin('te.task', 'task')
+      .addSelect(['task.id', 'task.title'])
+      .leftJoin('te.approver', 'approver')
+      .addSelect(['approver.id', 'approver.firstName', 'approver.lastName'])
+      .andWhere('te.id = :id', { id })
+      .getOne();
+    if (!entry || !(await this.scope.canSee(caller, entry.userId))) {
+      throw new NotFoundError('TimeEntry', id);
+    }
+    return entry;
+  }
+
+  /** Relation-free load for mutations (loaded relations would override changed FK columns on save). */
+  private async loadScoped(caller: ScopeUser, id: string): Promise<TimeEntry> {
+    const entry = await this.timeEntryRepo.findOne({ where: { id, companyId: caller.companyId } });
+    if (!entry || !(await this.scope.canSee(caller, entry.userId))) {
+      throw new NotFoundError('TimeEntry', id);
+    }
     return entry;
   }
 
   /* ───────────── Clock In ───────────── */
 
   async clockIn(companyId: string, userId: string, dto: ClockInDto): Promise<TimeEntry> {
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10);
+    await this.scope.assertProjectInCompany(companyId, dto.projectId);
+    if (dto.taskId) await this.scope.assertTaskInCompany(companyId, dto.taskId);
+
+    const { date: dateStr, time: startTime } = localNow();
 
     // Validate no open entry exists for this user today
     const openEntry = await this.timeEntryRepo.findOne({
@@ -129,9 +163,6 @@ export class TimekeepingService {
       where: { id: userId, companyId },
     });
     if (!user) throw new NotFoundError('AppUser', userId);
-
-    const now = new Date();
-    const startTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
     const entry = this.timeEntryRepo.create({
       companyId,
@@ -161,6 +192,7 @@ export class TimekeepingService {
   /* ───────────── Clock Out ───────────── */
 
   async clockOut(companyId: string, userId: string, id: string): Promise<TimeEntry> {
+    // Only the owner may clock out their own entry (others get 404).
     const entry = await this.timeEntryRepo.findOne({
       where: { id, companyId, userId },
     });
@@ -173,8 +205,7 @@ export class TimekeepingService {
       );
     }
 
-    const now = new Date();
-    const endTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    const { time: endTime } = localNow();
 
     entry.endTime = endTime;
 
@@ -183,7 +214,10 @@ export class TimekeepingService {
     const endParts = endTime.split(':').map(Number);
     const startMinTotal = startParts[0] * 60 + startParts[1];
     const endMinTotal = endParts[0] * 60 + endParts[1];
-    const workedMinutes = endMinTotal - startMinTotal - entry.breakMinutes;
+    // A shift that crosses midnight ends on the next day.
+    const spanMinutes =
+      endMinTotal >= startMinTotal ? endMinTotal - startMinTotal : endMinTotal + 24 * 60 - startMinTotal;
+    const workedMinutes = spanMinutes - entry.breakMinutes;
     const effectiveMinutes = Math.max(workedMinutes, 0);
 
     entry.totalMinutes = effectiveMinutes;
@@ -221,8 +255,9 @@ export class TimekeepingService {
 
   /* ───────────── Update ───────────── */
 
-  async updateTimeEntry(companyId: string, id: string, dto: UpdateTimeEntryDto): Promise<TimeEntry> {
-    const entry = await this.findTimeEntryById(companyId, id);
+  async updateTimeEntry(caller: ScopeUser, id: string, dto: UpdateTimeEntryDto): Promise<TimeEntry> {
+    const companyId = caller.companyId;
+    const entry = await this.loadScoped(caller, id);
 
     if (entry.status === 'approved') {
       throw new BusinessRuleError(
@@ -230,6 +265,15 @@ export class TimekeepingService {
         'Cannot modify an approved time entry.',
       );
     }
+    // Once submitted, only the reviewer (team leader / office) may correct it.
+    if (entry.userId === caller.id && !['draft', 'rejected'].includes(entry.status)) {
+      throw new BusinessRuleError(
+        'ENTRY_SUBMITTED',
+        'This entry is awaiting approval and can no longer be edited.',
+      );
+    }
+
+    if (dto.taskId) await this.scope.assertTaskInCompany(companyId, dto.taskId);
 
     if (dto.breakMinutes !== undefined) entry.breakMinutes = dto.breakMinutes;
     if (dto.notes !== undefined) entry.notes = dto.notes;
@@ -245,7 +289,10 @@ export class TimekeepingService {
       const endParts = entry.endTime.split(':').map(Number);
       const startMinTotal = startParts[0] * 60 + startParts[1];
       const endMinTotal = endParts[0] * 60 + endParts[1];
-      const workedMinutes = endMinTotal - startMinTotal - entry.breakMinutes;
+      // A shift that crosses midnight ends on the next day.
+      const spanMinutes =
+        endMinTotal >= startMinTotal ? endMinTotal - startMinTotal : endMinTotal + 24 * 60 - startMinTotal;
+      const workedMinutes = spanMinutes - entry.breakMinutes;
       const effectiveMinutes = Math.max(workedMinutes, 0);
 
       entry.totalMinutes = effectiveMinutes;
@@ -280,10 +327,33 @@ export class TimekeepingService {
 
   /* ───────────── Submit for Approval ───────────── */
 
-  async submitForApproval(companyId: string, userId: string) {
-    const drafts = await this.timeEntryRepo.find({
-      where: { companyId, userId, status: 'draft' },
-    });
+  /**
+   * Submits the caller's own draft entries: the given ids, or every draft when omitted.
+   * Ids that are not the caller's own entries → 404 (nothing submitted).
+   */
+  async submitForApproval(companyId: string, userId: string, entryIds?: string[]) {
+    let drafts: TimeEntry[];
+
+    if (entryIds && entryIds.length > 0) {
+      const ids = [...new Set(entryIds)];
+      drafts = await this.timeEntryRepo.find({
+        where: { companyId, userId, id: In(ids) },
+      });
+      if (drafts.length !== ids.length) {
+        throw new NotFoundError('TimeEntry', 'one or more entries');
+      }
+      const notDraft = drafts.find((e) => e.status !== 'draft');
+      if (notDraft) {
+        throw new BusinessRuleError(
+          'INVALID_STATUS',
+          `Time entry ${notDraft.id} is not in 'draft' status.`,
+        );
+      }
+    } else {
+      drafts = await this.timeEntryRepo.find({
+        where: { companyId, userId, status: 'draft' },
+      });
+    }
 
     if (drafts.length === 0) {
       throw new BusinessRuleError(
@@ -307,20 +377,25 @@ export class TimekeepingService {
     return this.timeEntryRepo.save(drafts);
   }
 
-  /* ───────────── Approve ───────────── */
+  /* ───────────── Approve / Reject ───────────── */
 
-  async approveEntries(companyId: string, approverId: string, entryIds: string[]) {
-    const entries = await this.timeEntryRepo
-      .createQueryBuilder('te')
-      .where('te.company_id = :companyId', { companyId })
-      .andWhere('te.id IN (:...entryIds)', { entryIds })
-      .getMany();
+  /**
+   * Loads the requested entries and enforces the approval scope before anything changes:
+   * TEAM_LEADER → 403 unless every id is a team member's entry (never their own);
+   * office roles → 404 when an id does not exist in the company.
+   */
+  private async loadForApproval(approver: ScopeUser, entryIds: string[]): Promise<TimeEntry[]> {
+    const ids = [...new Set(entryIds)];
+    const entries = await this.timeEntryRepo.find({
+      where: { companyId: approver.companyId, id: In(ids) },
+    });
 
-    if (entries.length !== entryIds.length) {
+    await this.scope.assertCanApprove(approver, entries.map((e) => e.userId), ids.length);
+
+    if (entries.length !== ids.length) {
       throw new NotFoundError('TimeEntry', 'one or more entries');
     }
 
-    const now = new Date();
     for (const entry of entries) {
       if (entry.status !== 'submitted') {
         throw new BusinessRuleError(
@@ -328,37 +403,30 @@ export class TimekeepingService {
           `Time entry ${entry.id} is not in 'submitted' status.`,
         );
       }
+    }
+    return entries;
+  }
+
+  async approveEntries(approver: ScopeUser, entryIds: string[]) {
+    const entries = await this.loadForApproval(approver, entryIds);
+
+    const now = new Date();
+    for (const entry of entries) {
       entry.status = 'approved';
-      entry.approvedBy = approverId;
+      entry.approvedBy = approver.id;
       entry.approvedAt = now;
     }
 
     return this.timeEntryRepo.save(entries);
   }
 
-  /* ───────────── Reject ───────────── */
-
-  async rejectEntries(companyId: string, approverId: string, entryIds: string[], reason: string) {
-    const entries = await this.timeEntryRepo
-      .createQueryBuilder('te')
-      .where('te.company_id = :companyId', { companyId })
-      .andWhere('te.id IN (:...entryIds)', { entryIds })
-      .getMany();
-
-    if (entries.length !== entryIds.length) {
-      throw new NotFoundError('TimeEntry', 'one or more entries');
-    }
+  async rejectEntries(approver: ScopeUser, entryIds: string[], reason: string) {
+    const entries = await this.loadForApproval(approver, entryIds);
 
     for (const entry of entries) {
-      if (entry.status !== 'submitted') {
-        throw new BusinessRuleError(
-          'INVALID_STATUS',
-          `Time entry ${entry.id} is not in 'submitted' status.`,
-        );
-      }
       entry.status = 'rejected';
       entry.notes = entry.notes
-        ? `${entry.notes}\n[Rejected by ${approverId}]: ${reason}`
+        ? `${entry.notes}\n[Rejected by ${approver.id}]: ${reason}`
         : `[Rejected]: ${reason}`;
     }
 
@@ -418,6 +486,7 @@ export class TimekeepingService {
     }
 
     return {
+      userId,
       totalNormal,
       totalOvertime,
       totalTravel,

@@ -11,9 +11,19 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
+import { ALL_ROLES, Roles } from '../../common/decorators/roles.decorator';
 import { NotificationsService } from './notifications.service';
 
+function toPositiveInt(value: string | undefined, max?: number): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return max ? Math.min(n, max) : n;
+}
+
+// Notifications are per-user: every query in the service filters by companyId AND userId.
 @Controller('notifications')
+@Roles(...ALL_ROLES)
 export class NotificationsController {
   constructor(private readonly service: NotificationsService) {}
 
@@ -26,8 +36,8 @@ export class NotificationsController {
     @Query('isRead') isRead?: string,
   ) {
     return this.service.findAll(companyId, user.id, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: toPositiveInt(page),
+      limit: toPositiveInt(limit, 200),
       isRead: isRead !== undefined ? isRead === 'true' : undefined,
     });
   }

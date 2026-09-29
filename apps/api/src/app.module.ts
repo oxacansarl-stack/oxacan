@@ -1,7 +1,7 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 import { join } from 'path';
@@ -9,6 +9,7 @@ import { join } from 'path';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { CompanyContextGuard } from './common/guards/company-context.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RlsContextMiddleware } from './common/middleware/rls-context.middleware';
 import { TenantConnectionHook } from './common/tenant/tenant-connection.hook';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
@@ -62,7 +63,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
         retryDelay: 3000,
       }),
     }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     AuthModule,
     CompanyModule,
     HealthModule,
@@ -88,7 +89,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: CompanyContextGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

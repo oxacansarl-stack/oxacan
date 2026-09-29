@@ -15,10 +15,32 @@ interface Plan {
 
 interface Annotation {
   id: string;
-  label: string;
-  x: number;
-  y: number;
-  note: string;
+  type: string;
+  label: string | null;
+  color: string;
+  geometry: Record<string, unknown>;
+}
+
+type PlanForm = {
+  name: string;
+  fileUrl: string;
+  fileType: string;
+  floor: string;
+  scale: string;
+};
+
+const EMPTY_FORM: PlanForm = { name: '', fileUrl: '', fileType: 'pdf', floor: '', scale: '1:50' };
+
+/** Drop empty optional fields so the payload matches CreatePlanDto. */
+function toCreatePayload(form: PlanForm): Record<string, string> {
+  const payload: Record<string, string> = {
+    name: form.name.trim(),
+    fileUrl: form.fileUrl.trim(),
+    fileType: form.fileType,
+  };
+  if (form.floor.trim()) payload.floor = form.floor.trim();
+  if (form.scale.trim()) payload.scale = form.scale.trim();
+  return payload;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -42,19 +64,14 @@ const buttonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const FILE_TYPES = ['PDF', 'DWG', 'DXF', 'PNG', 'JPG'] as const;
+// Values must match the plan.file_type CHECK constraint (lower-case).
+const FILE_TYPES = ['pdf', 'dwg', 'dxf', 'png', 'jpg'] as const;
 
 export default function Plans() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    fileUrl: '',
-    fileType: 'PDF',
-    floor: '',
-    scale: '1:50',
-  });
+  const [form, setForm] = useState<PlanForm>(EMPTY_FORM);
 
   const { data: plans = [], isLoading, error } = useQuery<Plan[], ApiError>({
     queryKey: ['plans'],
@@ -69,12 +86,12 @@ export default function Plans() {
     retry: false,
   });
 
-  const createMutation = useMutation({
-    mutationFn: (data: typeof form) => apiPost<Plan>('/plans', data),
+  const createMutation = useMutation<Plan, ApiError, PlanForm>({
+    mutationFn: (data) => apiPost<Plan>('/plans', toCreatePayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] });
       setShowForm(false);
-      setForm({ name: '', fileUrl: '', fileType: 'PDF', floor: '', scale: '1:50' });
+      setForm(EMPTY_FORM);
     },
   });
 
@@ -138,7 +155,7 @@ export default function Plans() {
             >
               {FILE_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {t.toUpperCase()}
                 </option>
               ))}
             </select>
@@ -173,6 +190,8 @@ export default function Plans() {
       {/* Plans grid */}
       {isLoading ? (
         <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+      ) : error ? (
+        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
       ) : plans.length === 0 ? (
         <div style={{ color: '#9ca3af', padding: 20, textAlign: 'center' }}>
           No plans yet
@@ -224,7 +243,7 @@ export default function Plans() {
                   marginBottom: 12,
                 }}
               >
-                {plan.fileType}
+                {plan.fileType.toUpperCase()}
               </div>
               <div
                 style={{
@@ -247,7 +266,7 @@ export default function Plans() {
               >
                 <span>Floor: {plan.floor || '—'}</span>
                 <span>Scale: {plan.scale || '—'}</span>
-                <span>Type: {plan.fileType}</span>
+                <span>Type: {plan.fileType.toUpperCase()}</span>
                 <span>v{plan.version ?? 1}</span>
               </div>
 
@@ -275,7 +294,7 @@ export default function Plans() {
                     <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13 }}>
                       {planDetail.annotations.map((a) => (
                         <li key={a.id} style={{ color: '#4b5563', marginBottom: 4 }}>
-                          <strong>{a.label}</strong>: {a.note}
+                          <strong>{a.label || a.type}</strong>: {a.type}
                         </li>
                       ))}
                     </ul>

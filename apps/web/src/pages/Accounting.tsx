@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, api } from '../lib/api';
+import { apiGet, apiList, apiPost, ApiError } from '../lib/api';
+import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -26,25 +27,30 @@ interface JournalEntryLine {
 
 interface JournalEntry {
   id: string;
-  entryNumber?: string;
+  entryNumber?: number;
   entryDate: string;
   description: string;
-  referenceType?: string;
+  referenceType?: string | null;
   isPosted: boolean;
-  totalDebitCents: number;
-  totalCreditCents: number;
   lines?: JournalEntryLine[];
   createdAt: string;
 }
 
+/** Row of GET /accounting/ledger/:accountId → { accountId, entries } */
 interface LedgerEntry {
-  entryId: string;
-  entryNumber?: string;
-  date: string;
+  entryNumber: number;
+  entryDate: string;
   description: string;
   debitCents: number;
   creditCents: number;
   balanceCents: number;
+}
+
+/** GET /accounting/export/fiduciary → semicolon-separated CSV strings (UTF-8 BOM). */
+interface FiduciaryExport {
+  journalCsv: string;
+  balanceCsv: string;
+  clientCsv: string;
 }
 
 interface TrialBalanceRow {
@@ -54,11 +60,6 @@ interface TrialBalanceRow {
   type: string;
   debitCents: number;
   creditCents: number;
-}
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -87,15 +88,40 @@ const TAB_LABELS: Record<Tab, string> = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const displayCHF = (cents: number): string => {
-  const rounded = Math.round(cents / 5) * 5;
-  return `CHF ${(rounded / 100).toFixed(2)}`;
-};
+// Exact to the centime — ledger amounts must never be display-rounded.
+const displayCHF = (cents: number): string => `CHF ${(cents / 100).toFixed(2)}`;
 
-const displayAmount = (cents: number): string => {
-  const rounded = Math.round(cents / 5) * 5;
-  return (rounded / 100).toFixed(2);
-};
+const displayAmount = (cents: number): string => (cents / 100).toFixed(2);
+
+const errorMessage = (e: unknown, fallback: string): string =>
+  e instanceof ApiError || e instanceof Error ? e.message || fallback : fallback;
+
+const entryTotalDebit = (e: JournalEntry): number =>
+  (e.lines ?? []).reduce((sum, l) => sum + (l.debitCents || 0), 0);
+
+/** Parses the API's semicolon-separated CSV (optional BOM, "quoted" fields) for preview. */
+function parseCsv(csv: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  const text = csv.replace(/^\uFEFF/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ';') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
+  }
+  if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
+  const [headers, ...body] = rows;
+  if (!headers) return [];
+  return body.map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared styles                                                      */
@@ -169,7 +195,10 @@ const tdStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export default function Accounting() {
-  const [activeTab, setActiveTab] = useState<Tab>('accounts');
+  // Project managers may only run the fiduciary export (PRD §3.2); the ledger is admin-only.
+  const isAdmin = useCurrentUser().role === 'ADMIN';
+  const visibleTabs: readonly Tab[] = isAdmin ? TABS : ['export'];
+  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'accounts' : 'export');
   const [error, setError] = useState('');
 
   /* ============================================================ */
@@ -221,7 +250,7 @@ export default function Accounting() {
   /* ============================================================ */
   const [exportDateFrom, setExportDateFrom] = useState('');
   const [exportDateTo, setExportDateTo] = useState('');
-  const [exportData, setExportData] = useState<any>(null);
+  const [exportData, setExportData] = useState<FiduciaryExport | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
 
   /* ============================================================ */
@@ -237,11 +266,10 @@ export default function Accounting() {
   const fetchAccounts = useCallback(async () => {
     setAccountsLoading(true);
     try {
-      const res = await apiGet<any>('/accounting/accounts');
-      const items = Array.isArray(res) ? res : res?.data ?? [];
-      setAccounts(items);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load accounts');
+      const items = await apiGet<Account[]>('/accounting/accounts?limit=500');
+      setAccounts(Array.isArray(items) ? items : []);
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load accounts'));
     } finally {
       setAccountsLoading(false);
     }
@@ -254,18 +282,11 @@ export default function Accounting() {
       if (entryDateFrom) path += `&dateFrom=${entryDateFrom}`;
       if (entryDateTo) path += `&dateTo=${entryDateTo}`;
       if (entryPostedFilter) path += `&isPosted=${entryPostedFilter}`;
-      const res = await apiGet<any>(path);
-      if (Array.isArray(res)) {
-        setEntries(res);
-        setEntriesTotalPages(1);
-      } else if (res?.data) {
-        setEntries(res.data);
-        setEntriesTotalPages(Math.ceil((res.meta?.total ?? res.data.length) / (res.meta?.pageSize ?? 25)));
-      } else {
-        setEntries([]);
-      }
-    } catch (e: any) {
-      setError(e.message || 'Failed to load entries');
+      const { items, meta } = await apiList<JournalEntry>(path);
+      setEntries(items);
+      setEntriesTotalPages(Math.max(1, meta?.totalPages ?? 1));
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load entries'));
     } finally {
       setEntriesLoading(false);
     }
@@ -280,11 +301,10 @@ export default function Accounting() {
       if (ledgerDateFrom) params.push(`dateFrom=${ledgerDateFrom}`);
       if (ledgerDateTo) params.push(`dateTo=${ledgerDateTo}`);
       if (params.length) path += '?' + params.join('&');
-      const res = await apiGet<any>(path);
-      const items = Array.isArray(res) ? res : res?.data ?? [];
-      setLedgerEntries(items);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load ledger');
+      const res = await apiGet<{ accountId: string; entries: LedgerEntry[] }>(path);
+      setLedgerEntries(res?.entries ?? []);
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to load ledger'));
     } finally {
       setLedgerLoading(false);
     }
@@ -308,16 +328,16 @@ export default function Accounting() {
     }
     try {
       await apiPost('/accounting/accounts', {
-        accountNumber: accountForm.accountNumber,
-        name: accountForm.name,
+        accountNumber: accountForm.accountNumber.trim(),
+        name: accountForm.name.trim(),
         type: accountForm.type,
-        parentId: accountForm.parentId || undefined,
+        ...(accountForm.parentId ? { parentId: accountForm.parentId } : {}),
       });
       setShowAccountForm(false);
       setAccountForm({ accountNumber: '', name: '', type: 'asset', parentId: '' });
       fetchAccounts();
-    } catch (e: any) {
-      setError(e.message || 'Failed to create account');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to create account'));
     }
   };
 
@@ -326,8 +346,8 @@ export default function Accounting() {
     try {
       await apiPost('/accounting/accounts/seed');
       fetchAccounts();
-    } catch (e: any) {
-      setError(e.message || 'Failed to seed defaults');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to seed defaults'));
     }
   };
 
@@ -366,10 +386,16 @@ export default function Accounting() {
       setEntryError('All lines must have an account selected');
       return;
     }
+    const validAmount = (c: number) => Number.isInteger(c) && c >= 0;
+    if (entryLines.some(l => !validAmount(l.debitCents) || !validAmount(l.creditCents))) {
+      setEntryError('Amounts must be positive');
+      return;
+    }
     try {
       await apiPost('/accounting/entries', {
         entryDate: entryForm.entryDate,
-        description: entryForm.description,
+        description: entryForm.description.trim(),
+        ...(entryForm.referenceType.trim() ? { referenceType: entryForm.referenceType.trim() } : {}),
         lines: entryLines.map(l => ({
           accountId: l.accountId,
           debitCents: l.debitCents,
@@ -383,8 +409,8 @@ export default function Accounting() {
         { accountId: '', debitCents: 0, creditCents: 0 },
       ]);
       fetchEntries();
-    } catch (e: any) {
-      setEntryError(e.message || 'Failed to create entry');
+    } catch (e) {
+      setEntryError(errorMessage(e, 'Failed to create entry'));
     }
   };
 
@@ -393,8 +419,8 @@ export default function Accounting() {
     try {
       await apiPost(`/accounting/entries/${id}/post`);
       fetchEntries();
-    } catch (e: any) {
-      setError(e.message || 'Failed to post entry');
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to post entry'));
     }
   };
 
@@ -409,24 +435,24 @@ export default function Accounting() {
     }
     setExportLoading(true);
     try {
-      const res = await apiGet<any>(`/accounting/export/fiduciary?dateFrom=${exportDateFrom}&dateTo=${exportDateTo}`);
-      setExportData(res?.data ?? res);
-    } catch (e: any) {
-      setError(e.message || 'Failed to generate export');
+      if (exportDateFrom > exportDateTo) {
+        setError('"From" must not be after "To"');
+        return;
+      }
+      const res = await apiGet<FiduciaryExport>(
+        `/accounting/export/fiduciary?dateFrom=${encodeURIComponent(exportDateFrom)}&dateTo=${encodeURIComponent(exportDateTo)}`,
+      );
+      setExportData(res);
+    } catch (e) {
+      setError(errorMessage(e, 'Failed to generate export'));
     } finally {
       setExportLoading(false);
     }
   };
 
-  const downloadCSV = (data: any[], filename: string) => {
-    if (!data || data.length === 0) return;
-    const headers = Object.keys(data[0]);
-    const rows = data.map(row => headers.map(h => {
-      const val = row[h];
-      const str = val == null ? '' : String(val);
-      return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
-    }).join(','));
-    const csv = [headers.join(','), ...rows].join('\n');
+  /** Downloads the CSV exactly as generated by the API (semicolons, BOM, Swiss dates). */
+  const downloadCSV = (csv: string, filename: string) => {
+    if (!csv) return;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -495,7 +521,7 @@ export default function Accounting() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
-        {TABS.map(tab => (
+        {visibleTabs.map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -847,7 +873,7 @@ export default function Accounting() {
                         </span>
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                        {displayCHF(e.totalDebitCents)}
+                        {displayCHF(entryTotalDebit(e))}
                       </td>
                       <td style={tdStyle}>
                         {!e.isPosted && (
@@ -940,9 +966,9 @@ export default function Accounting() {
                   </thead>
                   <tbody>
                     {ledgerEntries.map((entry, idx) => (
-                      <tr key={`${entry.entryId}-${idx}`}>
-                        <td style={tdStyle}>{new Date(entry.date).toLocaleDateString()}</td>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{entry.entryNumber || entry.entryId?.slice(0, 8)}</td>
+                      <tr key={`${entry.entryNumber}-${idx}`}>
+                        <td style={tdStyle}>{new Date(entry.entryDate).toLocaleDateString()}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{entry.entryNumber}</td>
                         <td style={tdStyle}>{entry.description}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
                           {entry.debitCents > 0 ? displayAmount(entry.debitCents) : ''}
@@ -1018,17 +1044,16 @@ export default function Accounting() {
             <div>
               {/* Render each CSV dataset */}
               {(() => {
-                const datasets: { key: string; label: string; data: any[] }[] = [];
-
-                if (Array.isArray(exportData)) {
-                  datasets.push({ key: 'export', label: 'Export Data', data: exportData });
-                } else if (typeof exportData === 'object') {
-                  Object.entries(exportData).forEach(([key, val]) => {
-                    if (Array.isArray(val) && val.length > 0) {
-                      datasets.push({ key, label: key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()), data: val as any[] });
-                    }
-                  });
-                }
+                const datasets: { key: string; label: string; csv: string; data: Record<string, string>[] }[] = [];
+                const sources: [string, string, string][] = [
+                  ['journal', 'Journal', exportData.journalCsv],
+                  ['balance', 'Balance', exportData.balanceCsv],
+                  ['clients', 'Clients', exportData.clientCsv],
+                ];
+                sources.forEach(([key, label, csv]) => {
+                  const data = csv ? parseCsv(csv) : [];
+                  if (data.length > 0) datasets.push({ key, label, csv, data });
+                });
 
                 if (datasets.length === 0) {
                   return <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>No data to export</p>;
@@ -1040,7 +1065,7 @@ export default function Accounting() {
                       <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>{ds.label}</h4>
                       <button
                         style={{ ...btnOutline, fontSize: 12, padding: '4px 12px' }}
-                        onClick={() => downloadCSV(ds.data, `${ds.key}_${exportDateFrom}_${exportDateTo}.csv`)}
+                        onClick={() => downloadCSV(ds.csv, `${ds.key}_${exportDateFrom}_${exportDateTo}.csv`)}
                       >
                         Download CSV
                       </button>

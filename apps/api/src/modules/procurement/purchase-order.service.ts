@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity';
 import { PurchaseOrderLine } from './entities/purchase-order-line.entity';
 import { StockItem } from './entities/stock-item.entity';
 import { StockMovement } from './entities/stock-movement.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import {
+  CreatePurchaseOrderDto,
+  PurchaseOrderLineDto,
+} from './dto/purchase-order.dto';
 
 interface PurchaseOrderFilters {
   page?: number;
@@ -15,19 +19,7 @@ interface PurchaseOrderFilters {
   status?: string;
 }
 
-interface CreateLineDto {
-  description: string;
-  quantity: number;
-  unit: string;
-  unitPriceCents: number;
-  canonicalArticleId?: string;
-}
-
-interface CreatePurchaseOrderDto {
-  supplierId: string;
-  projectId?: string;
-  lines: CreateLineDto[];
-}
+const DELIVERABLE_STATUSES = ['sent', 'confirmed', 'partially_delivered', 'delivered'];
 
 @Injectable()
 export class PurchaseOrderService {
@@ -40,6 +32,7 @@ export class PurchaseOrderService {
     private readonly stockItemRepo: Repository<StockItem>,
     @InjectRepository(StockMovement)
     private readonly stockMovementRepo: Repository<StockMovement>,
+    private readonly dataSource: DataSource,
   ) {}
 
   /* ───────────── List ───────────── */
@@ -105,17 +98,6 @@ export class PurchaseOrderService {
       );
     }
 
-    // Generate reference PO-YYYY-NNNN
-    const year = new Date().getFullYear();
-    const countResult = await this.poRepo
-      .createQueryBuilder('po')
-      .where('po.company_id = :companyId', { companyId })
-      .andWhere('po.reference LIKE :prefix', { prefix: `PO-${year}-%` })
-      .getCount();
-
-    const seqNum = countResult + 1;
-    const reference = `PO-${year}-${String(seqNum).padStart(4, '0')}`;
-
     // Compute line totals and overall total
     let totalHtCents = 0;
     const lineEntities: PurchaseOrderLine[] = [];
@@ -138,25 +120,32 @@ export class PurchaseOrderService {
       );
     }
 
-    const po = this.poRepo.create({
-      companyId,
-      supplierId: dto.supplierId,
-      projectId: dto.projectId || null,
-      reference,
-      status: 'draft',
-      totalHtCents,
-      createdById: userId,
+    const poId = await this.dataSource.transaction(async (m) => {
+      // Serialise per company so the yearly PO-YYYY-NNNN sequence has no duplicates.
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase_order:${companyId}`]);
+      const prefix = `PO-${new Date().getFullYear()}-`;
+      const [{ max }] = await m.query(
+        `SELECT MAX(substring(reference from '[0-9]+$')::int) AS max
+         FROM purchase_order WHERE company_id = $1 AND reference LIKE $2`,
+        [companyId, `${prefix}%`],
+      );
+      const savedPo = await m.save(
+        m.create(PurchaseOrder, {
+          companyId,
+          supplierId: dto.supplierId,
+          projectId: dto.projectId || null,
+          reference: `${prefix}${String((max ?? 0) + 1).padStart(4, '0')}`,
+          status: 'draft',
+          totalHtCents,
+          createdById: userId,
+        }),
+      );
+      for (const line of lineEntities) line.purchaseOrderId = savedPo.id;
+      await m.save(lineEntities);
+      return savedPo.id;
     });
 
-    const savedPo = await this.poRepo.save(po);
-
-    // Set purchaseOrderId on lines and save
-    for (const line of lineEntities) {
-      line.purchaseOrderId = savedPo.id;
-    }
-    await this.lineRepo.save(lineEntities);
-
-    return this.findById(companyId, savedPo.id);
+    return this.findById(companyId, poId);
   }
 
   /* ───────────── Update Status ───────────── */
@@ -173,9 +162,8 @@ export class PurchaseOrderService {
       sent: ['confirmed', 'cancelled'],
       confirmed: ['partially_delivered', 'delivered', 'cancelled'],
       partially_delivered: ['delivered', 'cancelled'],
-      delivered: ['closed'],
+      delivered: [],
       cancelled: [],
-      closed: [],
     };
 
     const allowed = validTransitions[po.status] || [];
@@ -200,7 +188,7 @@ export class PurchaseOrderService {
   async addLine(
     companyId: string,
     orderId: string,
-    dto: CreateLineDto,
+    dto: PurchaseOrderLineDto,
   ): Promise<PurchaseOrder> {
     const po = await this.findById(companyId, orderId);
 
@@ -250,63 +238,92 @@ export class PurchaseOrderService {
 
   /* ───────────── Record Delivery ───────────── */
 
+  /**
+   * deliveredQty is the line's cumulative delivered quantity; only the change since the last
+   * recording is booked to stock, into a single stock item for the article.
+   */
   async recordDelivery(
     companyId: string,
     orderId: string,
     lineId: string,
     deliveredQty: number,
+    locationId?: string,
   ): Promise<PurchaseOrder> {
-    const po = await this.findById(companyId, orderId);
-
-    const line = await this.lineRepo.findOne({
-      where: { id: lineId, purchaseOrderId: orderId, companyId },
-    });
-    if (!line) throw new NotFoundError('PurchaseOrderLine', lineId);
-
-    line.deliveredQuantity = deliveredQty;
-    await this.lineRepo.save(line);
-
-    // Create stock movement if a matching stock item exists for this article
-    if (line.canonicalArticleId) {
-      const stockItems = await this.stockItemRepo.find({
-        where: { companyId, canonicalArticleId: line.canonicalArticleId },
+    await this.dataSource.transaction(async (m) => {
+      const po = await m.findOne(PurchaseOrder, {
+        where: { id: orderId, companyId },
+        lock: { mode: 'pessimistic_write' },
       });
-
-      for (const stockItem of stockItems) {
-        const movement = this.stockMovementRepo.create({
-          companyId,
-          stockItemId: stockItem.id,
-          type: 'in',
-          quantity: deliveredQty,
-          reference: `PO ${po.reference} line ${lineId}`,
-        });
-        await this.stockMovementRepo.save(movement);
-
-        // Update stock item quantity
-        stockItem.quantity = (stockItem.quantity || 0) + deliveredQty;
-        await this.stockItemRepo.save(stockItem);
+      if (!po) throw new NotFoundError('PurchaseOrder', orderId);
+      if (!DELIVERABLE_STATUSES.includes(po.status)) {
+        throw new BusinessRuleError(
+          'PO_NOT_DELIVERABLE',
+          `Deliveries can only be recorded on sent or confirmed orders (status is '${po.status}').`,
+        );
       }
-    }
 
-    // Reload lines to check overall delivery status
-    const allLines = await this.lineRepo.find({
-      where: { purchaseOrderId: orderId, companyId },
+      const line = await m.findOne(PurchaseOrderLine, {
+        where: { id: lineId, purchaseOrderId: orderId, companyId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!line) throw new NotFoundError('PurchaseOrderLine', lineId);
+
+      const delta = deliveredQty - Number(line.deliveredQuantity || 0);
+      line.deliveredQuantity = deliveredQty;
+      await m.save(line);
+
+      if (delta !== 0 && line.canonicalArticleId) {
+        const stockItem = await this.resolveDeliveryStockItem(m, companyId, line.canonicalArticleId, locationId);
+        if (stockItem) {
+          await m.save(
+            m.create(StockMovement, {
+              companyId,
+              stockItemId: stockItem.id,
+              type: delta > 0 ? 'in' : 'adjustment',
+              quantity: delta,
+              reference: `PO ${po.reference} line ${lineId}`,
+            }),
+          );
+          stockItem.quantity = Number(stockItem.quantity || 0) + delta;
+          await m.save(stockItem);
+        }
+      }
+
+      const allLines = await m.find(PurchaseOrderLine, { where: { purchaseOrderId: orderId, companyId } });
+      const allFullyDelivered = allLines.every((l) => Number(l.deliveredQuantity) >= Number(l.quantity));
+      const anyDelivered = allLines.some((l) => Number(l.deliveredQuantity) > 0);
+      po.status = allFullyDelivered ? 'delivered' : anyDelivered ? 'partially_delivered' : po.status;
+      await m.save(po);
     });
-
-    const allFullyDelivered = allLines.every(
-      (l) => l.deliveredQuantity >= l.quantity,
-    );
-    const anyDelivered = allLines.some((l) => l.deliveredQuantity > 0);
-
-    if (allFullyDelivered) {
-      po.status = 'delivered';
-    } else if (anyDelivered) {
-      po.status = 'partially_delivered';
-    }
-
-    await this.poRepo.save(po);
 
     return this.findById(companyId, orderId);
+  }
+
+  /** The target location's item (created if needed), else the article's only stock item, else none. */
+  private async resolveDeliveryStockItem(
+    m: EntityManager,
+    companyId: string,
+    canonicalArticleId: string,
+    locationId?: string,
+  ): Promise<StockItem | null> {
+    if (locationId) {
+      const existing = await m.findOne(StockItem, {
+        where: { companyId, canonicalArticleId, locationId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      return existing ?? m.save(m.create(StockItem, { companyId, canonicalArticleId, locationId, quantity: 0 }));
+    }
+    const items = await m.find(StockItem, {
+      where: { companyId, canonicalArticleId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (items.length > 1) {
+      throw new BusinessRuleError(
+        'LOCATION_REQUIRED',
+        'This article is stocked in several locations. Choose the location receiving the delivery.',
+      );
+    }
+    return items[0] ?? null;
   }
 
   /* ───────────── Private Helpers ───────────── */

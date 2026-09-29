@@ -13,7 +13,17 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import {
+  OFFICE_ROLES,
+  Roles,
+  SITE_LEAD_ROLES,
+} from '../../common/decorators/roles.decorator';
+import {
+  CreatePurchaseOrderDto,
+  PurchaseOrderLineDto,
+  RecordDeliveryDto,
+  UpdatePurchaseOrderStatusDto,
+} from './dto/purchase-order.dto';
 import { PurchaseOrderService } from './purchase-order.service';
 
 @Controller('purchase-orders')
@@ -21,7 +31,7 @@ export class PurchaseOrderController {
   constructor(private readonly service: PurchaseOrderService) {}
 
   @Get()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findAll(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -40,7 +50,7 @@ export class PurchaseOrderController {
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findById(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -49,55 +59,37 @@ export class PurchaseOrderController {
   }
 
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async create(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      supplierId: string;
-      projectId?: string;
-      lines: {
-        description: string;
-        quantity: number;
-        unit: string;
-        unitPriceCents: number;
-        canonicalArticleId?: string;
-      }[];
-    },
+    @Body() body: CreatePurchaseOrderDto,
   ) {
     return this.service.create(companyId, user.id, body);
   }
 
   @Put(':id/status')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateStatus(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { status: string },
+    @Body() body: UpdatePurchaseOrderStatusDto,
   ) {
     return this.service.updateStatus(companyId, id, body.status);
   }
 
   @Post(':id/lines')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async addLine(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      description: string;
-      quantity: number;
-      unit: string;
-      unitPriceCents: number;
-      canonicalArticleId?: string;
-    },
+    @Body() body: PurchaseOrderLineDto,
   ) {
     return this.service.addLine(companyId, id, body);
   }
 
   @Delete(':id/lines/:lineId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async removeLine(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -107,13 +99,13 @@ export class PurchaseOrderController {
   }
 
   @Post(':id/lines/:lineId/delivery')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...SITE_LEAD_ROLES)
   async recordDelivery(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('lineId', ParseUUIDPipe) lineId: string,
-    @Body() body: { deliveredQuantity: number },
+    @Body() body: RecordDeliveryDto,
   ) {
-    return this.service.recordDelivery(companyId, id, lineId, body.deliveredQuantity);
+    return this.service.recordDelivery(companyId, id, lineId, body.deliveredQuantity, body.locationId);
   }
 }

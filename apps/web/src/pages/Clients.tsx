@@ -17,17 +17,57 @@ interface Client {
 
 interface Contact {
   id: string;
-  name: string;
-  role: string;
-  email: string;
-  phone: string;
+  firstName: string;
+  lastName: string;
+  role: string | null;
+  email: string | null;
+  phone: string | null;
 }
 
 interface Interaction {
   id: string;
+  type: string | null;
+  subject: string | null;
+  body: string | null;
+  interactionDate: string;
+}
+
+// Must match the client.type CHECK constraint.
+const CLIENT_TYPES: Array<[string, string]> = [
+  ['entreprise_generale', 'Entreprise générale'],
+  ['maitre_ouvrage', "Maître d'ouvrage"],
+  ['architecte', 'Architecte'],
+  ['sous_traitant', 'Sous-traitant'],
+  ['fournisseur', 'Fournisseur'],
+  ['autre', 'Autre'],
+];
+
+type ClientForm = {
+  name: string;
   type: string;
-  date: string;
-  notes: string;
+  email: string;
+  phone: string;
+  city: string;
+  canton: string;
+};
+
+const EMPTY_FORM: ClientForm = {
+  name: '',
+  type: 'entreprise_generale',
+  email: '',
+  phone: '',
+  city: '',
+  canton: '',
+};
+
+/** Drop empty optional fields: the API validates e.g. `email` and rejects "". */
+function toCreatePayload(form: ClientForm): Record<string, string> {
+  const payload: Record<string, string> = { name: form.name.trim() };
+  for (const key of ['type', 'email', 'phone', 'city', 'canton'] as const) {
+    const v = form[key].trim();
+    if (v) payload[key] = v;
+  }
+  return payload;
 }
 
 const PIPELINE_STAGES = ['prospect', 'qualified', 'active', 'inactive', 'archived'] as const;
@@ -65,30 +105,23 @@ export default function Clients() {
   const [stageFilter, setStageFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    type: 'company',
-    email: '',
-    phone: '',
-    city: '',
-    canton: '',
-  });
+  const [form, setForm] = useState<ClientForm>(EMPTY_FORM);
 
   const { data: clients = [], isLoading, error } = useQuery<Client[], ApiError>({
     queryKey: ['clients', stageFilter],
     queryFn: () => {
-      const params = stageFilter ? `?pipelineStage=${stageFilter}` : '';
-      return apiGet<Client[]>(`/clients${params}`);
+      const params = stageFilter ? `&stage=${encodeURIComponent(stageFilter)}` : '';
+      return apiGet<Client[]>(`/clients?limit=100${params}`);
     },
     retry: false,
   });
 
-  const createMutation = useMutation({
-    mutationFn: (data: typeof form) => apiPost<Client>('/clients', data),
+  const createMutation = useMutation<Client, ApiError, ClientForm>({
+    mutationFn: (data) => apiPost<Client>('/clients', toCreatePayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
       setShowForm(false);
-      setForm({ name: '', type: 'company', email: '', phone: '', city: '', canton: '' });
+      setForm(EMPTY_FORM);
     },
   });
 
@@ -161,9 +194,11 @@ export default function Clients() {
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
-              <option value="company">Company</option>
-              <option value="individual">Individual</option>
-              <option value="public">Public</option>
+              {CLIENT_TYPES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
             <input
               style={inputStyle}
@@ -192,7 +227,7 @@ export default function Clients() {
           </div>
           <button
             style={buttonStyle}
-            onClick={() => form.name && createMutation.mutate(form)}
+            onClick={() => form.name.trim() && createMutation.mutate(form)}
             disabled={createMutation.isPending}
           >
             {createMutation.isPending ? 'Creating...' : 'Create Client'}
@@ -230,6 +265,8 @@ export default function Clients() {
       {/* Table */}
       {isLoading ? (
         <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+      ) : error ? (
+        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -358,7 +395,10 @@ export default function Clients() {
                                   key={c.id}
                                   style={{ fontSize: 13, color: '#4b5563', marginBottom: 4 }}
                                 >
-                                  <strong>{c.name}</strong> ({c.role}) — {c.email}{' '}
+                                  <strong>
+                                    {c.firstName} {c.lastName}
+                                  </strong>
+                                  {c.role ? ` (${c.role})` : ''} — {c.email}{' '}
                                   {c.phone}
                                 </li>
                               ))}
@@ -391,7 +431,9 @@ export default function Clients() {
                                   key={i.id}
                                   style={{ fontSize: 13, color: '#4b5563', marginBottom: 4 }}
                                 >
-                                  <strong>{i.type}</strong> — {i.date}: {i.notes}
+                                  <strong>{i.type}</strong> —{' '}
+                                  {new Date(i.interactionDate).toLocaleDateString()}:{' '}
+                                  {i.subject || i.body}
                                 </li>
                               ))}
                             </ul>

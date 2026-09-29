@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiList, apiPost } from '../lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -14,24 +14,24 @@ interface StockLocation {
 interface StockItem {
   id: string;
   canonicalArticleId?: string;
-  article?: { designation?: string; unit?: string };
+  canonicalArticle?: { description?: string; unit?: string };
   locationId: string;
   location?: { name: string; type: string };
   quantity: number;
-  minThreshold: number;
+  minThreshold: number | null;
   createdAt: string;
 }
 
 interface StockMovement {
   id: string;
   stockItemId: string;
-  stockItem?: { article?: { designation?: string }; location?: { name: string } };
+  stockItem?: { canonicalArticle?: { description?: string }; location?: { name: string } };
   type: 'in' | 'out' | 'transfer' | 'adjustment';
   quantity: number;
   projectId?: string;
   project?: { name: string };
   reference?: string;
-  createdBy?: string;
+  performedBy?: string;
   createdAt: string;
 }
 
@@ -84,10 +84,8 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('fr-CH');
 }
 
-function unwrap<T>(res: unknown): T[] {
-  if (Array.isArray(res)) return res as T[];
-  if (res && typeof res === 'object' && 'data' in res) return (res as { data: T[] }).data ?? [];
-  return [];
+function errMsg(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 /* ── Sub-components ────────────────────────────────────────────────── */
@@ -100,6 +98,24 @@ function Badge({ label, bg, color }: { label: string; bg: string; color: string 
     }}>
       {label}
     </span>
+  );
+}
+
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div style={{
+      padding: '10px 16px', marginBottom: 16, background: '#fee2e2', color: '#991b1b',
+      borderRadius: 6, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    }}>
+      <span>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontWeight: 600 }}
+      >
+        &times;
+      </button>
+    </div>
   );
 }
 
@@ -127,7 +143,9 @@ function LoadingState() {
 
 function LocationsTab() {
   const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [type, setType] = useState<'warehouse' | 'vehicle' | 'site'>('warehouse');
@@ -137,9 +155,12 @@ function LocationsTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiGet('/stock/locations?page=1');
-      setLocations(unwrap<StockLocation>(res));
-    } catch { /* empty */ }
+      const { items, meta } = await apiList<StockLocation>('/stock/locations?page=1&limit=100');
+      setLocations(items);
+      setTotal(meta?.total ?? items.length);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to load locations'));
+    }
     setLoading(false);
   }, []);
 
@@ -153,7 +174,9 @@ function LocationsTab() {
       await apiPost('/stock/locations', { name: name.trim(), type, address: address.trim() || undefined });
       setName(''); setAddress(''); setShowForm(false);
       await load();
-    } catch { /* empty */ }
+    } catch (err) {
+      setError(errMsg(err, 'Failed to create location'));
+    }
     setSaving(false);
   };
 
@@ -163,12 +186,14 @@ function LocationsTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          Storage Locations ({locations.length})
+          Storage Locations ({total})
         </h3>
         <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
           {showForm ? 'Cancel' : '+ New Location'}
         </button>
       </div>
+
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {showForm && (
         <form onSubmit={handleCreate} style={{
@@ -234,6 +259,7 @@ function ItemsTab() {
   const [items, setItems] = useState<StockItem[]>([]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [filterLocation, setFilterLocation] = useState('');
   const [belowOnly, setBelowOnly] = useState(false);
@@ -251,12 +277,14 @@ function ItemsTab() {
       if (filterLocation) params.set('locationId', filterLocation);
       if (belowOnly) params.set('belowThreshold', 'true');
       const [itemsRes, locsRes] = await Promise.all([
-        apiGet(`/stock/items?${params}`),
-        apiGet('/stock/locations?page=1'),
+        apiGet<StockItem[]>(`/stock/items?${params}`),
+        apiGet<StockLocation[]>('/stock/locations?page=1&limit=100'),
       ]);
-      setItems(unwrap<StockItem>(itemsRes));
-      setLocations(unwrap<StockLocation>(locsRes));
-    } catch { /* empty */ }
+      setItems(itemsRes ?? []);
+      setLocations(locsRes ?? []);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to load stock items'));
+    }
     setLoading(false);
   }, [filterLocation, belowOnly]);
 
@@ -276,7 +304,9 @@ function ItemsTab() {
       setNewArticleId(''); setNewLocationId(''); setNewQuantity(''); setNewThreshold('');
       setShowForm(false);
       await load();
-    } catch { /* empty */ }
+    } catch (err) {
+      setError(errMsg(err, 'Failed to add stock item'));
+    }
     setSaving(false);
   };
 
@@ -308,6 +338,8 @@ function ItemsTab() {
           {showForm ? 'Cancel' : '+ Add Item'}
         </button>
       </div>
+
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {showForm && (
         <form onSubmit={handleCreate} style={{
@@ -359,7 +391,7 @@ function ItemsTab() {
             </thead>
             <tbody>
               {items.map(item => {
-                const isLow = item.quantity <= item.minThreshold;
+                const isLow = item.quantity <= (item.minThreshold ?? 0);
                 return (
                   <tr key={item.id} style={{
                     borderLeft: isLow ? '3px solid #f59e0b' : '3px solid transparent',
@@ -367,10 +399,10 @@ function ItemsTab() {
                   }}>
                     <td style={tdStyle}>
                       <div style={{ fontWeight: 500 }}>
-                        {item.article?.designation ?? item.canonicalArticleId ?? '-'}
+                        {item.canonicalArticle?.description ?? item.canonicalArticleId ?? '-'}
                       </div>
-                      {item.article?.unit && (
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>{item.article.unit}</div>
+                      {item.canonicalArticle?.unit && (
+                        <div style={{ fontSize: 12, color: '#6b7280' }}>{item.canonicalArticle.unit}</div>
                       )}
                     </td>
                     <td style={tdStyle}>{item.location?.name ?? '-'}</td>
@@ -378,7 +410,7 @@ function ItemsTab() {
                       {item.quantity}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {item.minThreshold}
+                      {item.minThreshold ?? 0}
                     </td>
                     <td style={tdStyle}>
                       {isLow
@@ -404,8 +436,11 @@ function ItemsTab() {
 
 function MovementsTab() {
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [total, setTotal] = useState(0);
   const [items, setItems] = useState<StockItem[]>([]);
+  const [locations, setLocations] = useState<StockLocation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   const [newItemId, setNewItemId] = useState('');
@@ -413,18 +448,24 @@ function MovementsTab() {
   const [newQty, setNewQty] = useState('');
   const [newRef, setNewRef] = useState('');
   const [newProjectId, setNewProjectId] = useState('');
+  const [newToLocationId, setNewToLocationId] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [movRes, itemsRes] = await Promise.all([
-        apiGet('/stock/movements?page=1'),
-        apiGet('/stock/items?page=1'),
+      const [movRes, itemsRes, locsRes] = await Promise.all([
+        apiList<StockMovement>('/stock/movements?page=1'),
+        apiGet<StockItem[]>('/stock/items?page=1&limit=100'),
+        apiGet<StockLocation[]>('/stock/locations?page=1&limit=100'),
       ]);
-      setMovements(unwrap<StockMovement>(movRes));
-      setItems(unwrap<StockItem>(itemsRes));
-    } catch { /* empty */ }
+      setMovements(movRes.items);
+      setTotal(movRes.meta?.total ?? movRes.items.length);
+      setItems(itemsRes ?? []);
+      setLocations(locsRes ?? []);
+    } catch (err) {
+      setError(errMsg(err, 'Failed to load movements'));
+    }
     setLoading(false);
   }, []);
 
@@ -433,19 +474,26 @@ function MovementsTab() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItemId || !newQty) return;
+    const isTransfer = newType === 'transfer';
+    if (isTransfer && !newToLocationId) return;
+    const sourceItem = items.find(it => it.id === newItemId);
     setSaving(true);
     try {
       await apiPost('/stock/movements', {
         stockItemId: newItemId,
         type: newType,
         quantity: Number(newQty),
+        fromLocationId: isTransfer ? sourceItem?.locationId : undefined,
+        toLocationId: isTransfer ? newToLocationId : undefined,
         reference: newRef.trim() || undefined,
         projectId: newProjectId.trim() || undefined,
       });
-      setNewItemId(''); setNewQty(''); setNewRef(''); setNewProjectId('');
+      setNewItemId(''); setNewQty(''); setNewRef(''); setNewProjectId(''); setNewToLocationId('');
       setShowForm(false);
       await load();
-    } catch { /* empty */ }
+    } catch (err) {
+      setError(errMsg(err, 'Failed to record movement'));
+    }
     setSaving(false);
   };
 
@@ -462,12 +510,14 @@ function MovementsTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          Movement Log ({movements.length})
+          Movement Log ({total})
         </h3>
         <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
           {showForm ? 'Cancel' : '+ Record Movement'}
         </button>
       </div>
+
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
 
       {showForm && (
         <form onSubmit={handleCreate} style={{
@@ -482,7 +532,8 @@ function MovementsTab() {
                 <option value="">Select item</option>
                 {items.map(it => (
                   <option key={it.id} value={it.id}>
-                    {it.article?.designation ?? it.canonicalArticleId ?? it.id}
+                    {it.canonicalArticle?.description ?? it.canonicalArticleId ?? it.id}
+                    {it.location?.name ? ` (${it.location.name})` : ''}
                   </option>
                 ))}
               </select>
@@ -508,6 +559,17 @@ function MovementsTab() {
               <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Project ID</label>
               <input style={inputStyle} value={newProjectId} onChange={e => setNewProjectId(e.target.value)} placeholder="Optional" />
             </div>
+            {newType === 'transfer' && (
+              <div>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>To Location *</label>
+                <select style={inputStyle} value={newToLocationId} onChange={e => setNewToLocationId(e.target.value)}>
+                  <option value="">Select location</option>
+                  {locations
+                    .filter(l => l.id !== items.find(it => it.id === newItemId)?.locationId)
+                    .map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
           <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
             {saving ? 'Recording...' : 'Record Movement'}
@@ -540,7 +602,7 @@ function MovementsTab() {
                       {fmtDate(mov.createdAt)}
                     </td>
                     <td style={tdStyle}>
-                      {mov.stockItem?.article?.designation ?? '-'}
+                      {mov.stockItem?.canonicalArticle?.description ?? '-'}
                     </td>
                     <td style={tdStyle}>
                       {mov.stockItem?.location?.name ?? '-'}

@@ -21,6 +21,15 @@ const CLIENT_DB_ERRORS: Record<string, [number, string, string]> = {
   '22008': [400, 'VALIDATION_ERROR', 'A date or time field is out of range.'],
 };
 
+const HTTP_CODES: Record<number, string> = {
+  400: 'VALIDATION_ERROR',
+  401: 'UNAUTHORIZED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  429: 'RATE_LIMITED',
+};
+
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
@@ -49,11 +58,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exResponse = exception.getResponse();
-      code = 'HTTP_ERROR';
-      message =
-        typeof exResponse === 'string'
-          ? exResponse
-          : (exResponse as any).message || exception.message;
+      const raw = typeof exResponse === 'string' ? exResponse : (exResponse as any).message;
+      code = HTTP_CODES[status] ?? 'HTTP_ERROR';
+      if (Array.isArray(raw)) {
+        // class-validator failures from ValidationPipe
+        message = raw.join('; ');
+        details = { errors: raw };
+      } else {
+        message = raw || exception.message;
+      }
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       code = 'INTERNAL_ERROR';

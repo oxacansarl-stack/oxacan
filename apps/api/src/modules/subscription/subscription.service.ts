@@ -5,23 +5,8 @@ import { Subscription } from './entities/subscription.entity';
 import { BillingEvent } from './entities/billing-event.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { CreateSubscriptionDto, UpdateSubscriptionDto } from './dto/subscription.dto';
 
-interface CreateSubscriptionDto {
-  stripeCustomerId: string;
-  tier: string;
-  saasSeatCount?: number;
-}
-
-interface UpdateSubscriptionDto {
-  tier?: string;
-  status?: string;
-  saasSeatCount?: number;
-  applicationSeatCount?: number;
-  stripeSubscriptionId?: string;
-  currentPeriodStart?: Date;
-  currentPeriodEnd?: Date;
-  trialEndsAt?: Date;
-}
 
 interface AddBillingEventDto {
   subscriptionId: string;
@@ -48,6 +33,11 @@ export class SubscriptionService {
   ) {}
 
   /* ───────────── Find by Company ───────────── */
+
+  /** A company without a subscription yet is a normal state, not an error. */
+  async findCurrent(companyId: string): Promise<Subscription | null> {
+    return this.subscriptionRepo.findOne({ where: { companyId } });
+  }
 
   async findByCompany(companyId: string): Promise<Subscription> {
     const subscription = await this.subscriptionRepo.findOne({
@@ -101,11 +91,11 @@ export class SubscriptionService {
     if (dto.stripeSubscriptionId !== undefined)
       subscription.stripeSubscriptionId = dto.stripeSubscriptionId;
     if (dto.currentPeriodStart !== undefined)
-      subscription.currentPeriodStart = dto.currentPeriodStart;
+      subscription.currentPeriodStart = dto.currentPeriodStart ? new Date(dto.currentPeriodStart) : null;
     if (dto.currentPeriodEnd !== undefined)
-      subscription.currentPeriodEnd = dto.currentPeriodEnd;
+      subscription.currentPeriodEnd = dto.currentPeriodEnd ? new Date(dto.currentPeriodEnd) : null;
     if (dto.trialEndsAt !== undefined)
-      subscription.trialEndsAt = dto.trialEndsAt;
+      subscription.trialEndsAt = dto.trialEndsAt ? new Date(dto.trialEndsAt) : null;
 
     return this.subscriptionRepo.save(subscription);
   }
@@ -163,13 +153,13 @@ export class SubscriptionService {
   /* ───────────── Seat Availability ───────────── */
 
   async checkSeatAvailability(companyId: string) {
-    const subscription = await this.findByCompany(companyId);
+    const subscription = await this.findCurrent(companyId);
 
     const used = await this.appUserRepo.count({
       where: { companyId, isActive: true },
     });
 
-    const total = subscription.saasSeatCount;
+    const total = subscription?.saasSeatCount ?? 0;
 
     return {
       used,

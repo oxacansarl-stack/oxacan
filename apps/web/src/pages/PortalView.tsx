@@ -42,6 +42,49 @@ interface PortalData {
   taskOverview: TaskOverview;
 }
 
+/** Raw shape of GET /portal/view/:token (inside the response envelope). */
+interface PortalApiResponse {
+  project: { name: string; status: string; progressPercent: number | null };
+  lots: { id: string; name: string }[];
+  milestones: { id: string; name: string; status: string; targetDate: string | null }[];
+  tasks: { id: string; lotId: string | null; status: string }[];
+  dailyReports: { id: string; date: string; workDescription: string | null }[];
+}
+
+function toPortalData(raw: PortalApiResponse): PortalData {
+  const tasks = raw.tasks ?? [];
+  const countStatus = (st: string) => tasks.filter(t => t.status === st).length;
+  return {
+    project: {
+      name: raw.project.name,
+      status: raw.project.status,
+      progress: raw.project.progressPercent ?? 0,
+    },
+    lots: (raw.lots ?? []).map(l => ({
+      id: l.id,
+      name: l.name,
+      taskCount: tasks.filter(t => t.lotId === l.id).length,
+    })),
+    milestones: (raw.milestones ?? []).map(m => ({
+      id: m.id,
+      name: m.name,
+      status: m.status,
+      dueDate: m.targetDate ?? undefined,
+    })),
+    recentReports: (raw.dailyReports ?? []).map(r => ({
+      id: r.id,
+      date: r.date,
+      summary: r.workDescription ?? '',
+    })),
+    taskOverview: {
+      todo: countStatus('todo'),
+      in_progress: countStatus('in_progress'),
+      // 'validated' is a signed-off 'done'
+      done: countStatus('done') + countStatus('validated'),
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Styles                                                             */
 /* ------------------------------------------------------------------ */
@@ -76,14 +119,17 @@ export default function PortalView() {
         if (!res.ok) {
           const body = await res.text();
           let msg: string;
-          try { msg = JSON.parse(body).message || res.statusText; }
+          try {
+            const parsed = JSON.parse(body);
+            msg = parsed?.error?.message || parsed?.message || res.statusText;
+          }
           catch { msg = body || res.statusText; }
           throw new Error(msg);
         }
         return res.json();
       })
       .then(res => {
-        setData(res?.data ?? res);
+        setData(toPortalData((res?.data ?? res) as PortalApiResponse));
       })
       .catch(e => {
         setError(e.message || 'Failed to load portal data');

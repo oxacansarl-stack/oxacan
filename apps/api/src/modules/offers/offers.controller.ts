@@ -13,10 +13,21 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Roles, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { OffersService } from './offers.service';
 import { PricingService } from './pricing.service';
+import { CreateOfferDto, UpdateOfferDto, UpdateOfferStatusDto } from './dto/offer.dto';
+import { AddOfferLineDto, UpdateOfferLineDto } from './dto/offer-line.dto';
+import { AddOfferAssumptionDto } from './dto/offer-assumption.dto';
 
+/** Parses a positive integer query param; falls back on missing/invalid values and clamps to max. */
+function positiveInt(value: string | undefined, max?: number): number | undefined {
+  const n = value ? parseInt(value, 10) : NaN;
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return max ? Math.min(n, max) : n;
+}
+
+// PRD: offers are project-manager / admin work.
 @Controller('offers')
 export class OffersController {
   constructor(
@@ -25,6 +36,7 @@ export class OffersController {
   ) {}
 
   @Get()
+  @Roles(...OFFICE_ROLES)
   async listOffers(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -34,8 +46,8 @@ export class OffersController {
     @Query('search') search?: string,
   ) {
     return this.offersService.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: positiveInt(page),
+      limit: positiveInt(limit, 200),
       status,
       clientId,
       search,
@@ -43,6 +55,7 @@ export class OffersController {
   }
 
   @Get('suggest-articles')
+  @Roles(...OFFICE_ROLES)
   async suggestArticles(
     @CompanyId() companyId: string,
     @Query('roomType') roomType: string,
@@ -51,6 +64,7 @@ export class OffersController {
   }
 
   @Get(':id')
+  @Roles(...OFFICE_ROLES)
   async getOffer(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -59,102 +73,60 @@ export class OffersController {
   }
 
   @Post()
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async createOffer(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectName: string;
-      clientId: string;
-      projectTypeId?: string;
-      reference?: string;
-      marginFactor?: number;
-      vatRate?: number;
-      validityDays?: number;
-      notes?: string;
-    },
+    @Body() body: CreateOfferDto,
   ) {
     return this.offersService.create(companyId, user.id, body);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateOffer(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { id: string },
-    @Body()
-    body: {
-      projectName?: string;
-      clientId?: string;
-      projectTypeId?: string;
-      reference?: string;
-      marginFactor?: number;
-      vatRate?: number;
-      validityDays?: number;
-      notes?: string;
-    },
+    @Body() body: UpdateOfferDto,
   ) {
     return this.offersService.update(companyId, id, user.id, body);
   }
 
   @Patch(':id/status')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateStatus(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { id: string },
-    @Body() body: { status: string },
+    @Body() body: UpdateOfferStatusDto,
   ) {
     return this.offersService.updateStatus(companyId, id, user.id, body.status);
   }
 
   @Post(':id/lines')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async addLine(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      canonicalArticleId?: string;
-      description: string;
-      unit: string;
-      quantity: number;
-      unitPriceCents?: number | null;
-      pricingStrategy?: string;
-      roomType?: string;
-      variantType?: string;
-      sortOrder?: number;
-    },
+    @Body() body: AddOfferLineDto,
   ) {
     return this.offersService.addLine(companyId, id, body);
   }
 
   @Patch(':id/lines/:lineId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateLine(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('lineId', ParseUUIDPipe) lineId: string,
-    @Body()
-    body: {
-      description?: string;
-      unit?: string;
-      quantity?: number;
-      unitPriceCents?: number | null;
-      pricingStrategy?: string;
-      roomType?: string;
-      variantType?: string;
-      sortOrder?: number;
-      positionNumber?: number;
-    },
+    @Body() body: UpdateOfferLineDto,
   ) {
     return this.offersService.updateLine(companyId, id, lineId, body);
   }
 
   @Delete(':id/lines/:lineId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async removeLine(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -165,23 +137,17 @@ export class OffersController {
   }
 
   @Post(':id/assumptions')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async addAssumption(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      type: string;
-      description: string;
-      impactAmountCents?: number;
-      status?: string;
-    },
+    @Body() body: AddOfferAssumptionDto,
   ) {
     return this.offersService.addAssumption(companyId, id, body);
   }
 
   @Post(':id/recalculate')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async recalculateTotals(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -190,7 +156,7 @@ export class OffersController {
   }
 
   @Post(':id/duplicate')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async duplicateOffer(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,

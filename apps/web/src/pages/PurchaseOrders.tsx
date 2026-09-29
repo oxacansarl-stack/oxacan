@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiDelete, api, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiPut, apiDelete, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -22,7 +22,7 @@ interface POLine {
   quantity: number;
   unit: string;
   unitPriceCents: number;
-  totalCents: number;
+  totalPriceCents: number;
   deliveredQuantity: number;
 }
 
@@ -33,7 +33,7 @@ interface PurchaseOrder {
   supplier?: { name: string };
   projectId?: string;
   project?: { name: string; reference?: string };
-  status: 'draft' | 'sent' | 'confirmed' | 'delivered' | 'cancelled';
+  status: 'draft' | 'sent' | 'confirmed' | 'partially_delivered' | 'delivered' | 'cancelled';
   totalHtCents: number;
   expectedDelivery?: string;
   lines?: POLine[];
@@ -50,6 +50,7 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
   draft: { bg: '#f3f4f6', fg: '#4b5563' },
   sent: { bg: '#dbeafe', fg: '#1d4ed8' },
   confirmed: { bg: '#dcfce7', fg: '#166534' },
+  partially_delivered: { bg: '#fef3c7', fg: '#92400e' },
   delivered: { bg: '#f0fdf4', fg: '#15803d' },
   cancelled: { bg: '#fee2e2', fg: '#991b1b' },
 };
@@ -156,9 +157,8 @@ export default function PurchaseOrders() {
     setError(null);
     try {
       const statusParam = activeTab !== 'all' ? `&status=${activeTab}` : '';
-      const res = await apiGet<any>(`/purchase-orders?page=1${statusParam}`);
-      const list = Array.isArray(res) ? res : res.data ?? [];
-      setPos(list);
+      const list = await apiGet<PurchaseOrder[]>(`/purchase-orders?page=1${statusParam}`);
+      setPos(list ?? []);
     } catch (err: any) {
       setError(err.message || 'Failed to load purchase orders');
     } finally {
@@ -169,11 +169,11 @@ export default function PurchaseOrders() {
   const fetchDropdowns = useCallback(async () => {
     try {
       const [sRes, pRes] = await Promise.all([
-        apiGet<any>('/suppliers'),
-        apiGet<any>('/projects'),
+        apiGet<Supplier[]>('/suppliers?limit=100'),
+        apiGet<Project[]>('/projects'),
       ]);
-      setSuppliers(Array.isArray(sRes) ? sRes : sRes.data ?? []);
-      setProjects(Array.isArray(pRes) ? pRes : pRes.data ?? []);
+      setSuppliers(sRes ?? []);
+      setProjects(pRes ?? []);
     } catch {
       /* non-blocking */
     }
@@ -181,8 +181,7 @@ export default function PurchaseOrders() {
 
   const fetchDetail = useCallback(async (id: string) => {
     try {
-      const res = await apiGet<any>(`/purchase-orders/${id}`);
-      const po: PurchaseOrder = res.data ?? res;
+      const po = await apiGet<PurchaseOrder>(`/purchase-orders/${id}`);
       setExpandedPO(po);
       /* init delivery inputs */
       const inputs: Record<string, string> = {};
@@ -258,10 +257,7 @@ export default function PurchaseOrders() {
 
   const changeStatus = async (id: string, status: string) => {
     try {
-      await api(`/purchase-orders/${id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
+      await apiPut(`/purchase-orders/${id}/status`, { status });
       fetchList();
       if (expandedId === id) fetchDetail(id);
     } catch (err: any) {
@@ -272,11 +268,12 @@ export default function PurchaseOrders() {
   /* ---------- add line to existing PO ---------- */
 
   const handleAddLine = async (poId: string) => {
-    if (!addLineDesc.trim() || !addLineQty) return;
+    const qty = parseFloat(addLineQty);
+    if (!addLineDesc.trim() || isNaN(qty) || qty < 0) return;
     try {
       await apiPost(`/purchase-orders/${poId}/lines`, {
         description: addLineDesc.trim(),
-        quantity: parseFloat(addLineQty),
+        quantity: qty,
         unit: addLineUnit,
         unitPriceCents: parseCents(addLinePrice),
       });
@@ -309,11 +306,11 @@ export default function PurchaseOrders() {
     const val = parseFloat(deliveryInputs[lineId] ?? '0');
     if (isNaN(val) || val < 0) return;
     try {
-      await api(`/purchase-orders/${poId}/lines/${lineId}/delivery`, {
-        method: 'PATCH',
-        body: JSON.stringify({ deliveredQuantity: val }),
+      await apiPost(`/purchase-orders/${poId}/lines/${lineId}/delivery`, {
+        deliveredQuantity: val,
       });
       fetchDetail(poId);
+      fetchList();
     } catch (err: any) {
       setError(err.message || 'Failed to record delivery');
     }
@@ -903,7 +900,7 @@ function ExpandedDetail({
                       CHF {formatCHF(line.unitPriceCents)}
                     </td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 500, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      CHF {formatCHF(line.totalCents)}
+                      CHF {formatCHF(line.totalPriceCents)}
                     </td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>

@@ -9,6 +9,12 @@ import { Contract } from '../contracts/entities/contract.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { OfferLine } from '../offers/entities/offer-line.entity';
 import { NotFoundError } from '@oxacan/shared-types';
+import {
+  AddLotDto,
+  AddMilestoneDto,
+  UpdateMilestoneDto,
+  UpdateProjectDto,
+} from './dto/project.dto';
 
 interface ProjectFilters {
   page?: number;
@@ -18,37 +24,8 @@ interface ProjectFilters {
   managerId?: string;
 }
 
-interface UpdateProjectDto {
-  name?: string;
-  startDate?: Date | null;
-  endDate?: Date | null;
-  address?: string | null;
-  postalCode?: string | null;
-  city?: string | null;
-  managerId?: string | null;
-  status?: string;
-}
-
-interface AddLotDto {
-  name: string;
-  description?: string;
-  budgetCents?: number;
-  sortOrder?: number;
-}
-
-interface AddMilestoneDto {
-  name: string;
-  targetDate?: Date;
-  lotId?: string;
-  status?: string;
-}
-
-interface UpdateMilestoneDto {
-  name?: string;
-  targetDate?: Date | null;
-  completedDate?: Date | null;
-  status?: string;
-}
+/** DATE columns are exchanged as YYYY-MM-DD strings (the pg driver returns them as strings too). */
+const asDate = (v: string | null | undefined): Date | null => (v ? (v as unknown as Date) : null);
 
 @Injectable()
 export class ProjectsService {
@@ -148,28 +125,29 @@ export class ProjectsService {
       where: { offerId: offer.id, companyId },
     });
 
-    // 2. Generate reference: PRJ-{YEAR}-{sequence}
-    const year = new Date().getFullYear();
-    const existingCount = await this.projectRepo.count({
-      where: { companyId },
+    // 2–3. Create project with reference PRJ-{YEAR}-{sequence}, serialised per company
+    const savedProject = await this.projectRepo.manager.transaction(async (m) => {
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`project:${companyId}`]);
+      const prefix = `PRJ-${new Date().getFullYear()}-`;
+      const [{ max }] = await m.query(
+        `SELECT MAX(substring(reference from '[0-9]+$')::int) AS max
+         FROM project WHERE company_id = $1 AND reference LIKE $2`,
+        [companyId, `${prefix}%`],
+      );
+      return m.save(
+        m.create(Project, {
+          companyId,
+          contractId: contract.id,
+          clientId: contract.clientId,
+          reference: `${prefix}${String((max ?? 0) + 1).padStart(4, '0')}`,
+          name: offer.projectName,
+          status: 'planning',
+          startDate: new Date(),
+          budgetHtCents: offer.totalHtCents,
+          managerId: userId,
+        }),
+      );
     });
-    const sequence = String(existingCount + 1).padStart(4, '0');
-    const reference = `PRJ-${year}-${sequence}`;
-
-    // 3. Create project
-    const startDate = new Date();
-    const project = this.projectRepo.create({
-      companyId,
-      contractId: contract.id,
-      clientId: contract.clientId,
-      reference,
-      name: offer.projectName,
-      status: 'planning',
-      startDate,
-      budgetHtCents: offer.totalHtCents,
-      managerId: userId,
-    });
-    const savedProject = await this.projectRepo.save(project);
 
     // 4. Group offer lines by roomType -> create ProjectLot for each group
     const baseLines = offerLines.filter((line) => line.variantType === 'BASE');
@@ -196,7 +174,7 @@ export class ProjectsService {
     }
 
     // 5. Create a default milestone "Projet termine" with targetDate = startDate + 90 days
-    const targetDate = new Date(startDate);
+    const targetDate = new Date(savedProject.startDate ?? new Date());
     targetDate.setDate(targetDate.getDate() + 90);
     const milestone = this.milestoneRepo.create({
       projectId: savedProject.id,
@@ -291,7 +269,7 @@ export class ProjectsService {
       projectId,
       companyId,
       name: dto.name,
-      targetDate: dto.targetDate || null,
+      targetDate: asDate(dto.targetDate),
       lotId: dto.lotId || null,
       status: dto.status ?? 'pending',
     });

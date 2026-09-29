@@ -1,16 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, ApiError, formatCHF } from '../lib/api';
+import { apiGet, apiList, ApiError, formatCHF, PageMeta } from '../lib/api';
+import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
-}
 
 interface Offer {
   id: string;
@@ -100,20 +96,18 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Helper: unwrap paginated or plain array response                  */
+/*  Helpers: API responses are already unwrapped (lists are arrays)    */
 /* ------------------------------------------------------------------ */
 
-function unwrapArray<T>(res: PaginatedResponse<T> | T[] | any): T[] {
-  if (Array.isArray(res)) return res;
-  if (res && typeof res === 'object' && 'data' in res && Array.isArray(res.data)) return res.data;
-  return [];
+type ListResult = { items: unknown[]; meta: PageMeta };
+
+function unwrapArray<T>(res: T[] | undefined): T[] {
+  return Array.isArray(res) ? res : [];
 }
 
-function unwrapTotal(res: any): number {
-  if (res && typeof res === 'object' && 'meta' in res) return res.meta?.total ?? 0;
-  if (res && typeof res === 'object' && 'count' in res) return res.count;
-  if (Array.isArray(res)) return res.length;
-  return 0;
+/** Field roles get 403 on offers/invoices: those widgets are hidden rather than shown as errors. */
+function isForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,66 +142,81 @@ function StatCard({ label, value, loading, error, accentColor }: StatCardProps) 
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { role } = useCurrentUser();
+  // Offers and invoices are office data; don't request them for field roles.
+  const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
 
   /* --- Stat queries --- */
-  const activeProjects = useQuery<any, ApiError>({
+  const activeProjects = useQuery<ListResult, ApiError>({
     queryKey: ['dash-projects'],
-    queryFn: () => apiGet('/projects?status=active&limit=1'),
+    queryFn: () => apiList('/projects?status=active&limit=1'),
     retry: false,
   });
 
-  const openOffers = useQuery<any, ApiError>({
+  const openOffers = useQuery<ListResult, ApiError>({
     queryKey: ['dash-offers'],
-    queryFn: () => apiGet('/offers?status=draft&limit=1'),
+    queryFn: () => apiList('/offers?status=draft&limit=1'),
+    enabled: isOffice,
     retry: false,
   });
 
-  const pendingInvoices = useQuery<any, ApiError>({
+  const pendingInvoices = useQuery<ListResult, ApiError>({
     queryKey: ['dash-invoices-pending'],
-    queryFn: () => apiGet('/invoices?status=sent&limit=1'),
+    queryFn: () => apiList('/invoices?status=sent&limit=1'),
+    enabled: isOffice,
     retry: false,
   });
 
-  const paidInvoices = useQuery<any, ApiError>({
+  const paidInvoices = useQuery<Invoice[], ApiError>({
     queryKey: ['dash-invoices-paid'],
-    queryFn: () => apiGet('/invoices?status=paid'),
+    queryFn: () => apiGet<Invoice[]>('/invoices?status=paid&limit=100'),
+    enabled: isOffice,
     retry: false,
   });
 
   /* --- Recent lists --- */
-  const recentOffers = useQuery<any, ApiError>({
+  const recentOffers = useQuery<Offer[], ApiError>({
     queryKey: ['dash-recent-offers'],
-    queryFn: () => apiGet('/offers?limit=5'),
+    queryFn: () => apiGet<Offer[]>('/offers?limit=5'),
+    enabled: isOffice,
     retry: false,
   });
 
-  const recentInvoices = useQuery<any, ApiError>({
+  const recentInvoices = useQuery<Invoice[], ApiError>({
     queryKey: ['dash-recent-invoices'],
-    queryFn: () => apiGet('/invoices?limit=5'),
+    queryFn: () => apiGet<Invoice[]>('/invoices?limit=5'),
+    enabled: isOffice,
     retry: false,
   });
 
-  const recentTime = useQuery<any, ApiError>({
+  const recentTime = useQuery<TimeEntry[], ApiError>({
     queryKey: ['dash-recent-time'],
-    queryFn: () => apiGet('/timekeeping?limit=5'),
+    queryFn: () => apiGet<TimeEntry[]>('/timekeeping?limit=5'),
     retry: false,
   });
 
   /* --- Computed values --- */
-  function getCount(query: typeof activeProjects): number {
-    if (!query.data) return 0;
-    if (query.data?.meta?.total !== undefined) return query.data.meta.total;
-    if (query.data?.count !== undefined) return query.data.count;
-    if (Array.isArray(query.data)) return query.data.length;
-    if (Array.isArray(query.data?.data)) return query.data.data.length;
-    return 0;
+  function getCount(query: { data?: ListResult }): number {
+    return query.data?.meta?.total ?? query.data?.items.length ?? 0;
   }
 
-  function getError(query: typeof activeProjects): string | undefined {
-    if (!query.error) return undefined;
-    if (query.error instanceof ApiError && query.error.status === 401) return 'Login required';
-    return 'Unavailable';
+  /** '—' for widgets the caller's role may not see (not requested, or 403). */
+  function statValue(
+    query: { error: ApiError | null; status: string; fetchStatus: string },
+    value: string | number,
+  ): string | number {
+    const notRequested = query.status === 'pending' && query.fetchStatus === 'idle';
+    return notRequested || isForbidden(query.error) ? '—' : value;
   }
+
+  function getError(query: { error: ApiError | null }): string | undefined {
+    if (!query.error || isForbidden(query.error)) return undefined;
+    if (query.error.status === 401) return 'Login required';
+    return query.error.message || 'Unavailable';
+  }
+
+  const canSeeOffers = isOffice && !isForbidden(recentOffers.error);
+  const canSeeInvoices = isOffice && !isForbidden(recentInvoices.error);
 
   // Revenue calculation — sum of paid invoices this month
   const paidList = unwrapArray<Invoice>(paidInvoices.data);
@@ -246,28 +255,28 @@ export default function Dashboard() {
       >
         <StatCard
           label="Active Projects"
-          value={getCount(activeProjects)}
+          value={statValue(activeProjects, getCount(activeProjects))}
           loading={activeProjects.isLoading}
           error={getError(activeProjects)}
           accentColor="#2563eb"
         />
         <StatCard
           label="Open Offers"
-          value={getCount(openOffers)}
+          value={statValue(openOffers, getCount(openOffers))}
           loading={openOffers.isLoading}
           error={getError(openOffers)}
           accentColor="#f59e0b"
         />
         <StatCard
           label="Pending Invoices"
-          value={getCount(pendingInvoices)}
+          value={statValue(pendingInvoices, getCount(pendingInvoices))}
           loading={pendingInvoices.isLoading}
           error={getError(pendingInvoices)}
           accentColor="#ef4444"
         />
         <StatCard
           label="This Month Revenue"
-          value={`CHF ${formatCHF(thisMonthRevenue)}`}
+          value={statValue(paidInvoices, `CHF ${formatCHF(thisMonthRevenue)}`)}
           loading={paidInvoices.isLoading}
           error={getError(paidInvoices)}
           accentColor="#16a34a"
@@ -280,15 +289,19 @@ export default function Dashboard() {
       <div style={{ marginBottom: 32 }}>
         <h2 style={sectionTitleStyle}>Quick Actions</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button style={quickActionStyle} onClick={() => navigate('/offers')}>
-            + New Offer
-          </button>
-          <button
-            style={{ ...quickActionStyle, background: '#16a34a' }}
-            onClick={() => navigate('/invoices')}
-          >
-            + New Invoice
-          </button>
+          {isOffice && (
+            <>
+              <button style={quickActionStyle} onClick={() => navigate('/offers')}>
+                + New Offer
+              </button>
+              <button
+                style={{ ...quickActionStyle, background: '#16a34a' }}
+                onClick={() => navigate('/invoices')}
+              >
+                + New Invoice
+              </button>
+            </>
+          )}
           <button
             style={{ ...quickActionStyle, background: '#7c3aed' }}
             onClick={() => navigate('/timekeeping')}
@@ -307,6 +320,7 @@ export default function Dashboard() {
       {/* ============================================================ */}
       {/*  Financial Overview                                           */}
       {/* ============================================================ */}
+      {canSeeInvoices && (
       <div style={{ ...cardStyle, marginBottom: 32 }}>
         <h2 style={{ ...sectionTitleStyle, marginBottom: 16 }}>Financial Overview</h2>
         {recentInvoices.isLoading ? (
@@ -407,6 +421,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+      )}
 
       {/* ============================================================ */}
       {/*  Recent Activity — 3-column grid                              */}
@@ -421,12 +436,15 @@ export default function Dashboard() {
         }}
       >
         {/* Recent Offers */}
+        {canSeeOffers && (
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
             Recent Offers
           </h3>
           {recentOffers.isLoading ? (
             <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+          ) : recentOffers.error ? (
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentOffers.error.message}</div>
           ) : unwrapArray<Offer>(recentOffers.data).length === 0 ? (
             <div style={{ color: '#9ca3af', fontSize: 13 }}>No offers yet</div>
           ) : (
@@ -478,14 +496,18 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        )}
 
         {/* Recent Invoices */}
+        {canSeeInvoices && (
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
             Recent Invoices
           </h3>
           {recentInvoices.isLoading ? (
             <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+          ) : recentInvoices.error ? (
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentInvoices.error.message}</div>
           ) : unwrapArray<Invoice>(recentInvoices.data).length === 0 ? (
             <div style={{ color: '#9ca3af', fontSize: 13 }}>No invoices yet</div>
           ) : (
@@ -535,6 +557,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        )}
 
         {/* Recent Time Entries */}
         <div style={cardStyle}>
@@ -543,6 +566,8 @@ export default function Dashboard() {
           </h3>
           {recentTime.isLoading ? (
             <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+          ) : recentTime.error ? (
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentTime.error.message}</div>
           ) : unwrapArray<TimeEntry>(recentTime.data).length === 0 ? (
             <div style={{ color: '#9ca3af', fontSize: 13 }}>No time entries yet</div>
           ) : (

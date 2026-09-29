@@ -19,9 +19,10 @@ interface Project {
   clientId: string;
   client?: Client;
   status: string;
-  progress: number;
-  budgetHtCents: number;
-  manager?: string;
+  progressPercent: number;
+  /** Absent for field roles (financials are stripped server-side). */
+  budgetHtCents?: number | null;
+  manager?: { id: string; firstName: string; lastName: string } | null;
   startDate?: string;
   endDate?: string;
   createdAt: string;
@@ -63,6 +64,10 @@ function statusLabel(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function managerName(m: Project['manager']): string {
+  return m ? `${m.firstName} ${m.lastName}`.trim() : '';
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -79,8 +84,9 @@ export default function Projects() {
   } = useQuery<Project[], ApiError>({
     queryKey: ['projects', statusFilter],
     queryFn: () => {
-      const params = statusFilter ? `?status=${statusFilter}` : '';
-      return apiGet<Project[]>(`/projects${params}`);
+      const params = new URLSearchParams({ limit: '100' });
+      if (statusFilter) params.set('status', statusFilter);
+      return apiGet<Project[]>(`/projects?${params.toString()}`);
     },
     retry: false,
   });
@@ -91,12 +97,15 @@ export default function Projects() {
     return (
       p.name.toLowerCase().includes(term) ||
       (p.reference ?? '').toLowerCase().includes(term) ||
-      (p.manager ?? '').toLowerCase().includes(term)
+      managerName(p.manager).toLowerCase().includes(term)
     );
   });
 
   if (error instanceof ApiError && error.status === 401) {
     return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+  }
+  if (error) {
+    return <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>;
   }
 
   return (
@@ -178,7 +187,7 @@ export default function Projects() {
             )}
             {filtered.map((project) => {
               const colors = STATUS_COLORS[project.status] ?? STATUS_COLORS.planning;
-              const progressPct = Math.min(100, Math.max(0, project.progress ?? 0));
+              const progressPct = Math.min(100, Math.max(0, project.progressPercent ?? 0));
               const progressColor =
                 progressPct >= 100 ? '#22c55e' : progressPct >= 50 ? '#2563eb' : '#f59e0b';
 
@@ -245,10 +254,10 @@ export default function Projects() {
                     </div>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>
-                    CHF {formatCHF(project.budgetHtCents ?? 0)}
+                    {project.budgetHtCents != null ? `CHF ${formatCHF(project.budgetHtCents)}` : '—'}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                    {project.manager ?? '-'}
+                    {managerName(project.manager) || '-'}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
                     {project.startDate ? new Date(project.startDate).toLocaleDateString('fr-CH') : '-'}

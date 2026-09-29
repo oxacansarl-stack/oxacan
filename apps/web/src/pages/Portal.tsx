@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiDelete } from '../lib/api';
+import { apiGet, apiList, apiPost, apiDelete } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -18,11 +18,6 @@ interface PortalToken {
   expiresAt?: string;
   isActive: boolean;
   createdAt: string;
-}
-
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page: number; pageSize: number; total: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,16 +145,9 @@ export default function Portal() {
     setLoading(true);
     setError('');
     try {
-      const res = await apiGet<any>(`/portal/tokens?page=${page}`);
-      if (Array.isArray(res)) {
-        setTokens(res);
-        setTotalPages(1);
-      } else if (res && typeof res === 'object' && 'data' in res) {
-        setTokens(res.data);
-        setTotalPages(Math.ceil((res.meta?.total ?? res.data.length) / (res.meta?.pageSize ?? 25)));
-      } else {
-        setTokens([]);
-      }
+      const { items, meta } = await apiList<PortalToken>(`/portal/tokens?page=${page}`);
+      setTokens(items);
+      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e: any) {
       setError(e.message || 'Failed to load portal tokens');
       setTokens([]);
@@ -170,8 +158,7 @@ export default function Portal() {
 
   const fetchProjects = useCallback(async () => {
     try {
-      const res = await apiGet<any>('/projects');
-      setProjects(Array.isArray(res) ? res : res?.data ?? []);
+      setProjects(await apiGet<Project[]>('/projects?limit=100'));
     } catch { /* ignore */ }
   }, []);
 
@@ -182,10 +169,12 @@ export default function Portal() {
     setCreateError('');
     if (!createForm.projectId) { setCreateError('Project is required'); return; }
     try {
-      await apiPost('/portal/tokens', {
-        projectId: createForm.projectId,
-        expiresAt: createForm.expiresAt || undefined,
-      });
+      const body: { projectId: string; expiresAt?: string } = { projectId: createForm.projectId };
+      // expiresAt is a timestamp: the link stays valid until the end of the chosen (local) day.
+      if (createForm.expiresAt) {
+        body.expiresAt = new Date(`${createForm.expiresAt}T23:59:59`).toISOString();
+      }
+      await apiPost('/portal/tokens', body);
       setShowCreate(false);
       setCreateForm({ projectId: '', expiresAt: '' });
       setSuccess('Portal token created');

@@ -6,6 +6,7 @@ import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalEntryLine } from './entities/journal-entry-line.entity';
 import { Invoice } from '../invoicing/entities/invoice.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { CreateAccountDto, CreateJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
 
 /* ─── DTOs ─── */
 
@@ -16,22 +17,6 @@ interface AccountFilters {
   isActive?: boolean;
 }
 
-interface CreateAccountDto {
-  accountNumber: string;
-  name: string;
-  type: string;
-  parentId?: string;
-  isSystem?: boolean;
-}
-
-interface UpdateAccountDto {
-  accountNumber?: string;
-  name?: string;
-  type?: string;
-  parentId?: string;
-  isActive?: boolean;
-}
-
 interface EntryFilters {
   page?: number;
   limit?: number;
@@ -39,21 +24,6 @@ interface EntryFilters {
   dateTo?: string;
   isPosted?: boolean;
   referenceType?: string;
-}
-
-interface EntryLineDto {
-  accountId: string;
-  debitCents: number;
-  creditCents: number;
-  description?: string;
-}
-
-interface CreateEntryDto {
-  entryDate: string;
-  description: string;
-  referenceType?: string;
-  referenceId?: string;
-  lines: EntryLineDto[];
 }
 
 interface LedgerFilters {
@@ -289,7 +259,7 @@ export class AccountingService {
   async createEntry(
     companyId: string,
     userId: string,
-    dto: CreateEntryDto,
+    dto: CreateJournalEntryDto,
   ): Promise<JournalEntry> {
     /* Validate balanced entry */
     const totalDebits = dto.lines.reduce((s, l) => s + l.debitCents, 0);

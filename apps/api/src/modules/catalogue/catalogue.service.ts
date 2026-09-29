@@ -8,6 +8,7 @@ import { SourceDocument } from './entities/source-document.entity';
 import { SourceOccurrence } from './entities/source-occurrence.entity';
 import { PriceObservation } from './entities/price-observation.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { CreateArticleDto, UpdateArticleDto, ImportCsvDto } from './dto/catalogue.dto';
 
 interface ArticleFilters {
   search?: string;
@@ -15,55 +16,6 @@ interface ArticleFilters {
   isActive?: boolean;
   page?: number;
   limit?: number;
-}
-
-interface CreateArticleDto {
-  npkNumber?: string;
-  description: string;
-  unit: string;
-  category?: string;
-  isComposed?: boolean;
-  composedComponents?: Array<{
-    articleId: string;
-    quantity: number;
-    unitPriceCents: number;
-  }>;
-}
-
-interface UpdateArticleDto {
-  npkNumber?: string;
-  description?: string;
-  unit?: string;
-  category?: string;
-  isComposed?: boolean;
-  composedComponents?: Array<{
-    articleId: string;
-    quantity: number;
-    unitPriceCents: number;
-  }>;
-  isActive?: boolean;
-}
-
-interface CsvRow {
-  lineNumber: number;
-  rawText: string;
-  npkNumber?: string;
-  description?: string;
-  unit?: string;
-  quantity?: number;
-  unitPriceCents?: number;
-  totalPriceCents?: number;
-  roomType?: string;
-  floor?: string;
-}
-
-interface CsvImportData {
-  filename: string;
-  projectName?: string;
-  projectYear?: number;
-  entrepreneurName?: string;
-  documentType?: string;
-  rows: CsvRow[];
 }
 
 @Injectable()
@@ -110,8 +62,11 @@ export class CatalogueService {
       .skip((page - 1) * limit)
       .take(limit);
 
-    const [items, total] = await qb.getManyAndCount();
-    return { items, total, page, limit };
+    const [data, total] = await qb.getManyAndCount();
+    return {
+      data,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findArticleById(companyId: string, id: string) {
@@ -186,7 +141,7 @@ export class CatalogueService {
 
   /* ───────────── CSV Import ───────────── */
 
-  async importCsv(companyId: string, userId: string, data: CsvImportData) {
+  async importCsv(companyId: string, userId: string, data: ImportCsvDto) {
     // Compute SHA-256 hash of the CSV content for dedup
     const contentForHash = JSON.stringify(data.rows);
     const hashSha256 = createHash('sha256')

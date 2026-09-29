@@ -10,16 +10,12 @@ import { Task } from '../projects/entities/task.entity';
 import { DailyReport } from '../timekeeping/entities/daily-report.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { runAsSystem, setTenant } from '../../common/tenant/tenant-context';
+import { CreatePortalTokenDto } from './dto/portal-token.dto';
 
 interface TokenFilters {
   page?: number;
   limit?: number;
   projectId?: string;
-}
-
-interface CreateTokenDto {
-  projectId: string;
-  expiresAt?: Date;
 }
 
 @Injectable()
@@ -46,8 +42,10 @@ export class PortalService {
 
     const qb = this.tokenRepo
       .createQueryBuilder('token')
-      .leftJoinAndSelect('token.project', 'project')
-      .leftJoinAndSelect('token.createdBy', 'createdBy')
+      .leftJoin('token.project', 'project')
+      .addSelect(['project.id', 'project.reference', 'project.name', 'project.status'])
+      .leftJoin('token.createdBy', 'createdBy')
+      .addSelect(['createdBy.id', 'createdBy.firstName', 'createdBy.lastName'])
       .where('token.company_id = :companyId', { companyId });
 
     if (projectId) {
@@ -76,7 +74,7 @@ export class PortalService {
   async createToken(
     companyId: string,
     userId: string,
-    dto: CreateTokenDto,
+    dto: CreatePortalTokenDto,
   ): Promise<PortalToken> {
     const project = await this.projectRepo.findOne({
       where: { id: dto.projectId, companyId },
@@ -87,7 +85,7 @@ export class PortalService {
       companyId,
       projectId: dto.projectId,
       token: randomUUID(),
-      expiresAt: dto.expiresAt || null,
+      expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       isActive: true,
       createdById: userId,
     });
@@ -179,6 +177,7 @@ export class PortalService {
       where: { projectId: project.id },
       select: [
         'id',
+        'lotId',
         'title',
         'status',
         'priority',
@@ -189,7 +188,7 @@ export class PortalService {
       order: { createdAt: 'ASC' },
     });
 
-    // Recent daily reports (last 5, no sensitive data)
+    // Recent daily reports (last 5). Notes are internal site remarks and stay private.
     const dailyReports = await this.dailyReportRepo.find({
       where: { projectId: project.id },
       select: [
@@ -198,7 +197,6 @@ export class PortalService {
         'workDescription',
         'weather',
         'temperatureCelsius',
-        'notes',
       ],
       order: { date: 'DESC' },
       take: 5,

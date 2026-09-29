@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Expense } from './entities/expense.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
 
 interface ExpenseFilters {
   page?: number;
@@ -15,46 +17,46 @@ interface ExpenseFilters {
   dateTo?: string;
 }
 
-interface CreateExpenseDto {
-  projectId?: string;
-  taskId?: string;
-  date: string;
-  category: string;
-  description: string;
-  amountCents: number;
-  receiptUrl?: string;
-  isBillable?: boolean;
-}
-
-interface UpdateExpenseDto {
-  projectId?: string;
-  taskId?: string;
-  date?: string;
-  category?: string;
-  description?: string;
-  amountCents?: number;
-  receiptUrl?: string;
-  isBillable?: boolean;
-}
-
 @Injectable()
 export class ExpenseService {
   constructor(
     @InjectRepository(Expense)
     private readonly expenseRepo: Repository<Expense>,
+    private readonly scope: AccessScopeService,
   ) {}
+
+  /** Expenses with user/project reduced to non-sensitive columns. */
+  private listQuery(companyId: string) {
+    return this.expenseRepo
+      .createQueryBuilder('exp')
+      .leftJoin('exp.user', 'user')
+      .addSelect(['user.id', 'user.firstName', 'user.lastName'])
+      .leftJoin('exp.project', 'project')
+      .addSelect(['project.id', 'project.name', 'project.reference'])
+      .where('exp.company_id = :companyId', { companyId });
+  }
+
+  /** Relation-free load for mutations; 404 outside the caller's scope. */
+  private async loadScoped(caller: ScopeUser, id: string): Promise<Expense> {
+    const expense = await this.expenseRepo.findOne({ where: { id, companyId: caller.companyId } });
+    if (!expense || !(await this.scope.canSee(caller, expense.userId))) {
+      throw new NotFoundError('Expense', id);
+    }
+    return expense;
+  }
 
   /* ───────────── List ───────────── */
 
-  async findAll(companyId: string, filters: ExpenseFilters = {}) {
+  async findAll(caller: ScopeUser, filters: ExpenseFilters = {}) {
     const { page = 1, limit = 25, userId, projectId, status, category, dateFrom, dateTo } = filters;
 
-    const qb = this.expenseRepo
-      .createQueryBuilder('exp')
-      .leftJoinAndSelect('exp.user', 'user')
-      .leftJoinAndSelect('exp.project', 'project')
-      .where('exp.company_id = :companyId', { companyId });
+    const qb = this.listQuery(caller.companyId);
 
+    // Visibility scope first; a ?userId outside it can only narrow to nothing.
+    const visible = await this.scope.visibleUserIds(caller);
+    if (visible) {
+      qb.andWhere('exp.user_id IN (:...visible)', { visible });
+    }
     if (userId) {
       qb.andWhere('exp.user_id = :userId', { userId });
     }
@@ -94,18 +96,26 @@ export class ExpenseService {
 
   /* ───────────── Find by ID ───────────── */
 
-  async findById(companyId: string, id: string): Promise<Expense> {
-    const expense = await this.expenseRepo.findOne({
-      where: { id, companyId },
-      relations: ['user', 'project', 'task', 'approver'],
-    });
-    if (!expense) throw new NotFoundError('Expense', id);
+  async findById(caller: ScopeUser, id: string): Promise<Expense> {
+    const expense = await this.listQuery(caller.companyId)
+      .leftJoin('exp.task', 'task')
+      .addSelect(['task.id', 'task.title'])
+      .leftJoin('exp.approver', 'approver')
+      .addSelect(['approver.id', 'approver.firstName', 'approver.lastName'])
+      .andWhere('exp.id = :id', { id })
+      .getOne();
+    if (!expense || !(await this.scope.canSee(caller, expense.userId))) {
+      throw new NotFoundError('Expense', id);
+    }
     return expense;
   }
 
   /* ───────────── Create ───────────── */
 
   async create(companyId: string, userId: string, dto: CreateExpenseDto): Promise<Expense> {
+    if (dto.projectId) await this.scope.assertProjectInCompany(companyId, dto.projectId);
+    if (dto.taskId) await this.scope.assertTaskInCompany(companyId, dto.taskId);
+
     const expense = this.expenseRepo.create({
       companyId,
       userId,
@@ -125,8 +135,8 @@ export class ExpenseService {
 
   /* ───────────── Update ───────────── */
 
-  async update(companyId: string, id: string, dto: UpdateExpenseDto): Promise<Expense> {
-    const expense = await this.findById(companyId, id);
+  async update(caller: ScopeUser, id: string, dto: UpdateExpenseDto): Promise<Expense> {
+    const expense = await this.loadScoped(caller, id);
 
     if (expense.status !== 'draft') {
       throw new BusinessRuleError(
@@ -134,6 +144,9 @@ export class ExpenseService {
         'Only draft expenses can be edited.',
       );
     }
+
+    if (dto.projectId) await this.scope.assertProjectInCompany(caller.companyId, dto.projectId);
+    if (dto.taskId) await this.scope.assertTaskInCompany(caller.companyId, dto.taskId);
 
     if (dto.projectId !== undefined) expense.projectId = dto.projectId || null;
     if (dto.taskId !== undefined) expense.taskId = dto.taskId || null;
@@ -149,8 +162,8 @@ export class ExpenseService {
 
   /* ───────────── Delete ───────────── */
 
-  async delete(companyId: string, id: string): Promise<void> {
-    const expense = await this.findById(companyId, id);
+  async delete(caller: ScopeUser, id: string): Promise<void> {
+    const expense = await this.loadScoped(caller, id);
 
     if (expense.status !== 'draft') {
       throw new BusinessRuleError(
@@ -164,15 +177,14 @@ export class ExpenseService {
 
   /* ───────────── Submit for Approval ───────────── */
 
+  /** Callers submit only their own drafts; any other id → 404, nothing submitted. */
   async submitForApproval(companyId: string, userId: string, expenseIds: string[]) {
-    const expenses = await this.expenseRepo
-      .createQueryBuilder('exp')
-      .where('exp.company_id = :companyId', { companyId })
-      .andWhere('exp.user_id = :userId', { userId })
-      .andWhere('exp.id IN (:...expenseIds)', { expenseIds })
-      .getMany();
+    const ids = [...new Set(expenseIds)];
+    const expenses = await this.expenseRepo.find({
+      where: { companyId, userId, id: In(ids) },
+    });
 
-    if (expenses.length !== expenseIds.length) {
+    if (expenses.length !== ids.length) {
       throw new NotFoundError('Expense', 'one or more expenses');
     }
 
@@ -189,20 +201,24 @@ export class ExpenseService {
     return this.expenseRepo.save(expenses);
   }
 
-  /* ───────────── Approve ───────────── */
+  /* ───────────── Approve / Reject ───────────── */
 
-  async approveExpenses(companyId: string, approverId: string, expenseIds: string[]) {
-    const expenses = await this.expenseRepo
-      .createQueryBuilder('exp')
-      .where('exp.company_id = :companyId', { companyId })
-      .andWhere('exp.id IN (:...expenseIds)', { expenseIds })
-      .getMany();
+  /**
+   * Enforces the approval scope before anything changes: TEAM_LEADER → 403 unless every
+   * id is a team member's expense (never their own); office roles → 404 on unknown ids.
+   */
+  private async loadForApproval(approver: ScopeUser, expenseIds: string[]): Promise<Expense[]> {
+    const ids = [...new Set(expenseIds)];
+    const expenses = await this.expenseRepo.find({
+      where: { companyId: approver.companyId, id: In(ids) },
+    });
 
-    if (expenses.length !== expenseIds.length) {
+    await this.scope.assertCanApprove(approver, expenses.map((e) => e.userId), ids.length);
+
+    if (expenses.length !== ids.length) {
       throw new NotFoundError('Expense', 'one or more expenses');
     }
 
-    const now = new Date();
     for (const expense of expenses) {
       if (expense.status !== 'submitted') {
         throw new BusinessRuleError(
@@ -210,34 +226,27 @@ export class ExpenseService {
           `Expense ${expense.id} is not in 'submitted' status.`,
         );
       }
+    }
+    return expenses;
+  }
+
+  async approveExpenses(approver: ScopeUser, expenseIds: string[]) {
+    const expenses = await this.loadForApproval(approver, expenseIds);
+
+    const now = new Date();
+    for (const expense of expenses) {
       expense.status = 'approved';
-      expense.approvedBy = approverId;
+      expense.approvedBy = approver.id;
       expense.approvedAt = now;
     }
 
     return this.expenseRepo.save(expenses);
   }
 
-  /* ───────────── Reject ───────────── */
-
-  async rejectExpenses(companyId: string, approverId: string, expenseIds: string[], reason: string) {
-    const expenses = await this.expenseRepo
-      .createQueryBuilder('exp')
-      .where('exp.company_id = :companyId', { companyId })
-      .andWhere('exp.id IN (:...expenseIds)', { expenseIds })
-      .getMany();
-
-    if (expenses.length !== expenseIds.length) {
-      throw new NotFoundError('Expense', 'one or more expenses');
-    }
+  async rejectExpenses(approver: ScopeUser, expenseIds: string[]) {
+    const expenses = await this.loadForApproval(approver, expenseIds);
 
     for (const expense of expenses) {
-      if (expense.status !== 'submitted') {
-        throw new BusinessRuleError(
-          'INVALID_STATUS',
-          `Expense ${expense.id} is not in 'submitted' status.`,
-        );
-      }
       expense.status = 'rejected';
     }
 

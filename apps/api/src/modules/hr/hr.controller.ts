@@ -12,8 +12,20 @@ import {
 import {
   CompanyId,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import {
+  ADMIN_ONLY,
+  OFFICE_ROLES,
+  Roles,
+  SITE_LEAD_ROLES,
+} from '../../common/decorators/roles.decorator';
 import { HrService } from './hr.service';
+import { parsePaging } from '../timekeeping/access-scope.service';
+import {
+  AddTeamMemberDto,
+  CreateTeamDto,
+  UpdateEmployeeDto,
+  UpdateTeamDto,
+} from './dto/hr.dto';
 
 @Controller('hr')
 export class HrController {
@@ -21,23 +33,20 @@ export class HrController {
 
   /* ───────────── Teams ───────────── */
 
+  /** Team leaders may read teams; leader/member users are reduced to non-sensitive columns. */
   @Get('teams')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...SITE_LEAD_ROLES)
   async findAllTeams(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
   ) {
-    return this.service.findAllTeams(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-      search,
-    });
+    return this.service.findAllTeams(companyId, { ...parsePaging(page, limit), search });
   }
 
   @Get('teams/:id')
-  @Roles('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER')
+  @Roles(...SITE_LEAD_ROLES)
   async findTeamById(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -46,26 +55,26 @@ export class HrController {
   }
 
   @Post('teams')
-  @Roles('ADMIN')
+  @Roles(...OFFICE_ROLES)
   async createTeam(
     @CompanyId() companyId: string,
-    @Body() body: { name: string; leaderId?: string },
+    @Body() body: CreateTeamDto,
   ) {
     return this.service.createTeam(companyId, body);
   }
 
   @Put('teams/:id')
-  @Roles('ADMIN')
+  @Roles(...OFFICE_ROLES)
   async updateTeam(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { name?: string; leaderId?: string },
+    @Body() body: UpdateTeamDto,
   ) {
     return this.service.updateTeam(companyId, id, body);
   }
 
   @Delete('teams/:id')
-  @Roles('ADMIN')
+  @Roles(...OFFICE_ROLES)
   async deleteTeam(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -77,17 +86,17 @@ export class HrController {
   /* ───────────── Team Members ───────────── */
 
   @Post('teams/:id/members')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async addMember(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { userId: string },
+    @Body() body: AddTeamMemberDto,
   ) {
     return this.service.addMember(companyId, id, body.userId);
   }
 
   @Delete('teams/:id/members/:userId')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async removeMember(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -99,8 +108,9 @@ export class HrController {
 
   /* ───────────── Employees ───────────── */
 
+  /** Office only: rows include hourly rates. */
   @Get('employees')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async findAllEmployees(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -110,26 +120,20 @@ export class HrController {
     @Query('isActive') isActive?: string,
   ) {
     return this.service.findAllEmployees(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      ...parsePaging(page, limit),
       search,
       role,
       isActive: isActive !== undefined ? isActive === 'true' : undefined,
     });
   }
 
+  /** PRD: the administrator sets pay rates and roles. */
   @Put('employees/:userId')
-  @Roles('ADMIN')
+  @Roles(...ADMIN_ONLY)
   async updateEmployee(
     @CompanyId() companyId: string,
     @Param('userId', ParseUUIDPipe) userId: string,
-    @Body()
-    body: {
-      hourlyRateCents?: number;
-      role?: string;
-      cctCode?: string;
-      isActive?: boolean;
-    },
+    @Body() body: UpdateEmployeeDto,
   ) {
     return this.service.updateEmployee(companyId, userId, body);
   }

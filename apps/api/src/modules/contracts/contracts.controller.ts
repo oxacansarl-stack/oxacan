@@ -12,14 +12,29 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { Roles, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { ContractsService } from './contracts.service';
+import {
+  CreateContractFromOfferDto,
+  UpdateContractDto,
+  UpdateContractStatusDto,
+} from './dto/contract.dto';
+import { AddContractAmendmentDto } from './dto/contract-amendment.dto';
 
+/** Parses a positive integer query param; falls back on missing/invalid values and clamps to max. */
+function positiveInt(value: string | undefined, max?: number): number | undefined {
+  const n = value ? parseInt(value, 10) : NaN;
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return max ? Math.min(n, max) : n;
+}
+
+// PRD: contracts are project-manager / admin work.
 @Controller('contracts')
 export class ContractsController {
   constructor(private readonly contractsService: ContractsService) {}
 
   @Get()
+  @Roles(...OFFICE_ROLES)
   async listContracts(
     @CompanyId() companyId: string,
     @Query('page') page?: string,
@@ -29,8 +44,8 @@ export class ContractsController {
     @Query('offerId') offerId?: string,
   ) {
     return this.contractsService.findAll(companyId, {
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      page: positiveInt(page),
+      limit: positiveInt(limit, 200),
       status,
       clientId,
       offerId,
@@ -38,6 +53,7 @@ export class ContractsController {
   }
 
   @Get(':id')
+  @Roles(...OFFICE_ROLES)
   async getContract(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -46,47 +62,42 @@ export class ContractsController {
   }
 
   @Post('from-offer')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async createFromOffer(
     @CompanyId() companyId: string,
     @CurrentUser() user: { id: string },
-    @Body() body: { offerId: string },
+    @Body() body: CreateContractFromOfferDto,
   ) {
     return this.contractsService.createFromOffer(companyId, body.offerId, user.id);
   }
 
   @Patch(':id')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateContract(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { notes?: string; retentionRate?: number },
+    @Body() body: UpdateContractDto,
   ) {
     return this.contractsService.update(companyId, id, body);
   }
 
   @Patch(':id/status')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async updateStatus(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { id: string },
-    @Body() body: { status: string },
+    @Body() body: UpdateContractStatusDto,
   ) {
     return this.contractsService.updateStatus(companyId, id, user.id, body.status);
   }
 
   @Post(':id/amendments')
-  @Roles('ADMIN', 'PROJECT_MANAGER')
+  @Roles(...OFFICE_ROLES)
   async addAmendment(
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body()
-    body: {
-      description: string;
-      amountDeltaCents?: number;
-      status?: string;
-    },
+    @Body() body: AddContractAmendmentDto,
   ) {
     return this.contractsService.addAmendment(companyId, id, body);
   }

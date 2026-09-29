@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, formatCHF } from '../lib/api';
+import { apiGet, apiPost, apiDelete, ApiError, formatCHF } from '../lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -57,6 +57,13 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
 
 const STATUS_TABS = ['all', 'draft', 'submitted', 'approved', 'rejected'] as const;
 
+const APPROVER_ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'];
+
+interface Profile {
+  id: string;
+  role: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Shared styles                                                      */
 /* ------------------------------------------------------------------ */
@@ -111,9 +118,19 @@ function statusLabel(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('fr-CH');
+/** 'YYYY-MM-DD' → local date without timezone shift */
+function formatDate(date: string): string {
+  if (!date) return '-';
+  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('fr-CH');
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) return `Not allowed: ${err.message}`;
+    return err.message || fallback;
+  }
+  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 /* ------------------------------------------------------------------ */
@@ -141,31 +158,33 @@ export default function Expenses() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
 
-  // ---- Load projects ----
+  // Caller (own drafts / approve rights); null until loaded or if unavailable
+  const [me, setMe] = useState<Profile | null>(null);
+  const canApprove = me ? APPROVER_ROLES.includes(me.role) : true;
+
+  // ---- Load profile & projects ----
   useEffect(() => {
-    apiGet<{ data: Project[] } | Project[]>('/projects')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data;
-        setProjects(list);
-      })
+    apiGet<Profile>('/auth/profile')
+      .then(setMe)
+      .catch(() => {});
+    apiGet<Project[]>('/projects')
+      .then((list) => setProjects(list ?? []))
       .catch(() => {});
   }, []);
 
   // ---- Load expenses ----
   const loadExpenses = useCallback(() => {
     setLoading(true);
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ limit: '100' });
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
     if (categoryFilter) params.set('category', categoryFilter);
-    const qs = params.toString() ? `?${params.toString()}` : '';
 
-    apiGet<{ data: Expense[] }>(`/expenses${qs}`)
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res.data ?? [];
-        setExpenses(list);
+    apiGet<Expense[]>(`/expenses?${params.toString()}`)
+      .then((list) => {
+        setExpenses(list ?? []);
         setError('');
       })
-      .catch((err) => setError(err.message || 'Failed to load expenses'))
+      .catch((err) => setError(errorMessage(err, 'Failed to load expenses')))
       .finally(() => setLoading(false));
   }, [statusFilter, categoryFilter]);
 
@@ -177,9 +196,14 @@ export default function Expenses() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formDescription || !formAmount) return;
+    // CHF → integer centimes (API rejects negatives and non-integers)
+    const amountCents = Math.round(parseFloat(formAmount) * 100);
+    if (!Number.isFinite(amountCents) || amountCents < 0) {
+      setError('Amount must be a positive CHF value.');
+      return;
+    }
     setFormLoading(true);
     try {
-      const amountCents = Math.round(parseFloat(formAmount) * 100);
       await apiPost('/expenses', {
         projectId: formProjectId || undefined,
         date: formDate,
@@ -197,8 +221,8 @@ export default function Expenses() {
       setFormBillable(false);
       setShowForm(false);
       loadExpenses();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create expense');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to create expense'));
     } finally {
       setFormLoading(false);
     }
@@ -207,13 +231,21 @@ export default function Expenses() {
   // ---- Actions ----
   const handleSubmit = async () => {
     if (selected.size === 0) return;
+    // Only the caller's own drafts can be submitted.
+    const expenseIds = me
+      ? expenses.filter((e) => selected.has(e.id) && e.userId === me.id && e.status === 'draft').map((e) => e.id)
+      : Array.from(selected);
+    if (expenseIds.length === 0) {
+      setError('Select at least one of your own draft expenses to submit.');
+      return;
+    }
     setActionLoading(true);
     try {
-      await apiPost('/expenses/submit', { expenseIds: Array.from(selected) });
+      await apiPost('/expenses/submit', { expenseIds });
       setSelected(new Set());
       loadExpenses();
-    } catch (err: any) {
-      setError(err.message || 'Submit failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Submit failed'));
     } finally {
       setActionLoading(false);
     }
@@ -226,8 +258,12 @@ export default function Expenses() {
       await apiPost('/expenses/approve', { expenseIds: Array.from(selected) });
       setSelected(new Set());
       loadExpenses();
-    } catch (err: any) {
-      setError(err.message || 'Approve failed');
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 403
+          ? 'You can only approve expenses of your own team members (not your own).'
+          : errorMessage(err, 'Approve failed'),
+      );
     } finally {
       setActionLoading(false);
     }
@@ -242,8 +278,12 @@ export default function Expenses() {
       await apiPost('/expenses/reject', { expenseIds: Array.from(selected), reason });
       setSelected(new Set());
       loadExpenses();
-    } catch (err: any) {
-      setError(err.message || 'Reject failed');
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status === 403
+          ? 'You can only reject expenses of your own team members (not your own).'
+          : errorMessage(err, 'Reject failed'),
+      );
     } finally {
       setActionLoading(false);
     }
@@ -254,8 +294,8 @@ export default function Expenses() {
     try {
       await apiDelete(`/expenses/${id}`);
       loadExpenses();
-    } catch (err: any) {
-      setError(err.message || 'Delete failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Delete failed'));
     }
   };
 
@@ -443,12 +483,16 @@ export default function Expenses() {
           <button style={{ ...btnPrimary }} onClick={handleSubmit} disabled={actionLoading}>
             Submit ({selected.size})
           </button>
-          <button style={{ ...btnSuccess }} onClick={handleApprove} disabled={actionLoading}>
-            Approve ({selected.size})
-          </button>
-          <button style={{ ...btnDanger }} onClick={handleReject} disabled={actionLoading}>
-            Reject ({selected.size})
-          </button>
+          {canApprove && (
+            <>
+              <button style={{ ...btnSuccess }} onClick={handleApprove} disabled={actionLoading}>
+                Approve ({selected.size})
+              </button>
+              <button style={{ ...btnDanger }} onClick={handleReject} disabled={actionLoading}>
+                Reject ({selected.size})
+              </button>
+            </>
+          )}
         </div>
       )}
 

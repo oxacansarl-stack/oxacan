@@ -1,8 +1,15 @@
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
+import { createServer, Server } from 'node:http';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { exportJWK, generateKeyPair } from 'jose';
 import { config } from 'dotenv';
 import { Client } from 'pg';
-import { TEST_DB, TEST_PORT, COMPANY_A, COMPANY_B, USER_A, USER_B } from './setup';
+import {
+  TEST_DB, TEST_PORT, COMPANY_A, COMPANY_B, USER_A, USER_B,
+  PM_A, TEAM_LEAD_A, WORKER_1_A, WORKER_2_A, TEAM_A,
+  MOCK_SUPABASE_URL, MOCK_SUPABASE_PORT, MOCK_SUPABASE_KEY_FILE,
+} from './setup';
 
 const ROOT = join(__dirname, '../../..');
 const API_DIR = join(__dirname, '..');
@@ -16,6 +23,7 @@ const admin = {
 };
 
 let server: ChildProcess | undefined;
+let jwksServer: Server | undefined;
 
 async function withClient<T>(database: string, fn: (c: Client) => Promise<T>): Promise<T> {
   const c = new Client({ ...admin, database });
@@ -62,11 +70,43 @@ export async function setup() {
         [user, company, authId, email],
       );
     }
+    for (const [u, email] of [
+      [PM_A, 'pm-a@test.local'],
+      [TEAM_LEAD_A, 'lead-a@test.local'],
+      [WORKER_1_A, 'worker1-a@test.local'],
+      [WORKER_2_A, 'worker2-a@test.local'],
+    ] as const) {
+      await c.query(
+        `INSERT INTO app_user (id, company_id, supabase_auth_id, email, first_name, last_name, role, licence_tier)
+         VALUES ($1, $2, $3, $4, 'Test', $5, $5, 'saas')`,
+        [u.id, COMPANY_A, u.authId, email, u.role],
+      );
+    }
+    await c.query(`INSERT INTO team (id, company_id, name, leader_id) VALUES ($1, $2, 'Équipe Nord', $3)`, [
+      TEAM_A,
+      COMPANY_A,
+      TEAM_LEAD_A.id,
+    ]);
+    await c.query(`INSERT INTO team_member (team_id, user_id, company_id) VALUES ($1, $2, $3)`, [
+      TEAM_A,
+      WORKER_1_A.id,
+      COMPANY_A,
+    ]);
   });
+
+  jwksServer = await startMockSupabaseJwks();
 
   server = spawn('node', ['dist/main.js'], {
     cwd: API_DIR,
-    env: { ...process.env, DB_NAME: TEST_DB, PORT: String(TEST_PORT), NODE_ENV: 'test', SENTRY_DSN: '' },
+    env: {
+      ...process.env,
+      DB_NAME: TEST_DB,
+      PORT: String(TEST_PORT),
+      NODE_ENV: 'test',
+      SENTRY_DSN: '',
+      ALLOW_DEV_TOKENS: 'true',
+      SUPABASE_URL: MOCK_SUPABASE_URL,
+    },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
 
@@ -83,6 +123,24 @@ export async function setup() {
   throw new Error('API did not become healthy within 30s');
 }
 
+/** Serves a JWKS like Supabase Auth does, so ES256 session tokens can be verified end to end. */
+async function startMockSupabaseJwks(): Promise<Server> {
+  const { publicKey, privateKey } = await generateKeyPair('ES256', { extractable: true });
+  const publicJwk = { ...(await exportJWK(publicKey)), alg: 'ES256', kid: 'test-key', use: 'sig' };
+  writeFileSync(MOCK_SUPABASE_KEY_FILE, JSON.stringify({ ...(await exportJWK(privateKey)), alg: 'ES256', kid: 'test-key' }));
+  const srv = createServer((req, res) => {
+    if (req.url === '/auth/v1/.well-known/jwks.json') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ keys: [publicJwk] }));
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve) => srv.listen(MOCK_SUPABASE_PORT, resolve));
+  return srv;
+}
+
 export async function teardown() {
   server?.kill();
+  jwksServer?.close();
 }
