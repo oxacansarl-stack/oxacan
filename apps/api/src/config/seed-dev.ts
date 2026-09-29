@@ -1,19 +1,61 @@
+import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { sign } from 'jsonwebtoken';
 import dataSource from './data-source';
 
 const COMPANY_ID = 'd0000000-0000-4000-8000-000000000001';
+const CREDENTIALS_FILE = join(__dirname, '../../../../.demo-credentials');
 
+// Emails use the reserved .example domain so no real mailbox can ever receive them.
 const USERS = [
-  { id: 'd0000000-0000-4000-8000-000000000011', authId: 'd0000000-0000-4000-8000-000000000021', email: 'admin@demo-bau.ch', first: 'Anna', last: 'Admin', role: 'ADMIN' },
-  { id: 'd0000000-0000-4000-8000-000000000012', authId: 'd0000000-0000-4000-8000-000000000022', email: 'pm@demo-bau.ch', first: 'Peter', last: 'Projekt', role: 'PROJECT_MANAGER' },
-  { id: 'd0000000-0000-4000-8000-000000000013', authId: 'd0000000-0000-4000-8000-000000000023', email: 'chef@demo-bau.ch', first: 'Luca', last: 'Chef', role: 'TEAM_LEADER' },
-  { id: 'd0000000-0000-4000-8000-000000000014', authId: 'd0000000-0000-4000-8000-000000000024', email: 'worker@demo-bau.ch', first: 'Marco', last: 'Maurer', role: 'WORKER' },
+  { id: 'd0000000-0000-4000-8000-000000000011', authId: 'd0000000-0000-4000-8000-000000000021', email: 'admin@demo-bau.example', first: 'Anna', last: 'Admin', role: 'ADMIN' },
+  { id: 'd0000000-0000-4000-8000-000000000012', authId: 'd0000000-0000-4000-8000-000000000022', email: 'pm@demo-bau.example', first: 'Peter', last: 'Projekt', role: 'PROJECT_MANAGER' },
+  { id: 'd0000000-0000-4000-8000-000000000013', authId: 'd0000000-0000-4000-8000-000000000023', email: 'chef@demo-bau.example', first: 'Luca', last: 'Chef', role: 'TEAM_LEADER' },
+  { id: 'd0000000-0000-4000-8000-000000000014', authId: 'd0000000-0000-4000-8000-000000000024', email: 'worker@demo-bau.example', first: 'Marco', last: 'Maurer', role: 'WORKER' },
 ];
+
+interface SupabaseUser {
+  id: string;
+  email: string;
+}
+
+/** Creates the demo users in Supabase Auth (or resets their password) and returns email → auth id. */
+async function ensureSupabaseUsers(password: string): Promise<Map<string, string>> {
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('--supabase needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env');
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  const admin = async (path: string, init: RequestInit = {}): Promise<any> => {
+    const res = await fetch(`${url}/auth/v1/admin${path}`, { ...init, headers });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Supabase ${init.method ?? 'GET'} ${path}: ${res.status} ${JSON.stringify(body)}`);
+    return body;
+  };
+
+  const { users: existing } = (await admin('/users?page=1&per_page=1000')) as { users: SupabaseUser[] };
+  const ids = new Map<string, string>();
+  for (const u of USERS) {
+    const found = existing.find((e) => e.email?.toLowerCase() === u.email);
+    const user: SupabaseUser = found
+      ? await admin(`/users/${found.id}`, { method: 'PUT', body: JSON.stringify({ password }) })
+      : await admin('/users', {
+          method: 'POST',
+          body: JSON.stringify({ email: u.email, password, email_confirm: true, user_metadata: { demo: true } }),
+        });
+    ids.set(u.email, user.id);
+  }
+  return ids;
+}
 
 async function main() {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to seed demo data in production.');
   }
+  const withSupabase = process.argv.includes('--supabase');
+  const password = process.env.DEMO_PASSWORD || `Demo-${randomBytes(9).toString('base64url')}`;
+  const supabaseIds = withSupabase ? await ensureSupabaseUsers(password) : new Map<string, string>();
+
   await dataSource.initialize();
   await dataSource.transaction(async (m) => {
     await m.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
@@ -27,18 +69,35 @@ async function main() {
       await m.query(
         `INSERT INTO app_user (id, company_id, supabase_auth_id, email, first_name, last_name, role, licence_tier)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'saas')
-         ON CONFLICT (supabase_auth_id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email`,
         [u.id, COMPANY_ID, u.authId, u.email, u.first, u.last, u.role],
       );
+      const authId = supabaseIds.get(u.email);
+      if (authId) {
+        await m.query('UPDATE app_user SET supabase_auth_id = $1 WHERE id = $2', [authId, u.id]);
+      }
     }
   });
+  const linked: { email: string; role: string; supabase_auth_id: string }[] = await dataSource.query(
+    `SELECT email, role, supabase_auth_id FROM app_user WHERE company_id = $1 ORDER BY email`,
+    [COMPANY_ID],
+  );
   await dataSource.destroy();
 
   console.log('Seeded company "Demo Bau AG" with one user per role.');
-  console.log('Dev tokens (12h, need ALLOW_DEV_TOKENS=true on the API). Paste one into');
-  console.log('"Developer sign-in" on the web login page:');
-  for (const u of USERS) {
-    const token = sign({ sub: u.authId }, process.env.JWT_SECRET!, { expiresIn: '12h' });
+  if (withSupabase) {
+    writeFileSync(
+      CREDENTIALS_FILE,
+      `# Demo logins for the local web app (gitignored). Regenerated by db:seed --supabase.\n` +
+        USERS.map((u) => `${u.role}\t${u.email}\t${password}`).join('\n') +
+        '\n',
+      { mode: 0o600 },
+    );
+    console.log(`Supabase logins created; emails and password written to ${CREDENTIALS_FILE}`);
+  }
+  console.log('\nDev tokens (12h, need ALLOW_DEV_TOKENS=true on the API) for "Developer sign-in":');
+  for (const u of linked) {
+    const token = sign({ sub: u.supabase_auth_id }, process.env.JWT_SECRET!, { expiresIn: '12h' });
     console.log(`\n# ${u.role} (${u.email})\n${token}`);
   }
 }

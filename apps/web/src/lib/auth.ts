@@ -3,12 +3,21 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const DEV_TOKEN_KEY = 'oxacan_token';
 export const UNAUTHORIZED_EVENT = 'oxacan:unauthorized';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
+const configuredUrl = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Dev goes through the Vite proxy (see vite.config.ts) so blocked networks can still sign in.
+const url = import.meta.env.DEV && configuredUrl ? `${window.location.origin}/supabase` : configuredUrl;
 
 export const supabase: SupabaseClient | null =
   url && anonKey
-    ? createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true } })
+    ? createClient(url, anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          // Keep the session key tied to the real project, not the proxy origin.
+          storageKey: `sb-${new URL(configuredUrl).hostname.split('.')[0]}-auth-token`,
+        },
+      })
     : null;
 
 /** Dev tokens (from `npm run db:seed -w apps/api`) are honoured only in dev builds. */

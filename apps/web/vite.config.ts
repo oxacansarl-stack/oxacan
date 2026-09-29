@@ -14,6 +14,17 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        // Some networks (e.g. several Indian ISPs) block browser connections to *.supabase.co;
+        // in dev the browser reaches Supabase Auth through this same-origin proxy instead.
+        ...(env.SUPABASE_URL
+          ? {
+              '/supabase': {
+                target: env.SUPABASE_URL,
+                changeOrigin: true,
+                rewrite: (path: string) => path.replace(/^\/supabase/, ''),
+              },
+            }
+          : {}),
         '/api': {
           target: 'http://localhost:3001',
           changeOrigin: true,
