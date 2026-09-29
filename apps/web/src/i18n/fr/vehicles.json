@@ -1,0 +1,60 @@
+{
+  "title": "Véhicules",
+  "count_one": "{{count}} véhicule",
+  "count_other": "{{count}} véhicules",
+  "actions": {
+    "add": "+ Ajouter un véhicule",
+    "update": "Mettre à jour",
+    "deleting": "…"
+  },
+  "form": {
+    "editTitle": "Modifier le véhicule",
+    "newTitle": "Nouveau véhicule",
+    "registration": "Immatriculation *",
+    "registrationPlaceholder": "p. ex. VS 12345",
+    "make": "Marque",
+    "makePlaceholder": "p. ex. Mercedes",
+    "model": "Modèle",
+    "modelPlaceholder": "p. ex. Sprinter 314",
+    "assignedTeam": "Équipe affectée",
+    "assignedProject": "Projet affecté",
+    "none": "-- Aucun --",
+    "odometer": "Kilométrage (km)",
+    "odometerPlaceholder": "p. ex. 45230",
+    "nextServiceDate": "Date du prochain service",
+    "insuranceExpiry": "Échéance de l'assurance"
+  },
+  "badges": {
+    "serviceOverdue": "Service en retard",
+    "serviceSoon": "Service à prévoir",
+    "serviceOk": "Service à jour",
+    "insuranceExpired": "Assurance échue",
+    "insuranceExpiring": "Assurance bientôt échue",
+    "insured": "Assuré"
+  },
+  "card": {
+    "team": "Équipe :",
+    "unassigned": "Non affecté",
+    "project": "Projet :",
+    "noProject": "Aucun projet",
+    "odometer": "Kilométrage :",
+    "odometerValue": "{{value}} km",
+    "added": "Ajouté le {{date}}",
+    "deleteConfirm": "Supprimer ce véhicule ?"
+  },
+  "state": {
+    "loading": "Chargement des véhicules…"
+  },
+  "empty": {
+    "title": "Aucun véhicule pour l'instant",
+    "text": "Ajoutez votre premier véhicule pour commencer le suivi de votre parc."
+  },
+  "pagination": {
+    "page": "Page {{page}}"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les véhicules",
+    "saveFailed": "Impossible d'enregistrer le véhicule",
+    "deleteFailed": "Impossible de supprimer le véhicule"
+  }
+}

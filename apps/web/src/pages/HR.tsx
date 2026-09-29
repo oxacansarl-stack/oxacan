@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
+import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { formatMoney } from '../lib/format';
 import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
@@ -120,23 +124,12 @@ const ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'] as const;
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function statusLabel(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+function roleLabel(role: string): string {
+  return i18n.t(`role.${role}`, { ns: 'common', defaultValue: role });
 }
 
 function displayName(u: { firstName?: string; lastName?: string; email: string }): string {
   return [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (err.status === 403) return `Not allowed: ${err.message}`;
-    return err.message || fallback;
-  }
-  return err instanceof Error && err.message ? err.message : fallback;
 }
 
 function roleBadge(role: string): React.ReactNode {
@@ -153,7 +146,7 @@ function roleBadge(role: string): React.ReactNode {
         color: colors.fg,
       }}
     >
-      {statusLabel(role)}
+      {roleLabel(role)}
     </span>
   );
 }
@@ -171,7 +164,7 @@ function activeBadge(isActive: boolean): React.ReactNode {
         color: isActive ? '#166534' : '#991b1b',
       }}
     >
-      {isActive ? 'Active' : 'Inactive'}
+      {isActive ? i18n.t('active', { ns: 'hr' }) : i18n.t('inactive', { ns: 'hr' })}
     </span>
   );
 }
@@ -181,6 +174,7 @@ function activeBadge(isActive: boolean): React.ReactNode {
 /* ------------------------------------------------------------------ */
 
 export default function HR() {
+  const { t } = useTranslation('hr');
   // The employee directory (with pay rates) is office-only; team leaders see their teams.
   const { role } = useCurrentUser();
   const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
@@ -236,7 +230,7 @@ export default function HR() {
     if (teamsSearch) params.set('search', teamsSearch);
     apiGet<Team[]>(`/hr/teams?${params.toString()}`)
       .then((list) => setTeams(list ?? []))
-      .catch((err) => setTeamsError(errorMessage(err, 'Failed to load teams')))
+      .catch((err) => setTeamsError(errorMessage(err, t('messages.loadTeamsFailed'))))
       .finally(() => setTeamsLoading(false));
   }, [teamsSearch]);
 
@@ -249,7 +243,7 @@ export default function HR() {
     if (activeFilter) params.set('isActive', activeFilter);
     apiGet<Employee[]>(`/hr/employees?${params.toString()}`)
       .then((list) => setEmployees(list ?? []))
-      .catch((err) => setEmployeesError(errorMessage(err, 'Failed to load employees')))
+      .catch((err) => setEmployeesError(errorMessage(err, t('messages.loadEmployeesFailed'))))
       .finally(() => setEmployeesLoading(false));
   }, [empSearch, roleFilter, activeFilter]);
 
@@ -300,7 +294,7 @@ export default function HR() {
         setShowCreateForm(false);
         fetchTeams();
       })
-      .catch((err) => setCreateError(errorMessage(err, 'Failed to create team')))
+      .catch((err) => setCreateError(errorMessage(err, t('messages.createTeamFailed'))))
       .finally(() => setCreateLoading(false));
   };
 
@@ -314,19 +308,19 @@ export default function HR() {
         fetchTeams();
         fetchTeamDetail(teamId);
       })
-      .catch((err) => alert(errorMessage(err, 'Failed to update team')))
+      .catch((err) => alert(errorMessage(err, t('messages.updateTeamFailed'))))
       .finally(() => setEditTeamLoading(false));
   };
 
   const handleDeleteTeam = (teamId: string) => {
-    if (!window.confirm('Are you sure you want to delete this team? This cannot be undone.')) return;
+    if (!window.confirm(t('teams.confirmDelete'))) return;
     apiDelete(`/hr/teams/${teamId}`)
       .then(() => {
         setExpandedTeamId(null);
         setTeamDetail(null);
         fetchTeams();
       })
-      .catch((err) => alert(errorMessage(err, 'Failed to delete team')));
+      .catch((err) => alert(errorMessage(err, t('messages.deleteTeamFailed'))));
   };
 
   const handleAddMember = (teamId: string) => {
@@ -338,7 +332,7 @@ export default function HR() {
         fetchTeamDetail(teamId);
         fetchTeams();
       })
-      .catch((err) => alert(errorMessage(err, 'Failed to add member')))
+      .catch((err) => alert(errorMessage(err, t('messages.addMemberFailed'))))
       .finally(() => setAddMemberLoading(false));
   };
 
@@ -348,7 +342,7 @@ export default function HR() {
         fetchTeamDetail(teamId);
         fetchTeams();
       })
-      .catch((err) => alert(errorMessage(err, 'Failed to remove member')));
+      .catch((err) => alert(errorMessage(err, t('messages.removeMemberFailed'))));
   };
 
   const handleExpandTeam = (teamId: string) => {
@@ -381,7 +375,7 @@ export default function HR() {
     // CHF → integer centimes; empty clears the rate
     const hourlyRateCents = editHourlyRate.trim() === '' ? null : Math.round(parseFloat(editHourlyRate) * 100);
     if (hourlyRateCents != null && (!Number.isFinite(hourlyRateCents) || hourlyRateCents < 0)) {
-      setEditError('Hourly rate must be a positive CHF amount.');
+      setEditError(t('messages.invalidHourlyRate'));
       return;
     }
     setEditLoading(true);
@@ -400,8 +394,8 @@ export default function HR() {
       .catch((err) =>
         setEditError(
           err instanceof ApiError && err.status === 403
-            ? 'Only an administrator can change roles, pay rates and account status.'
-            : errorMessage(err, 'Failed to update employee'),
+            ? t('messages.adminOnly')
+            : errorMessage(err, t('messages.updateEmployeeFailed')),
         ),
       )
       .finally(() => setEditLoading(false));
@@ -425,17 +419,17 @@ export default function HR() {
     <div>
       {/* Page header */}
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0, marginBottom: 16 }}>
-        Human Resources
+        {t('title')}
       </h1>
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 24 }}>
         <button style={tabStyle('teams')} onClick={() => setActiveTab('teams')}>
-          Teams
+          {t('tabs.teams')}
         </button>
         {isOffice && (
           <button style={tabStyle('employees')} onClick={() => setActiveTab('employees')}>
-            Employees
+            {t('tabs.employees')}
           </button>
         )}
       </div>
@@ -446,16 +440,16 @@ export default function HR() {
           {/* Teams header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0 }}>Teams</h2>
+              <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0 }}>{t('teams.title')}</h2>
               <input
                 style={{ ...inputStyle, maxWidth: 260 }}
-                placeholder="Search teams..."
+                placeholder={t('teams.searchPlaceholder')}
                 value={teamsSearch}
                 onChange={(e) => setTeamsSearch(e.target.value)}
               />
             </div>
             <button style={btnPrimary} onClick={() => setShowCreateForm(!showCreateForm)}>
-              {showCreateForm ? 'Cancel' : '+ New Team'}
+              {showCreateForm ? t('common:actions.cancel') : t('teams.new')}
             </button>
           </div>
 
@@ -473,28 +467,28 @@ export default function HR() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    Team Name *
+                    {t('teams.nameRequired')}
                   </label>
                   <input
                     style={inputStyle}
-                    placeholder="e.g. Gros Oeuvre Equipe A"
+                    placeholder={t('teams.namePlaceholder')}
                     value={createName}
                     onChange={(e) => setCreateName(e.target.value)}
                   />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    Team Leader
+                    {t('teams.leader')}
                   </label>
                   <select
                     style={inputStyle}
                     value={createLeaderId}
                     onChange={(e) => setCreateLeaderId(e.target.value)}
                   >
-                    <option value="">No leader</option>
+                    <option value="">{t('teams.noLeader')}</option>
                     {allEmployees.map((emp) => (
                       <option key={emp.id} value={emp.id}>
-                        {displayName(emp)} ({statusLabel(emp.role)})
+                        {displayName(emp)} ({roleLabel(emp.role)})
                       </option>
                     ))}
                   </select>
@@ -506,7 +500,7 @@ export default function HR() {
                   onClick={handleCreateTeam}
                   disabled={createLoading || !createName.trim()}
                 >
-                  {createLoading ? 'Creating...' : 'Create Team'}
+                  {createLoading ? t('teams.creating') : t('teams.create')}
                 </button>
                 {createError && (
                   <span style={{ color: '#ef4444', fontSize: 13 }}>{createError}</span>
@@ -517,12 +511,12 @@ export default function HR() {
 
           {/* Teams list */}
           {teamsLoading ? (
-            <div style={{ color: '#6b7280', padding: 20 }}>Loading teams...</div>
+            <div style={{ color: '#6b7280', padding: 20 }}>{t('teams.loading')}</div>
           ) : teamsError ? (
             <div style={{ color: '#ef4444', padding: 20 }}>{teamsError}</div>
           ) : teams.length === 0 ? (
             <div style={{ color: '#9ca3af', padding: 40, textAlign: 'center' }}>
-              No teams found. Create your first team above.
+              {t('teams.empty')}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
@@ -555,8 +549,8 @@ export default function HR() {
                     </div>
                     <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
                       {team.leader
-                        ? `Leader: ${displayName(team.leader)}`
-                        : 'No leader'}
+                        ? t('teams.leaderLabel', { name: displayName(team.leader) })
+                        : t('teams.noLeader')}
                     </div>
                     <span
                       style={{
@@ -569,7 +563,7 @@ export default function HR() {
                         color: '#1e40af',
                       }}
                     >
-                      {team.memberCount ?? 0} member{(team.memberCount ?? 0) !== 1 ? 's' : ''}
+                      {t('teams.memberCount', { count: team.memberCount ?? 0 })}
                     </span>
                   </div>
 
@@ -585,14 +579,14 @@ export default function HR() {
                       }}
                     >
                       {teamDetailLoading ? (
-                        <div style={{ color: '#6b7280' }}>Loading team details...</div>
+                        <div style={{ color: '#6b7280' }}>{t('teams.loadingDetail')}</div>
                       ) : teamDetail ? (
                         <div>
                           {/* Edit team name & leader */}
                           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
                             <div style={{ flex: 1 }}>
                               <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                                Team Name
+                                {t('teams.name')}
                               </label>
                               <input
                                 style={inputStyle}
@@ -602,14 +596,14 @@ export default function HR() {
                             </div>
                             <div style={{ flex: 1 }}>
                               <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                                Team Leader
+                                {t('teams.leader')}
                               </label>
                               <select
                                 style={inputStyle}
                                 value={editTeamLeaderId}
                                 onChange={(e) => setEditTeamLeaderId(e.target.value)}
                               >
-                                <option value="">No leader</option>
+                                <option value="">{t('teams.noLeader')}</option>
                                 {allEmployees.map((emp) => (
                                   <option key={emp.id} value={emp.id}>
                                     {displayName(emp)}
@@ -622,24 +616,24 @@ export default function HR() {
                               onClick={() => handleUpdateTeam(team.id)}
                               disabled={editTeamLoading}
                             >
-                              {editTeamLoading ? 'Saving...' : 'Save'}
+                              {editTeamLoading ? t('common:actions.saving') : t('common:actions.save')}
                             </button>
                             <button
                               style={btnDanger}
                               onClick={() => handleDeleteTeam(team.id)}
                             >
-                              Delete Team
+                              {t('teams.delete')}
                             </button>
                           </div>
 
                           {/* Members list */}
                           <h4 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 12 }}>
-                            Members ({teamDetail.members?.length ?? 0})
+                            {t('teams.members', { count: teamDetail.members?.length ?? 0 })}
                           </h4>
 
                           {(!teamDetail.members || teamDetail.members.length === 0) ? (
                             <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 16 }}>
-                              No members yet. Add one below.
+                              {t('teams.noMembers')}
                             </div>
                           ) : (
                             <div style={{ marginBottom: 16 }}>
@@ -674,7 +668,8 @@ export default function HR() {
                                       padding: '4px 8px',
                                       borderRadius: 4,
                                     }}
-                                    title="Remove member"
+                                    title={t('teams.removeMember')}
+                                    aria-label={t('teams.removeMember')}
                                     onClick={() => handleRemoveMember(team.id, m.userId)}
                                   >
                                     X
@@ -691,7 +686,7 @@ export default function HR() {
                               value={addMemberUserId}
                               onChange={(e) => setAddMemberUserId(e.target.value)}
                             >
-                              <option value="">Select employee to add...</option>
+                              <option value="">{t('teams.selectEmployee')}</option>
                               {allEmployees
                                 .filter(
                                   (emp) =>
@@ -699,7 +694,7 @@ export default function HR() {
                                 )
                                 .map((emp) => (
                                   <option key={emp.id} value={emp.id}>
-                                    {displayName(emp)} ({statusLabel(emp.role)})
+                                    {displayName(emp)} ({roleLabel(emp.role)})
                                   </option>
                                 ))}
                             </select>
@@ -708,12 +703,12 @@ export default function HR() {
                               onClick={() => handleAddMember(team.id)}
                               disabled={!addMemberUserId || addMemberLoading}
                             >
-                              {addMemberLoading ? 'Adding...' : 'Add'}
+                              {addMemberLoading ? t('teams.adding') : t('common:actions.add')}
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <div style={{ color: '#ef4444' }}>Failed to load team details.</div>
+                        <div style={{ color: '#ef4444' }}>{t('teams.detailFailed')}</div>
                       )}
                     </div>
                   )}
@@ -729,14 +724,14 @@ export default function HR() {
         <div>
           {/* Employees header */}
           <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0, marginBottom: 16 }}>
-            Employees
+            {t('employees.title')}
           </h2>
 
           {/* Filters */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
             <input
               style={{ ...inputStyle, maxWidth: 280 }}
-              placeholder="Search by name or email..."
+              placeholder={t('employees.searchPlaceholder')}
               value={empSearch}
               onChange={(e) => setEmpSearch(e.target.value)}
             />
@@ -745,10 +740,10 @@ export default function HR() {
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
             >
-              <option value="">All Roles</option>
+              <option value="">{t('employees.allRoles')}</option>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {statusLabel(r)}
+                  {roleLabel(r)}
                 </option>
               ))}
             </select>
@@ -765,7 +760,7 @@ export default function HR() {
                 }}
                 onClick={() => setActiveFilter('')}
               >
-                All
+                {t('common:actions.all')}
               </button>
               <button
                 style={{
@@ -780,7 +775,7 @@ export default function HR() {
                 }}
                 onClick={() => setActiveFilter('true')}
               >
-                Active
+                {t('active')}
               </button>
               <button
                 style={{
@@ -795,7 +790,7 @@ export default function HR() {
                 }}
                 onClick={() => setActiveFilter('false')}
               >
-                Inactive
+                {t('inactive')}
               </button>
             </div>
           </div>
@@ -818,17 +813,17 @@ export default function HR() {
 
           {/* Table */}
           {employeesLoading ? (
-            <div style={{ color: '#6b7280', padding: 20 }}>Loading employees...</div>
+            <div style={{ color: '#6b7280', padding: 20 }}>{t('employees.loading')}</div>
           ) : employeesError ? (
             <div style={{ color: '#ef4444', padding: 20 }}>{employeesError}</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Name', 'Email', 'Role', 'Hourly Rate (CHF)', 'CCT Code', 'Status', 'Actions'].map(
+                  {['name', 'email', 'role', 'hourlyRate', 'cctCode', 'status', 'actions'].map(
                     (h) => (
                       <th key={h} style={thStyle}>
-                        {h}
+                        {t(`employees.table.${h}`)}
                       </th>
                     ),
                   )}
@@ -841,7 +836,7 @@ export default function HR() {
                       colSpan={7}
                       style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}
                     >
-                      No employees found
+                      {t('employees.empty')}
                     </td>
                   </tr>
                 )}
@@ -879,7 +874,7 @@ export default function HR() {
                           >
                             {ROLES.map((r) => (
                               <option key={r} value={r}>
-                                {statusLabel(r)}
+                                {roleLabel(r)}
                               </option>
                             ))}
                           </select>
@@ -901,10 +896,10 @@ export default function HR() {
                               value={editHourlyRate}
                               onChange={(e) => setEditHourlyRate(e.target.value)}
                             />
-                            <span style={{ fontSize: 11, color: '#9ca3af' }}>/h</span>
+                            <span style={{ fontSize: 11, color: '#9ca3af' }}>{t('employees.perHour')}</span>
                           </div>
                         ) : (
-                          emp.hourlyRateCents != null ? `CHF ${formatCHF(emp.hourlyRateCents)}` : '-'
+                          emp.hourlyRateCents != null ? formatMoney(emp.hourlyRateCents) : '-'
                         )}
                       </td>
 
@@ -927,7 +922,7 @@ export default function HR() {
                             }}
                             onClick={() => setEditIsActive(!editIsActive)}
                           >
-                            {editIsActive ? 'Active' : 'Inactive'}
+                            {editIsActive ? t('active') : t('inactive')}
                           </button>
                         ) : (
                           activeBadge(emp.isActive)
@@ -943,13 +938,13 @@ export default function HR() {
                               onClick={() => handleSaveEmployee(emp.id)}
                               disabled={editLoading}
                             >
-                              {editLoading ? 'Saving...' : 'Save'}
+                              {editLoading ? t('common:actions.saving') : t('common:actions.save')}
                             </button>
                             <button
                               style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
                               onClick={cancelEditing}
                             >
-                              Cancel
+                              {t('common:actions.cancel')}
                             </button>
                           </div>
                         ) : (
@@ -957,7 +952,7 @@ export default function HR() {
                             style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
                             onClick={() => startEditing(emp)}
                           >
-                            Edit
+                            {t('common:actions.edit')}
                           </button>
                         )}
                       </td>

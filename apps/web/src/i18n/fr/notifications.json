@@ -1,0 +1,36 @@
+{
+  "title": "Notifications",
+  "unreadCount_one": "{{count}} notification non lue",
+  "unreadCount_other": "{{count}} notifications non lues",
+  "allCaughtUp": "Vous êtes à jour",
+  "actions": {
+    "markAllRead": "Tout marquer comme lu"
+  },
+  "tabs": {
+    "all": "Toutes",
+    "unread": "Non lues"
+  },
+  "state": {
+    "loading": "Chargement des notifications…"
+  },
+  "empty": {
+    "all": "Aucune notification",
+    "unread": "Aucune notification non lue"
+  },
+  "timeAgo": {
+    "months_one": "il y a {{count}} mois",
+    "months_other": "il y a {{count}} mois",
+    "days_one": "il y a {{count}} jour",
+    "days_other": "il y a {{count}} jours",
+    "hours_one": "il y a {{count}} heure",
+    "hours_other": "il y a {{count}} heures",
+    "minutes_one": "il y a {{count}} minute",
+    "minutes_other": "il y a {{count}} minutes",
+    "justNow": "à l'instant"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les notifications.",
+    "markReadFailed": "Impossible de marquer la notification comme lue.",
+    "markAllReadFailed": "Impossible de tout marquer comme lu."
+  }
+}

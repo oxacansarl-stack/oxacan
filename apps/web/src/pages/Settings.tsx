@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiGet, apiPut, apiPost, apiList } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
+import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -16,6 +19,8 @@ interface CompanySettings {
   defaultRetentionRate?: number;
   defaultMarginFactor?: number;
   geolocationEnabled?: boolean;
+  iban?: string | null;
+  defaultPaymentTermsDays?: number;
 }
 
 interface Subscription {
@@ -117,10 +122,7 @@ const sectionStyle: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-const displayCHF = (cents: number): string => {
-  const rounded = Math.round(cents / 5) * 5;
-  return `CHF ${(rounded / 100).toFixed(2)}`;
-};
+const displayCHF = (cents: number): string => formatMoney(Math.round(cents / 5) * 5);
 
 const TIER_COLORS: Record<string, { bg: string; fg: string }> = {
   solo: { bg: '#dbeafe', fg: '#1d4ed8' },
@@ -139,7 +141,13 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
+/** "CH4431999123000889012" → "CH44 3199 9123 0008 8901 2" (as printed by banks). */
+function formatIban(value: string): string {
+  return value.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim();
+}
+
 export default function Settings() {
+  const { t } = useTranslation('settings');
   // Project managers may view the defaults; changing them and the subscription is admin-only.
   const isAdmin = useCurrentUser().role === 'ADMIN';
   const [settings, setSettings] = useState<CompanySettings>({});
@@ -158,6 +166,8 @@ export default function Settings() {
   const [retentionRate, setRetentionRate] = useState('');
   const [marginFactor, setMarginFactor] = useState('');
   const [geoEnabled, setGeoEnabled] = useState(false);
+  const [iban, setIban] = useState('');
+  const [paymentTermsDays, setPaymentTermsDays] = useState('30');
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -167,10 +177,12 @@ export default function Settings() {
       setRetentionRate(data.defaultRetentionRate != null ? (data.defaultRetentionRate / 100).toFixed(2) : '5.00');
       setMarginFactor(data.defaultMarginFactor != null ? (data.defaultMarginFactor / 100).toFixed(2) : '1.20');
       setGeoEnabled(data.geolocationEnabled ?? false);
+      setIban(formatIban(data.iban ?? ''));
+      setPaymentTermsDays(String(data.defaultPaymentTermsDays ?? 30));
     } catch (e: any) {
-      setError(e.message || 'Failed to load settings');
+      setError(errorMessage(e, t('messages.loadFailed')));
     }
-  }, []);
+  }, [t]);
 
   const fetchSubscription = useCallback(async () => {
     try {
@@ -209,36 +221,38 @@ export default function Settings() {
       defaultRetentionRate: toHundredths(retentionRate),
       defaultMarginFactor: toHundredths(marginFactor),
       geolocationEnabled: geoEnabled,
+      iban: iban.trim(),
+      defaultPaymentTermsDays: parseInt(paymentTermsDays, 10),
     };
-    if (![payload.defaultVatRate, payload.defaultRetentionRate, payload.defaultMarginFactor].every(Number.isFinite)) {
-      setError('Please enter valid numbers for all rates');
+    if (![payload.defaultVatRate, payload.defaultRetentionRate, payload.defaultMarginFactor, payload.defaultPaymentTermsDays].every(Number.isFinite)) {
+      setError(t('messages.invalidRates'));
       setSaving(false);
       return;
     }
     try {
       await apiPut('/settings', payload);
-      setSuccess('Settings saved successfully');
+      setSuccess(t('messages.saved'));
       fetchSettings();
     } catch (e: any) {
-      setError(e.message || 'Failed to save settings');
+      setError(errorMessage(e, t('messages.saveFailed')));
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancelSubscription = async () => {
-    if (!confirm('Are you sure you want to cancel your subscription? This action cannot be undone.')) return;
+    if (!confirm(t('subscription.confirmCancel'))) return;
     try {
       await apiPost('/subscription/cancel');
-      setSuccess('Subscription cancelled');
+      setSuccess(t('messages.subscriptionCancelled'));
       fetchSubscription();
     } catch (e: any) {
-      setError(e.message || 'Failed to cancel subscription');
+      setError(errorMessage(e, t('messages.cancelFailed')));
     }
   };
 
   if (loading) {
-    return <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading settings...</p>;
+    return <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loading')}</p>;
   }
 
   const seatPct = seats.total > 0 ? Math.min(100, Math.round((seats.used / seats.total) * 100)) : 0;
@@ -247,42 +261,42 @@ export default function Settings() {
     <div>
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>Settings</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Company settings, defaults, and subscription</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
       </div>
 
       {error && (
         <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
           {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }}>x</button>
+          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
         </div>
       )}
 
       {success && (
         <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
           {success}
-          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontWeight: 600 }}>x</button>
+          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
         </div>
       )}
 
       {/* Company Info */}
       <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>Company Information</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('company.title')}</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
-            <label style={labelStyle}>Company Name</label>
+            <label style={labelStyle}>{t('company.name')}</label>
             <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.companyName || '-'}</div>
           </div>
           <div>
-            <label style={labelStyle}>Legal Name</label>
+            <label style={labelStyle}>{t('company.legalName')}</label>
             <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.legalName || '-'}</div>
           </div>
           <div>
-            <label style={labelStyle}>Address</label>
+            <label style={labelStyle}>{t('company.address')}</label>
             <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.address || '-'}</div>
           </div>
           <div>
-            <label style={labelStyle}>VAT Number</label>
+            <label style={labelStyle}>{t('company.vatNumber')}</label>
             <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.vatNumber || '-'}</div>
           </div>
         </div>
@@ -290,10 +304,10 @@ export default function Settings() {
 
       {/* Defaults */}
       <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>Defaults</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('defaults.title')}</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={labelStyle}>Default VAT Rate (%)</label>
+            <label style={labelStyle}>{t('defaults.vatRate')}</label>
             <input
               type="number"
               step="0.01"
@@ -302,10 +316,10 @@ export default function Settings() {
               onChange={e => setVatRate(e.target.value)}
               placeholder="8.10"
             />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Stored as basis points (810 = 8.10%)</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.vatRateHint')}</div>
           </div>
           <div>
-            <label style={labelStyle}>Default Retention Rate (%)</label>
+            <label style={labelStyle}>{t('defaults.retentionRate')}</label>
             <input
               type="number"
               step="0.01"
@@ -314,10 +328,10 @@ export default function Settings() {
               onChange={e => setRetentionRate(e.target.value)}
               placeholder="5.00"
             />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Stored as basis points (500 = 5.00%)</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.retentionRateHint')}</div>
           </div>
           <div>
-            <label style={labelStyle}>Default Margin Factor</label>
+            <label style={labelStyle}>{t('defaults.marginFactor')}</label>
             <input
               type="number"
               step="0.01"
@@ -326,7 +340,34 @@ export default function Settings() {
               onChange={e => setMarginFactor(e.target.value)}
               placeholder="1.20"
             />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Stored as integer (120 = 1.20x)</div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.marginFactorHint')}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
+          <div>
+            <label style={labelStyle}>{t('billing.iban')}</label>
+            <input
+              style={inputStyle}
+              value={iban}
+              onChange={e => setIban(e.target.value)}
+              placeholder="CH44 3199 9123 0008 8901 2"
+              disabled={!isAdmin}
+            />
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('billing.ibanHint')}</div>
+          </div>
+          <div>
+            <label style={labelStyle}>{t('billing.paymentTerms')}</label>
+            <input
+              type="number"
+              min={0}
+              max={365}
+              style={inputStyle}
+              value={paymentTermsDays}
+              onChange={e => setPaymentTermsDays(e.target.value)}
+              disabled={!isAdmin}
+            />
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('billing.paymentTermsHint')}</div>
           </div>
         </div>
 
@@ -338,14 +379,14 @@ export default function Settings() {
               onChange={e => setGeoEnabled(e.target.checked)}
               style={{ width: 16, height: 16 }}
             />
-            Enable Geolocation
+            {t('defaults.geolocation')}
           </label>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, marginLeft: 24 }}>Track GPS coordinates for timekeeping and daily reports</div>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, marginLeft: 24 }}>{t('defaults.geolocationHint')}</div>
         </div>
 
         {isAdmin && (
           <button style={btnPrimary} onClick={handleSaveDefaults} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Defaults'}
+            {saving ? t('common:actions.saving') : t('defaults.save')}
           </button>
         )}
       </div>
@@ -353,7 +394,7 @@ export default function Settings() {
       {/* Subscription */}
       {isAdmin && (
       <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>Subscription</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('subscription.title')}</h2>
 
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 }}>
           {subscription.tier && (
@@ -365,9 +406,8 @@ export default function Settings() {
               fontWeight: 600,
               background: (TIER_COLORS[subscription.tier] || TIER_COLORS.solo).bg,
               color: (TIER_COLORS[subscription.tier] || TIER_COLORS.solo).fg,
-              textTransform: 'capitalize',
             }}>
-              {subscription.tier}
+              {enumLabel('subscriptionTier', subscription.tier)}
             </span>
           )}
           {subscription.status && (
@@ -379,9 +419,8 @@ export default function Settings() {
               fontWeight: 500,
               background: (STATUS_COLORS[subscription.status] || STATUS_COLORS.active).bg,
               color: (STATUS_COLORS[subscription.status] || STATUS_COLORS.active).fg,
-              textTransform: 'capitalize',
             }}>
-              {subscription.status.replace('_', ' ')}
+              {statusLabel('subscription', subscription.status)}
             </span>
           )}
         </div>
@@ -390,7 +429,7 @@ export default function Settings() {
         {seats.total > 0 && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
-              <span>Seat Usage: {seats.used} of {seats.total} seats used</span>
+              <span>{t('subscription.seatUsage', { used: seats.used, count: seats.total })}</span>
               <span>{seatPct}%</span>
             </div>
             <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
@@ -408,47 +447,47 @@ export default function Settings() {
         {/* Period and trial info */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
           <div>
-            <label style={labelStyle}>Current Period Start</label>
+            <label style={labelStyle}>{t('subscription.periodStart')}</label>
             <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.currentPeriodStart ? new Date(subscription.currentPeriodStart).toLocaleDateString() : '-'}
+              {subscription.currentPeriodStart ? formatDate(subscription.currentPeriodStart) : '-'}
             </div>
           </div>
           <div>
-            <label style={labelStyle}>Current Period End</label>
+            <label style={labelStyle}>{t('subscription.periodEnd')}</label>
             <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : '-'}
+              {subscription.currentPeriodEnd ? formatDate(subscription.currentPeriodEnd) : '-'}
             </div>
           </div>
           <div>
-            <label style={labelStyle}>Trial End</label>
+            <label style={labelStyle}>{t('subscription.trialEnd')}</label>
             <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.trialEnd ? new Date(subscription.trialEnd).toLocaleDateString() : '-'}
+              {subscription.trialEnd ? formatDate(subscription.trialEnd) : '-'}
             </div>
           </div>
         </div>
 
         {/* Billing history */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Billing History</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('billing.title')}</h3>
         {billingEvents.length === 0 ? (
-          <p style={{ color: '#9ca3af', fontSize: 14, padding: '12px 0' }}>No billing events</p>
+          <p style={{ color: '#9ca3af', fontSize: 14, padding: '12px 0' }}>{t('billing.empty')}</p>
         ) : (
           <>
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th style={thStyle}>Date</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
-                    <th style={thStyle}>Stripe Event ID</th>
+                    <th style={thStyle}>{t('billing.table.date')}</th>
+                    <th style={thStyle}>{t('billing.table.type')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('billing.table.amount')}</th>
+                    <th style={thStyle}>{t('billing.table.stripeEventId')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {billingEvents.map(evt => (
                     <tr key={evt.id}>
-                      <td style={tdStyle}>{new Date(evt.createdAt).toLocaleDateString()}</td>
+                      <td style={tdStyle}>{formatDate(evt.createdAt)}</td>
                       <td style={tdStyle}>
-                        <span style={{ textTransform: 'capitalize' }}>{evt.type.replace(/_/g, ' ')}</span>
+                        <span>{enumLabel('billingEvent', evt.type)}</span>
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
                         {displayCHF(evt.amountCents)}
@@ -469,17 +508,17 @@ export default function Settings() {
                   disabled={billingPage <= 1}
                   onClick={() => setBillingPage(p => Math.max(1, p - 1))}
                 >
-                  Previous
+                  {t('common:actions.previous')}
                 </button>
                 <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                  Page {billingPage} of {billingTotalPages}
+                  {t('common:state.page', { page: billingPage, total: billingTotalPages })}
                 </span>
                 <button
                   style={btnOutline}
                   disabled={billingPage >= billingTotalPages}
                   onClick={() => setBillingPage(p => p + 1)}
                 >
-                  Next
+                  {t('common:actions.next')}
                 </button>
               </div>
             )}
@@ -490,9 +529,9 @@ export default function Settings() {
         {subscription.status && subscription.status !== 'cancelled' && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
             <button style={btnDanger} onClick={handleCancelSubscription}>
-              Cancel Subscription
+              {t('subscription.cancel')}
             </button>
-            <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 12 }}>This cannot be undone</span>
+            <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 12 }}>{t('subscription.cancelHint')}</span>
           </div>
         )}
       </div>

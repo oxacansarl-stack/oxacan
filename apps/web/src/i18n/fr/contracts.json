@@ -1,0 +1,65 @@
+{
+  "title": "Contrats",
+  "loginRequired": "Connexion requise",
+  "actions": {
+    "createFromOffer": "+ Créer depuis une offre",
+    "create": "Créer le contrat",
+    "creating": "Création…"
+  },
+  "form": {
+    "selectLabel": "Sélectionnez une offre acceptée à partir de laquelle créer le contrat",
+    "selectOffer": "Sélectionner une offre *"
+  },
+  "filters": {
+    "allStatuses": "Tous les statuts"
+  },
+  "table": {
+    "reference": "Référence",
+    "client": "Client",
+    "offer": "Offre",
+    "status": "Statut",
+    "totalTtc": "Total TTC (CHF)",
+    "signedAt": "Date de signature",
+    "createdAt": "Créé le"
+  },
+  "empty": "Aucun contrat trouvé",
+  "detail": {
+    "back": "Retour aux contrats",
+    "fallbackTitle": "Contrat",
+    "sign": "Signer le contrat",
+    "signing": "Signature…",
+    "viewOffer": "Voir l'offre",
+    "viewProject": "Voir le projet",
+    "summary": {
+      "totalTtc": "Total TTC",
+      "retentionRate": "Retenue de garantie",
+      "esignature": "Signature électronique",
+      "signedAt": "Date de signature",
+      "notSigned": "Non signé"
+    }
+  },
+  "amendments": {
+    "title": "Avenants ({{count}})",
+    "add": "+ Ajouter un avenant",
+    "submit": "Ajouter l'avenant",
+    "adding": "Ajout…",
+    "empty": "Aucun avenant",
+    "form": {
+      "description": "Description *",
+      "amountDelta": "Variation de montant (CHF)"
+    },
+    "table": {
+      "number": "N°",
+      "description": "Description",
+      "amountDelta": "Variation de montant (CHF)",
+      "status": "Statut",
+      "createdAt": "Créé le"
+    }
+  },
+  "notes": {
+    "title": "Notes",
+    "edit": "Modifier les notes",
+    "save": "Enregistrer les notes",
+    "empty": "Aucune note"
+  }
+}

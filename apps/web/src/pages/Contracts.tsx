@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, apiPost, apiPatch, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPatch, ApiError } from '../lib/api';
+import { formatDate, formatMoney, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -102,18 +105,11 @@ const buttonSecondaryStyle: React.CSSProperties = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function Contracts() {
+  const { t } = useTranslation('contracts');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -213,7 +209,7 @@ export default function Contracts() {
   /* --- Render: Auth error --- */
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
   }
 
   /* --- Render: Detail view --- */
@@ -238,7 +234,7 @@ export default function Contracts() {
             marginBottom: 16,
           }}
         >
-          &larr; Back to Contracts
+          &larr; {t('detail.back')}
         </button>
 
         {/* Header */}
@@ -252,7 +248,7 @@ export default function Contracts() {
         >
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: '0 0 6px 0' }}>
-              {c.reference || 'Contract'}
+              {c.reference || t('detail.fallbackTitle')}
             </h1>
             <div style={{ fontSize: 14, color: '#6b7280', display: 'flex', gap: 12, alignItems: 'center' }}>
               <span>{c.client?.name ?? '-'}</span>
@@ -268,7 +264,7 @@ export default function Contracts() {
                   color: colors.fg,
                 }}
               >
-                {statusLabel(c.status)}
+                {statusLabel('contract', c.status)}
               </span>
             </div>
           </div>
@@ -280,7 +276,7 @@ export default function Contracts() {
                 onClick={() => signMutation.mutate()}
                 disabled={signMutation.isPending}
               >
-                {signMutation.isPending ? 'Signing...' : 'Sign Contract'}
+                {signMutation.isPending ? t('detail.signing') : t('detail.sign')}
               </button>
             )}
           </div>
@@ -288,7 +284,7 @@ export default function Contracts() {
 
         {(signMutation.error || updateNotesMutation.error) && (
           <div style={{ color: '#ef4444', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
-            {(signMutation.error || updateNotesMutation.error)?.message}
+            {errorMessage(signMutation.error || updateNotesMutation.error)}
           </div>
         )}
 
@@ -301,12 +297,12 @@ export default function Contracts() {
             marginBottom: 32,
           }}
         >
-          <SummaryCard label="Total TTC" value={`CHF ${formatCHF(c.totalTtcCents ?? 0)}`} highlight />
-          <SummaryCard label="Retention Rate" value={`${(c.retentionRate / 100).toFixed(1)}%`} />
-          <SummaryCard label="E-Signature" value={statusLabel(c.esignatureStatus ?? 'none')} />
+          <SummaryCard label={t('detail.summary.totalTtc')} value={formatMoney(c.totalTtcCents ?? 0)} highlight />
+          <SummaryCard label={t('detail.summary.retentionRate')} value={`${(c.retentionRate / 100).toFixed(1)} %`} />
+          <SummaryCard label={t('detail.summary.esignature')} value={statusLabel('esignature', c.esignatureStatus ?? 'none')} />
           <SummaryCard
-            label="Signed Date"
-            value={c.signedAt ? new Date(c.signedAt).toLocaleDateString('fr-CH') : 'Not signed'}
+            label={t('detail.summary.signedAt')}
+            value={c.signedAt ? formatDate(c.signedAt) : t('detail.summary.notSigned')}
           />
         </div>
 
@@ -317,7 +313,7 @@ export default function Contracts() {
               style={buttonSecondaryStyle}
               onClick={() => navigate(`/offers/${c.offerId}`)}
             >
-              View Offer
+              {t('detail.viewOffer')}
             </button>
           )}
           {c.projectId && (
@@ -325,7 +321,7 @@ export default function Contracts() {
               style={buttonSecondaryStyle}
               onClick={() => navigate(`/projects/${c.projectId}`)}
             >
-              View Project
+              {t('detail.viewProject')}
             </button>
           )}
         </div>
@@ -341,13 +337,13 @@ export default function Contracts() {
             }}
           >
             <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              Amendments ({amendments.length})
+              {t('amendments.title', { count: amendments.length })}
             </h2>
             <button
               style={buttonStyle}
               onClick={() => setShowAmendmentForm(!showAmendmentForm)}
             >
-              {showAmendmentForm ? 'Cancel' : '+ Add Amendment'}
+              {showAmendmentForm ? t('common:actions.cancel') : t('amendments.add')}
             </button>
           </div>
 
@@ -371,7 +367,7 @@ export default function Contracts() {
               >
                 <input
                   style={inputStyle}
-                  placeholder="Description *"
+                  placeholder={t('amendments.form.description')}
                   value={amendmentForm.description}
                   onChange={(e) =>
                     setAmendmentForm({ ...amendmentForm, description: e.target.value })
@@ -381,7 +377,7 @@ export default function Contracts() {
                   style={inputStyle}
                   type="number"
                   step="0.05"
-                  placeholder="Amount Delta (CHF)"
+                  placeholder={t('amendments.form.amountDelta')}
                   value={amendmentForm.amountDeltaChf}
                   onChange={(e) =>
                     setAmendmentForm({
@@ -398,23 +394,29 @@ export default function Contracts() {
                 }
                 disabled={addAmendmentMutation.isPending}
               >
-                {addAmendmentMutation.isPending ? 'Adding...' : 'Add Amendment'}
+                {addAmendmentMutation.isPending ? t('amendments.adding') : t('amendments.submit')}
               </button>
               {addAmendmentMutation.error && (
                 <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {addAmendmentMutation.error.message}
+                  {errorMessage(addAmendmentMutation.error)}
                 </span>
               )}
             </div>
           )}
 
           {amendments.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>No amendments</div>
+            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('amendments.empty')}</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['#', 'Description', 'Amount Delta (CHF)', 'Status', 'Created'].map((h) => (
+                  {[
+                    t('amendments.table.number'),
+                    t('amendments.table.description'),
+                    t('amendments.table.amountDelta'),
+                    t('amendments.table.status'),
+                    t('amendments.table.createdAt'),
+                  ].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -453,7 +455,7 @@ export default function Contracts() {
                           color: a.amountDeltaCents < 0 ? '#ef4444' : '#111827',
                         }}
                       >
-                        {a.amountDeltaCents < 0 ? '-' : '+'}CHF {formatCHF(Math.abs(a.amountDeltaCents))}
+                        {a.amountDeltaCents < 0 ? '-' : '+'}{formatMoney(Math.abs(a.amountDeltaCents))}
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
                         <span
@@ -467,11 +469,11 @@ export default function Contracts() {
                             color: aColors.fg,
                           }}
                         >
-                          {statusLabel(a.status)}
+                          {statusLabel('amendment', a.status)}
                         </span>
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
-                        {a.createdAt ? new Date(a.createdAt).toLocaleDateString('fr-CH') : '-'}
+                        {formatDate(a.createdAt)}
                       </td>
                     </tr>
                   );
@@ -491,7 +493,7 @@ export default function Contracts() {
               marginBottom: 12,
             }}
           >
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>Notes</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>{t('notes.title')}</h2>
             {!editingNotes && (
               <button
                 style={buttonSecondaryStyle}
@@ -500,7 +502,7 @@ export default function Contracts() {
                   setEditingNotes(true);
                 }}
               >
-                Edit Notes
+                {t('notes.edit')}
               </button>
             )}
           </div>
@@ -523,13 +525,13 @@ export default function Contracts() {
                   onClick={() => updateNotesMutation.mutate(notesValue)}
                   disabled={updateNotesMutation.isPending}
                 >
-                  {updateNotesMutation.isPending ? 'Saving...' : 'Save Notes'}
+                  {updateNotesMutation.isPending ? t('common:actions.saving') : t('notes.save')}
                 </button>
                 <button
                   style={buttonSecondaryStyle}
                   onClick={() => setEditingNotes(false)}
                 >
-                  Cancel
+                  {t('common:actions.cancel')}
                 </button>
               </div>
             </div>
@@ -546,7 +548,7 @@ export default function Contracts() {
                 minHeight: 60,
               }}
             >
-              {c.notes || 'No notes'}
+              {c.notes || t('notes.empty')}
             </div>
           )}
         </div>
@@ -568,10 +570,10 @@ export default function Contracts() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Contracts
+          {t('title')}
         </h1>
         <button style={buttonStyle} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Create from Offer'}
+          {showForm ? t('common:actions.cancel') : t('actions.createFromOffer')}
         </button>
       </div>
 
@@ -588,17 +590,17 @@ export default function Contracts() {
         >
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-              Select an accepted offer to create a contract from
+              {t('form.selectLabel')}
             </label>
             <select
               style={{ ...inputStyle, maxWidth: 400 }}
               value={createForm.offerId}
               onChange={(e) => setCreateForm({ offerId: e.target.value })}
             >
-              <option value="">Select Offer *</option>
+              <option value="">{t('form.selectOffer')}</option>
               {acceptedOffers.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.reference || o.projectName} - {o.client?.name ?? ''} (CHF {formatCHF(o.totalTtcCents ?? 0)})
+                  {o.reference || o.projectName} - {o.client?.name ?? ''} ({formatMoney(o.totalTtcCents ?? 0)})
                 </option>
               ))}
             </select>
@@ -608,11 +610,11 @@ export default function Contracts() {
             onClick={() => createForm.offerId && createMutation.mutate(createForm)}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : 'Create Contract'}
+            {createMutation.isPending ? t('actions.creating') : t('actions.create')}
           </button>
           {createMutation.error && (
             <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-              {createMutation.error.message}
+              {errorMessage(createMutation.error)}
             </span>
           )}
         </div>
@@ -625,10 +627,10 @@ export default function Contracts() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="">All Statuses</option>
+          <option value="">{t('filters.allStatuses')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {statusLabel(s)}
+              {statusLabel('contract', s)}
             </option>
           ))}
         </select>
@@ -636,14 +638,22 @@ export default function Contracts() {
 
       {/* Table */}
       {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : error ? (
-        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
+        <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Reference', 'Client', 'Offer', 'Status', 'Total TTC (CHF)', 'Signed Date', 'Created'].map(
+              {[
+                t('table.reference'),
+                t('table.client'),
+                t('table.offer'),
+                t('table.status'),
+                t('table.totalTtc'),
+                t('table.signedAt'),
+                t('table.createdAt'),
+              ].map(
                 (h) => (
                   <th
                     key={h}
@@ -671,7 +681,7 @@ export default function Contracts() {
                   colSpan={7}
                   style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                 >
-                  No contracts found
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -710,17 +720,17 @@ export default function Contracts() {
                         color: colors.fg,
                       }}
                     >
-                      {statusLabel(contract.status)}
+                      {statusLabel('contract', contract.status)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontVariantNumeric: 'tabular-nums' }}>
-                    CHF {formatCHF(contract.totalTtcCents ?? 0)}
+                    {formatMoney(contract.totalTtcCents ?? 0)}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
-                    {contract.signedAt ? new Date(contract.signedAt).toLocaleDateString('fr-CH') : '-'}
+                    {formatDate(contract.signedAt)}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
-                    {contract.createdAt ? new Date(contract.createdAt).toLocaleDateString('fr-CH') : '-'}
+                    {formatDate(contract.createdAt)}
                   </td>
                 </tr>
               );

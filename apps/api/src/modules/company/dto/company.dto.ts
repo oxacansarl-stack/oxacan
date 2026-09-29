@@ -5,11 +5,14 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  ValidateIf,
   Length,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsSwissIban } from '../../../common/validation/is-swiss-iban';
 
 /*
  * Rates are integers:
@@ -135,4 +138,17 @@ export class UpdateSettingsDto {
   @Min(1)
   @Max(1000)
   defaultMarginFactor?: number;
+
+  /** Accepts spaces and lower case (as printed on bank documents); stored normalised. Empty clears it. */
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.replace(/\s+/g, '').toUpperCase() : value))
+  @ValidateIf((_, value) => value !== '')
+  @IsSwissIban()
+  iban?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  defaultPaymentTermsDays?: number;
 }

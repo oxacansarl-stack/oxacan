@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPut, apiDelete, apiDownload } from '../lib/api';
+import { formatDate, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -117,15 +120,6 @@ const tdStyle: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function formatDate(iso: string): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('fr-CH');
-}
-
 function isPastDue(iso?: string): boolean {
   if (!iso) return false;
   const due = new Date(iso);
@@ -138,6 +132,7 @@ function isPastDue(iso?: string): boolean {
 /* ------------------------------------------------------------------ */
 
 export default function Meetings() {
+  const { t } = useTranslation('meetings');
   /* ----- list state ----- */
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -191,11 +186,11 @@ export default function Meetings() {
       const qs = params.toString() ? `?${params.toString()}` : '';
       setMeetings(await apiGet<Meeting[]>(`/meetings${qs}`));
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load meetings');
+      setError(errorMessage(err, t('messages.loadFailed')));
     } finally {
       setLoading(false);
     }
-  }, [projectFilter, statusFilter]);
+  }, [projectFilter, statusFilter, t]);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -213,11 +208,11 @@ export default function Meetings() {
       setDetail(res);
       setMinutesDraft(res.minutes ?? '');
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to load meeting');
+      setDetailError(errorMessage(err, t('messages.detailFailed')));
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchProjects();
@@ -254,7 +249,7 @@ export default function Meetings() {
       setShowCreate(false);
       await fetchMeetings();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to create meeting');
+      setError(errorMessage(err, t('messages.createFailed')));
     } finally {
       setCreating(false);
     }
@@ -271,7 +266,7 @@ export default function Meetings() {
       setAttendeeForm({ name: '', role: '', organization: '' });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to add attendee');
+      setDetailError(errorMessage(err, t('messages.addAttendeeFailed')));
     } finally {
       setAddingAttendee(false);
     }
@@ -283,7 +278,7 @@ export default function Meetings() {
       await apiDelete(`/meetings/${detail.id}/attendees/${attendeeId}`);
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to remove attendee');
+      setDetailError(errorMessage(err, t('messages.removeAttendeeFailed')));
     }
   };
 
@@ -300,7 +295,7 @@ export default function Meetings() {
       setActionForm({ description: '', responsible: '', dueDate: '' });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to add action');
+      setDetailError(errorMessage(err, t('messages.addActionFailed')));
     } finally {
       setAddingAction(false);
     }
@@ -312,7 +307,7 @@ export default function Meetings() {
       await apiPut(`/meetings/${detail.id}/actions/${actionId}`, { status });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to update action');
+      setDetailError(errorMessage(err, t('messages.updateActionFailed')));
     }
   };
 
@@ -323,7 +318,7 @@ export default function Meetings() {
       await apiPut(`/meetings/${detail.id}`, { minutes: minutesDraft });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to save minutes');
+      setDetailError(errorMessage(err, t('messages.saveMinutesFailed')));
     } finally {
       setSavingMinutes(false);
     }
@@ -331,14 +326,14 @@ export default function Meetings() {
 
   const handleComplete = async () => {
     if (!detail) return;
-    if (!window.confirm('Are you sure you want to mark this meeting as completed?')) return;
+    if (!window.confirm(t('messages.confirmComplete'))) return;
     setCompleting(true);
     try {
       await apiPost(`/meetings/${detail.id}/complete`);
       await fetchDetail(detail.id);
       await fetchMeetings();
     } catch (err: unknown) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to complete meeting');
+      setDetailError(errorMessage(err, t('messages.completeFailed')));
     } finally {
       setCompleting(false);
     }
@@ -360,13 +355,13 @@ export default function Meetings() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Site Meetings
+          {t('title')}
         </h1>
         <button
           style={btnPrimary}
           onClick={() => setShowCreate((prev) => !prev)}
         >
-          + New Meeting
+          {t('newMeeting')}
         </button>
       </div>
 
@@ -377,7 +372,7 @@ export default function Meetings() {
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value)}
         >
-          <option value="">All Projects</option>
+          <option value="">{t('filters.allProjects')}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.reference ? `${p.reference} - ` : ''}{p.name}
@@ -386,7 +381,7 @@ export default function Meetings() {
         </select>
         <div style={{ display: 'flex', gap: 4 }}>
           {(['', 'scheduled', 'completed'] as const).map((s) => {
-            const label = s === '' ? 'All' : statusLabel(s);
+            const label = s === '' ? t('filters.allStatuses') : statusLabel('meeting', s);
             const active = statusFilter === s;
             return (
               <button
@@ -425,19 +420,19 @@ export default function Meetings() {
           }}
         >
           <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            New Meeting
+            {t('form.title')}
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Project *
+                {t('form.project')}
               </label>
               <select
                 style={inputStyle}
                 value={createForm.projectId}
                 onChange={(e) => setCreateForm((f) => ({ ...f, projectId: e.target.value }))}
               >
-                <option value="">Select project...</option>
+                <option value="">{t('form.selectProject')}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.reference ? `${p.reference} - ` : ''}{p.name}
@@ -447,7 +442,7 @@ export default function Meetings() {
             </div>
             <div>
               <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Date *
+                {t('form.date')}
               </label>
               <input
                 type="date"
@@ -458,11 +453,11 @@ export default function Meetings() {
             </div>
             <div>
               <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Location
+                {t('form.location')}
               </label>
               <input
                 style={inputStyle}
-                placeholder="e.g. Site office, room A"
+                placeholder={t('form.locationPlaceholder')}
                 value={createForm.location}
                 onChange={(e) => setCreateForm((f) => ({ ...f, location: e.target.value }))}
               />
@@ -470,11 +465,11 @@ export default function Meetings() {
           </div>
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-              Agenda
+              {t('form.agenda')}
             </label>
             <textarea
               style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder="Meeting agenda..."
+              placeholder={t('form.agendaPlaceholder')}
               value={createForm.agenda}
               onChange={(e) => setCreateForm((f) => ({ ...f, agenda: e.target.value }))}
             />
@@ -485,10 +480,10 @@ export default function Meetings() {
               onClick={handleCreate}
               disabled={creating || !createForm.projectId || !createForm.meetingDate}
             >
-              {creating ? 'Creating...' : 'Create Meeting'}
+              {creating ? t('form.creating') : t('form.submit')}
             </button>
             <button style={btnOutline} onClick={() => setShowCreate(false)}>
-              Cancel
+              {t('common:actions.cancel')}
             </button>
           </div>
         </div>
@@ -496,17 +491,17 @@ export default function Meetings() {
 
       {/* Meetings table */}
       {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : meetings.length === 0 ? (
         <div style={{ color: '#9ca3af', padding: 20, textAlign: 'center' }}>
-          No meetings found
+          {t('empty')}
         </div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['#', 'Date', 'Project', 'Location', 'Status', 'Actions', 'Created'].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
+              {(['number', 'date', 'project', 'location', 'status', 'actions', 'created'] as const).map((h) => (
+                <th key={h} style={thStyle}>{t(`table.${h}`)}</th>
               ))}
             </tr>
           </thead>
@@ -547,7 +542,7 @@ export default function Meetings() {
                           color: colors.fg,
                         }}
                       >
-                        {statusLabel(m.status)}
+                        {statusLabel('meeting', m.status)}
                       </span>
                     </td>
                     <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums' }}>
@@ -563,7 +558,7 @@ export default function Meetings() {
                     <tr>
                       <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid #e5e7eb' }}>
                         {detailLoading ? (
-                          <div style={{ padding: 24, color: '#6b7280' }}>Loading meeting details...</div>
+                          <div style={{ padding: 24, color: '#6b7280' }}>{t('detail.loading')}</div>
                         ) : detailError ? (
                           <div style={{ padding: 24, color: '#dc2626' }}>{detailError}</div>
                         ) : detail ? (
@@ -585,6 +580,11 @@ export default function Meetings() {
                             onSaveMinutes={handleSaveMinutes}
                             completing={completing}
                             onComplete={handleComplete}
+                            onDownloadPdf={() =>
+                              apiDownload(`/meetings/${detail.id}/pdf`).catch((err) =>
+                                setDetailError(errorMessage(err, t('messages.pdfFailed'))),
+                              )
+                            }
                           />
                         ) : null}
                       </td>
@@ -622,6 +622,7 @@ interface MeetingDetailProps {
   onSaveMinutes: () => void;
   completing: boolean;
   onComplete: () => void;
+  onDownloadPdf: () => void;
 }
 
 function MeetingDetail({
@@ -642,7 +643,9 @@ function MeetingDetail({
   onSaveMinutes,
   completing,
   onComplete,
+  onDownloadPdf,
 }: MeetingDetailProps) {
+  const { t } = useTranslation('meetings');
   const attendees = detail.attendees ?? [];
   const actions = detail.actions ?? [];
   const colors = STATUS_COLORS[detail.status] ?? STATUS_COLORS.scheduled;
@@ -664,18 +667,18 @@ function MeetingDetail({
       <div style={sectionStyle}>
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
           <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>Project: </span>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.project')}</span>
             <span style={{ fontWeight: 500, color: '#111827' }}>
               {detail.project?.name ?? '-'}
               {detail.project?.reference ? ` (${detail.project.reference})` : ''}
             </span>
           </div>
           <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>Date: </span>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.date')}</span>
             <span style={{ fontWeight: 500, color: '#111827' }}>{formatDate(detail.meetingDate)}</span>
           </div>
           <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>Location: </span>
+            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.location')}</span>
             <span style={{ fontWeight: 500, color: '#111827' }}>{detail.location ?? '-'}</span>
           </div>
           <span
@@ -689,7 +692,7 @@ function MeetingDetail({
               color: colors.fg,
             }}
           >
-            {statusLabel(detail.status)}
+            {statusLabel('meeting', detail.status)}
           </span>
         </div>
       </div>
@@ -697,7 +700,7 @@ function MeetingDetail({
       {/* Agenda */}
       {detail.agenda && (
         <div style={sectionStyle}>
-          <h4 style={sectionTitle}>Agenda</h4>
+          <h4 style={sectionTitle}>{t('detail.agenda')}</h4>
           <pre
             style={{
               background: '#fff',
@@ -719,13 +722,13 @@ function MeetingDetail({
 
       {/* Attendees */}
       <div style={sectionStyle}>
-        <h4 style={sectionTitle}>Attendees ({attendees.length})</h4>
+        <h4 style={sectionTitle}>{t('detail.attendees.title', { count: attendees.length })}</h4>
         {attendees.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
             <thead>
               <tr>
-                {['Name', 'Role', 'Organization', ''].map((h) => (
-                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{h}</th>
+                {(['name', 'role', 'organization', ''] as const).map((h) => (
+                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{h ? t(`detail.attendees.${h}`) : ''}</th>
                 ))}
               </tr>
             </thead>
@@ -740,7 +743,7 @@ function MeetingDetail({
                       style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}
                       onClick={() => onRemoveAttendee(a.id)}
                     >
-                      Remove
+                      {t('detail.attendees.remove')}
                     </button>
                   </td>
                 </tr>
@@ -749,33 +752,33 @@ function MeetingDetail({
           </table>
         )}
         {attendees.length === 0 && (
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>No attendees yet</div>
+          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>{t('detail.attendees.empty')}</div>
         )}
         {/* Add attendee inline form */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Name *</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.nameLabel')}</label>
             <input
               style={{ ...inputStyle, width: 180 }}
-              placeholder="Name"
+              placeholder={t('detail.attendees.name')}
               value={attendeeForm.name}
               onChange={(e) => setAttendeeForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Role</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.roleLabel')}</label>
             <input
               style={{ ...inputStyle, width: 150 }}
-              placeholder="Role"
+              placeholder={t('detail.attendees.role')}
               value={attendeeForm.role}
               onChange={(e) => setAttendeeForm((f) => ({ ...f, role: e.target.value }))}
             />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Organization</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.organizationLabel')}</label>
             <input
               style={{ ...inputStyle, width: 180 }}
-              placeholder="Organization"
+              placeholder={t('detail.attendees.organization')}
               value={attendeeForm.organization}
               onChange={(e) => setAttendeeForm((f) => ({ ...f, organization: e.target.value }))}
             />
@@ -785,20 +788,20 @@ function MeetingDetail({
             onClick={onAddAttendee}
             disabled={addingAttendee || !attendeeForm.name}
           >
-            {addingAttendee ? 'Adding...' : 'Add Attendee'}
+            {addingAttendee ? t('detail.attendees.adding') : t('detail.attendees.add')}
           </button>
         </div>
       </div>
 
       {/* Action Items */}
       <div style={sectionStyle}>
-        <h4 style={sectionTitle}>Action Items ({actions.length})</h4>
+        <h4 style={sectionTitle}>{t('detail.actions.title', { count: actions.length })}</h4>
         {actions.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
             <thead>
               <tr>
-                {['Description', 'Responsible', 'Due Date', 'Status'].map((h) => (
-                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{h}</th>
+                {(['description', 'responsible', 'dueDate', 'status'] as const).map((h) => (
+                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{t(`detail.actions.${h}`)}</th>
                 ))}
               </tr>
             </thead>
@@ -812,7 +815,7 @@ function MeetingDetail({
                     <td style={tdStyle}>{a.responsible}</td>
                     <td style={{ ...tdStyle, color: overdue ? '#dc2626' : undefined, fontWeight: overdue ? 600 : undefined }}>
                       {a.dueDate ? formatDate(a.dueDate) : '-'}
-                      {overdue && <span style={{ fontSize: 11, marginLeft: 4 }}>(overdue)</span>}
+                      {overdue && <span style={{ fontSize: 11, marginLeft: 4 }}>{t('detail.actions.overdue')}</span>}
                     </td>
                     <td style={tdStyle}>
                       <select
@@ -830,9 +833,9 @@ function MeetingDetail({
                         value={a.status}
                         onChange={(e) => onUpdateActionStatus(a.id, e.target.value)}
                       >
-                        <option value="open">Open</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="done">Done</option>
+                        <option value="open">{statusLabel('meetingAction', 'open')}</option>
+                        <option value="in_progress">{statusLabel('meetingAction', 'in_progress')}</option>
+                        <option value="done">{statusLabel('meetingAction', 'done')}</option>
                       </select>
                     </td>
                   </tr>
@@ -842,30 +845,30 @@ function MeetingDetail({
           </table>
         )}
         {actions.length === 0 && (
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>No action items yet</div>
+          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>{t('detail.actions.empty')}</div>
         )}
         {/* Add action inline form */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Description *</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.descriptionLabel')}</label>
             <input
               style={{ ...inputStyle, width: 240 }}
-              placeholder="Action description"
+              placeholder={t('detail.actions.descriptionPlaceholder')}
               value={actionForm.description}
               onChange={(e) => setActionForm((f) => ({ ...f, description: e.target.value }))}
             />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Responsible *</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.responsibleLabel')}</label>
             <input
               style={{ ...inputStyle, width: 160 }}
-              placeholder="Responsible"
+              placeholder={t('detail.actions.responsiblePlaceholder')}
               value={actionForm.responsible}
               onChange={(e) => setActionForm((f) => ({ ...f, responsible: e.target.value }))}
             />
           </div>
           <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>Due Date</label>
+            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.dueDateLabel')}</label>
             <input
               type="date"
               style={{ ...inputStyle, width: 160 }}
@@ -878,17 +881,17 @@ function MeetingDetail({
             onClick={onAddAction}
             disabled={addingAction || !actionForm.description || !actionForm.responsible}
           >
-            {addingAction ? 'Adding...' : 'Add Action'}
+            {addingAction ? t('detail.actions.adding') : t('detail.actions.add')}
           </button>
         </div>
       </div>
 
       {/* Minutes */}
       <div style={sectionStyle}>
-        <h4 style={sectionTitle}>Minutes</h4>
+        <h4 style={sectionTitle}>{t('detail.minutes.title')}</h4>
         <textarea
           style={{ ...inputStyle, minHeight: 120, resize: 'vertical', marginBottom: 8 }}
-          placeholder="Meeting minutes..."
+          placeholder={t('detail.minutes.placeholder')}
           value={minutesDraft}
           onChange={(e) => setMinutesDraft(e.target.value)}
         />
@@ -898,23 +901,26 @@ function MeetingDetail({
             onClick={onSaveMinutes}
             disabled={savingMinutes}
           >
-            {savingMinutes ? 'Saving...' : 'Save Minutes'}
+            {savingMinutes ? t('common:actions.saving') : t('detail.minutes.save')}
           </button>
         </div>
       </div>
 
       {/* Complete meeting */}
-      {detail.status === 'scheduled' && (
-        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16 }}>
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16, display: 'flex', gap: 8 }}>
+        <button style={btnOutline} onClick={onDownloadPdf}>
+          {t('detail.downloadPdf')}
+        </button>
+        {detail.status === 'scheduled' && (
           <button
             style={btnSuccess}
             onClick={onComplete}
             disabled={completing}
           >
-            {completing ? 'Completing...' : 'Complete Meeting'}
+            {completing ? t('detail.completing') : t('detail.complete')}
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

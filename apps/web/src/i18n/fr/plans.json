@@ -1,0 +1,31 @@
+{
+  "title": "Plans",
+  "actions": {
+    "upload": "+ Téléverser un plan",
+    "create": "Créer le plan",
+    "creating": "Création…"
+  },
+  "form": {
+    "name": "Nom du plan *",
+    "fileUrl": "URL du fichier (provisoire)",
+    "floor": "Étage (p. ex. RDC, 1er, sous-sol)",
+    "scale": "Échelle (p. ex. 1:50)"
+  },
+  "card": {
+    "floor": "Étage : {{value}}",
+    "scale": "Échelle : {{value}}",
+    "type": "Type : {{value}}",
+    "version": "v{{version}}"
+  },
+  "annotations": {
+    "title": "Annotations",
+    "empty": "Aucune annotation"
+  },
+  "empty": {
+    "plans": "Aucun plan pour le moment"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les plans.",
+    "createFailed": "Impossible de créer le plan."
+  }
+}

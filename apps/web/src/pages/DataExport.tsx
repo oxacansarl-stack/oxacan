@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { apiGet, ApiError } from '../lib/api';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -44,6 +46,7 @@ const cardStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export default function DataExport() {
+  const { t } = useTranslation('dataExport');
   const [exportData, setExportData] = useState<ExportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -59,9 +62,9 @@ export default function DataExport() {
       setExported(true);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 401) {
-        setError('Login required to export data.');
+        setError(t('messages.loginRequired'));
       } else {
-        setError(e.message || 'Failed to export data. Please try again.');
+        setError(errorMessage(e, t('messages.failed')));
       }
     } finally {
       setLoading(false);
@@ -84,34 +87,32 @@ export default function DataExport() {
   };
 
   const dataSections = [
-    { label: 'Company profile', description: 'Company name, address, registration details' },
-    { label: 'Users & roles', description: 'All user accounts and their assigned roles' },
-    { label: 'Clients (CRM)', description: 'Client contacts, pipeline stages, interaction history' },
-    { label: 'Offers & contracts', description: 'Offer documents, accepted contracts, amendments' },
-    { label: 'Projects & tasks', description: 'Active and archived project data, work lots' },
-    { label: 'Timekeeping', description: 'Clock-in/out entries, submitted and approved hours' },
-    { label: 'Expenses', description: 'Expense records, receipts, approval status' },
-    { label: 'Invoices & payments', description: 'Invoice history, payment records, credit notes' },
-    { label: 'Accounting entries', description: 'Journal entries, chart of accounts, fiduciary exports' },
-    { label: 'Daily reports', description: 'Site reports, weather, staff counts, issues' },
-    { label: 'Notifications', description: 'All system notifications and read status' },
-  ];
+    'company',
+    'users',
+    'clients',
+    'offers',
+    'projects',
+    'timekeeping',
+    'expenses',
+    'invoices',
+    'accounting',
+    'dailyReports',
+    'notifications',
+  ].map((key) => ({ label: t(`sections.${key}.label`), description: t(`sections.${key}.description`) }));
 
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
-        Data Export
+        {t('title')}
       </h1>
       <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24, maxWidth: 640 }}>
-        In compliance with the Swiss Federal Act on Data Protection (LPD/nDSG) and the EU
-        General Data Protection Regulation (GDPR), you have the right to request a full export
-        of all personal and company data stored in OXACAN.
+        {t('intro')}
       </p>
 
       {/* What will be exported */}
       <div style={cardStyle}>
         <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16, marginTop: 0 }}>
-          Data included in the export
+          {t('included')}
         </h2>
         <div
           style={{
@@ -179,7 +180,7 @@ export default function DataExport() {
               fontSize: 14,
             }}
           >
-            Dismiss
+            {t('actions.dismiss')}
           </button>
         </div>
       )}
@@ -194,7 +195,7 @@ export default function DataExport() {
           onClick={fetchExport}
           disabled={loading}
         >
-          {loading ? 'Preparing export...' : 'Export All My Data'}
+          {loading ? t('actions.preparing') : t('actions.exportAll')}
         </button>
 
         {exported && exportData && (
@@ -205,7 +206,7 @@ export default function DataExport() {
             }}
             onClick={downloadJSON}
           >
-            Download as JSON
+            {t('actions.downloadJson')}
           </button>
         )}
       </div>
@@ -214,7 +215,7 @@ export default function DataExport() {
       {exported && exportData && (
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            Export Preview
+            {t('preview.title')}
           </h3>
           <div
             style={{
@@ -232,7 +233,7 @@ export default function DataExport() {
             }}
           >
             {JSON.stringify(exportData, null, 2).slice(0, 5000)}
-            {JSON.stringify(exportData, null, 2).length > 5000 && '\n\n... (truncated — download full file above)'}
+            {JSON.stringify(exportData, null, 2).length > 5000 && `\n\n${t('preview.truncated')}`}
           </div>
         </div>
       )}
@@ -249,11 +250,12 @@ export default function DataExport() {
           lineHeight: 1.6,
         }}
       >
-        <strong>Privacy Notice:</strong> Your exported data is generated on-demand and is not
-        stored on our servers after download. The JSON file contains all data associated with
-        your company account. If you wish to request data deletion, please contact your system
-        administrator or write to{' '}
-        <span style={{ fontWeight: 600 }}>privacy@oxacan.ch</span>.
+        <Trans
+          t={t}
+          i18nKey="privacy"
+          values={{ email: 'privacy@oxacan.ch' }}
+          components={{ strong: <strong />, email: <span style={{ fontWeight: 600 }} /> }}
+        />
       </div>
     </div>
   );

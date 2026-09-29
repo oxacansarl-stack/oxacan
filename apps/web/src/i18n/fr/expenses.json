@@ -1,0 +1,56 @@
+{
+  "title": "Dépenses",
+  "subtitle": "Suivez et gérez les dépenses des projets",
+  "tabs": {
+    "all": "Toutes"
+  },
+  "actions": {
+    "new": "+ Nouvelle dépense",
+    "create": "Créer la dépense",
+    "creating": "Création…",
+    "submit": "Soumettre ({{count}})",
+    "approve": "Approuver ({{count}})",
+    "reject": "Refuser ({{count}})"
+  },
+  "form": {
+    "title": "Nouvelle dépense",
+    "project": "Projet (facultatif)",
+    "noProject": "Aucun projet",
+    "date": "Date",
+    "category": "Catégorie",
+    "amount": "Montant (CHF)",
+    "description": "Description",
+    "descriptionPlaceholder": "Décrivez la dépense…",
+    "billable": "Refacturable au client"
+  },
+  "filters": {
+    "allCategories": "Toutes les catégories"
+  },
+  "table": {
+    "date": "Date",
+    "category": "Catégorie",
+    "description": "Description",
+    "project": "Projet",
+    "amount": "Montant",
+    "billable": "Refacturable",
+    "status": "Statut",
+    "reason": "Motif : {{reason}}"
+  },
+  "empty": "Aucune dépense trouvée",
+  "prompts": {
+    "rejectionReason": "Motif du refus :",
+    "confirmDelete": "Supprimer cette dépense ?"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les dépenses.",
+    "invalidAmount": "Le montant doit être une valeur positive en CHF.",
+    "createFailed": "Impossible de créer la dépense.",
+    "selectOwnDrafts": "Sélectionnez au moins une de vos dépenses en brouillon ou refusées à soumettre.",
+    "submitFailed": "La soumission a échoué.",
+    "approveFailed": "L'approbation a échoué.",
+    "rejectFailed": "Le refus a échoué.",
+    "deleteFailed": "La suppression a échoué.",
+    "approveForbidden": "Vous ne pouvez approuver que les dépenses des membres de votre équipe (pas les vôtres).",
+    "rejectForbidden": "Vous ne pouvez refuser que les dépenses des membres de votre équipe (pas les vôtres)."
+  }
+}

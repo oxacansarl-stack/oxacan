@@ -1,0 +1,76 @@
+{
+  "title": "Commandes",
+  "actions": {
+    "new": "+ Nouvelle commande",
+    "create": "Créer la commande",
+    "creating": "Création…",
+    "addLine": "+ Ajouter une ligne",
+    "removeLine": "Retirer la ligne",
+    "deleteLine": "Supprimer la ligne",
+    "recordDelivery": "Enregistrer la livraison",
+    "send": "Envoyer",
+    "confirm": "Confirmer",
+    "markDelivered": "Marquer comme livrée",
+    "cancelOrder": "Annuler la commande"
+  },
+  "tabs": {
+    "all": "Toutes"
+  },
+  "form": {
+    "title": "Nouvelle commande",
+    "supplier": "Fournisseur *",
+    "selectSupplier": "Sélectionner un fournisseur…",
+    "project": "Projet (facultatif)",
+    "noProject": "Aucun projet",
+    "lines": "Lignes",
+    "description": "Description",
+    "quantity": "Qté",
+    "unit": "Unité",
+    "unitPriceChf": "Prix unitaire (CHF)",
+    "total": "Total",
+    "totalHt": "Total HT : {{amount}}"
+  },
+  "table": {
+    "reference": "Référence",
+    "supplier": "Fournisseur",
+    "project": "Projet",
+    "status": "Statut",
+    "totalHt": "Total HT",
+    "expectedDelivery": "Livraison prévue",
+    "created": "Créée le"
+  },
+  "detail": {
+    "loading": "Chargement des détails…",
+    "reference": "Référence",
+    "supplier": "Fournisseur",
+    "project": "Projet",
+    "status": "Statut",
+    "noLines": "Aucune ligne sur cette commande.",
+    "addLine": "Ajouter une ligne",
+    "priceChf": "Prix (CHF)"
+  },
+  "lines": {
+    "description": "Description",
+    "qtyOrdered": "Qté commandée",
+    "qtyDelivered": "Qté livrée",
+    "progress": "Avancement",
+    "unitPrice": "Prix unitaire",
+    "total": "Total",
+    "actions": "Actions"
+  },
+  "state": {
+    "loading": "Chargement des commandes…"
+  },
+  "empty": {
+    "none": "Aucune commande trouvée."
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les commandes",
+    "loadDetailFailed": "Impossible de charger le détail de la commande",
+    "createFailed": "Impossible de créer la commande",
+    "statusFailed": "Impossible de modifier le statut",
+    "addLineFailed": "Impossible d'ajouter la ligne",
+    "deleteLineFailed": "Impossible de supprimer la ligne",
+    "deliveryFailed": "Impossible d'enregistrer la livraison"
+  }
+}

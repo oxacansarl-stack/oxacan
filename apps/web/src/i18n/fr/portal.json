@@ -1,0 +1,53 @@
+{
+  "title": "Portail client",
+  "subtitle": "Gérez les liens d'accès au portail pour partager un projet avec le maître d'ouvrage",
+  "newToken": "+ Nouveau lien d'accès",
+  "form": {
+    "title": "Créer un lien d'accès au portail",
+    "project": "Projet *",
+    "selectProject": "Sélectionner un projet",
+    "expiresAt": "Date d'expiration (facultatif)",
+    "submit": "Créer le lien"
+  },
+  "table": {
+    "project": "Projet",
+    "token": "Jeton",
+    "created": "Créé",
+    "expires": "Expiration",
+    "status": "Statut",
+    "actions": "Actions"
+  },
+  "state": {
+    "loading": "Chargement des liens d'accès…",
+    "empty": "Aucun lien d'accès. Créez-en un pour partager les données d'un projet avec le client.",
+    "never": "Jamais",
+    "active": "Actif",
+    "revoked": "Révoqué"
+  },
+  "actions": {
+    "copy": "Copier",
+    "copied": "Copié !",
+    "copyUrl": "Copier l'URL",
+    "revoke": "Révoquer"
+  },
+  "messages": {
+    "projectRequired": "Le projet est obligatoire",
+    "created": "Lien d'accès au portail créé",
+    "revoked": "Lien d'accès révoqué",
+    "confirmRevoke": "Voulez-vous vraiment révoquer ce lien d'accès ? Le lien du portail ne fonctionnera plus.",
+    "loadFailed": "Impossible de charger les liens d'accès au portail",
+    "createFailed": "Impossible de créer le lien d'accès",
+    "revokeFailed": "Impossible de révoquer le lien d'accès"
+  },
+  "timeAgo": {
+    "months_one": "il y a {{count}} mois",
+    "months_other": "il y a {{count}} mois",
+    "days_one": "il y a {{count}} jour",
+    "days_other": "il y a {{count}} jours",
+    "hours_one": "il y a {{count}} heure",
+    "hours_other": "il y a {{count}} heures",
+    "minutes_one": "il y a {{count}} min",
+    "minutes_other": "il y a {{count}} min",
+    "justNow": "à l'instant"
+  }
+}

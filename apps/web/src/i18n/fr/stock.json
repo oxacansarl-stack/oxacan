@@ -1,0 +1,83 @@
+{
+  "title": "Gestion du stock",
+  "subtitle": "Gérez les emplacements de stockage, les niveaux de stock et les mouvements de matériel.",
+  "tabs": {
+    "locations": "Emplacements",
+    "items": "Articles",
+    "movements": "Mouvements"
+  },
+  "locations": {
+    "heading": "Emplacements de stockage ({{count}})",
+    "new": "+ Nouvel emplacement",
+    "formTitle": "Créer un emplacement",
+    "name": "Nom *",
+    "namePlaceholder": "Dépôt principal",
+    "type": "Type *",
+    "address": "Adresse",
+    "optional": "Facultatif",
+    "create": "Créer l'emplacement",
+    "creating": "Création…",
+    "created": "Créé le {{date}}",
+    "empty": "Aucun emplacement trouvé"
+  },
+  "items": {
+    "allLocations": "Tous les emplacements",
+    "belowThresholdActive": "!! Sous le seuil",
+    "belowThresholdOnly": "Sous le seuil uniquement",
+    "new": "+ Ajouter un article",
+    "formTitle": "Ajouter un article en stock",
+    "articleId": "ID de l'article *",
+    "articleIdPlaceholder": "ID de l'article",
+    "location": "Emplacement *",
+    "selectLocation": "Sélectionner un emplacement",
+    "quantity": "Quantité",
+    "minThreshold": "Seuil minimum",
+    "add": "Ajouter l'article",
+    "adding": "Ajout…",
+    "empty": "Aucun article en stock trouvé",
+    "lowStock": "Stock bas",
+    "ok": "OK",
+    "table": {
+      "article": "Article / désignation",
+      "location": "Emplacement",
+      "quantity": "Quantité",
+      "minThreshold": "Seuil minimum",
+      "status": "Statut",
+      "created": "Créé le"
+    }
+  },
+  "movements": {
+    "heading": "Journal des mouvements ({{count}})",
+    "new": "+ Enregistrer un mouvement",
+    "formTitle": "Enregistrer un mouvement",
+    "stockItem": "Article en stock *",
+    "selectItem": "Sélectionner un article",
+    "type": "Type *",
+    "quantity": "Quantité *",
+    "reference": "Référence",
+    "projectId": "ID du projet",
+    "optional": "Facultatif",
+    "toLocation": "Emplacement de destination *",
+    "selectLocation": "Sélectionner un emplacement",
+    "record": "Enregistrer le mouvement",
+    "recording": "Enregistrement…",
+    "empty": "Aucun mouvement enregistré",
+    "table": {
+      "date": "Date",
+      "article": "Article",
+      "location": "Emplacement",
+      "type": "Type",
+      "quantity": "Quantité",
+      "project": "Projet",
+      "reference": "Référence"
+    }
+  },
+  "messages": {
+    "loadLocationsFailed": "Impossible de charger les emplacements",
+    "createLocationFailed": "Impossible de créer l'emplacement",
+    "loadItemsFailed": "Impossible de charger les articles en stock",
+    "addItemFailed": "Impossible d'ajouter l'article en stock",
+    "loadMovementsFailed": "Impossible de charger les mouvements",
+    "recordMovementFailed": "Impossible d'enregistrer le mouvement"
+  }
+}

@@ -1,6 +1,9 @@
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, formatCHF, ApiError } from '../lib/api';
+import { apiGet, apiPost, ApiError } from '../lib/api';
+import { formatAmount } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 interface Article {
   id: string;
@@ -111,6 +114,7 @@ function parseCSV(text: string): ImportRow[] {
 }
 
 export default function Catalogue() {
+  const { t } = useTranslation('catalogue');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -140,7 +144,7 @@ export default function Catalogue() {
     const text = await file.text();
     const rows = parseCSV(text);
     if (rows.length === 0) {
-      setImportResult({ matched: 0, unmatched: 0, errors: ['No valid rows found in CSV'] });
+      setImportResult({ matched: 0, unmatched: 0, errors: [t('messages.noValidRows')] });
       return;
     }
     importMutation.mutate({ filename: file.name, rows });
@@ -163,14 +167,14 @@ export default function Catalogue() {
   });
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('common:auth.sessionExpired')}</div>;
   }
 
   if (error && !(error instanceof ApiError && error.status === 401)) {
     return (
       <div>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 20 }}>
-          Catalogue
+          {t('title')}
         </h1>
         <div
           style={{
@@ -199,7 +203,7 @@ export default function Catalogue() {
             !
           </div>
           <div style={{ fontSize: 14, color: '#dc2626', marginBottom: 12, textAlign: 'center' }}>
-            {error.message || 'Failed to load catalogue articles'}
+            {errorMessage(error, t('messages.loadFailed'))}
           </div>
           <button
             onClick={() => window.location.reload()}
@@ -214,7 +218,7 @@ export default function Catalogue() {
               cursor: 'pointer',
             }}
           >
-            Retry
+            {t('common:actions.retry')}
           </button>
         </div>
       </div>
@@ -232,7 +236,7 @@ export default function Catalogue() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Catalogue
+          {t('title')}
         </h1>
         <div>
           <input
@@ -247,7 +251,7 @@ export default function Catalogue() {
             onClick={() => fileRef.current?.click()}
             disabled={importMutation.isPending}
           >
-            {importMutation.isPending ? 'Importing...' : 'Import CSV'}
+            {importMutation.isPending ? t('actions.importing') : t('actions.importCsv')}
           </button>
         </div>
       </div>
@@ -264,8 +268,8 @@ export default function Catalogue() {
             fontSize: 13,
           }}
         >
-          <strong>Import complete:</strong> {importResult.matched} matched,{' '}
-          {importResult.unmatched} unmatched
+          <strong>{t('import.complete')}</strong>{' '}
+          {t('import.summary', { matched: importResult.matched, unmatched: importResult.unmatched })}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '8px 0 0', paddingLeft: 16 }}>
               {importResult.errors.map((err, i) => (
@@ -287,7 +291,7 @@ export default function Catalogue() {
             }}
             onClick={() => setImportResult(null)}
           >
-            Dismiss
+            {t('actions.dismiss')}
           </button>
         </div>
       )}
@@ -304,7 +308,7 @@ export default function Catalogue() {
             color: '#dc2626',
           }}
         >
-          Import failed: {importMutation.error.message}
+          {t('import.failed', { message: errorMessage(importMutation.error) })}
         </div>
       )}
 
@@ -312,7 +316,7 @@ export default function Catalogue() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <input
           style={{ ...inputStyle, maxWidth: 300 }}
-          placeholder="Search articles..."
+          placeholder={t('filters.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -321,7 +325,7 @@ export default function Catalogue() {
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
         >
-          <option value="">All Categories</option>
+          <option value="">{t('filters.allCategories')}</option>
           {categories.map((c) => (
             <option key={c} value={c}>
               {c}
@@ -353,7 +357,7 @@ export default function Catalogue() {
               marginBottom: 16,
             }}
           />
-          <span style={{ fontSize: 14 }}>Loading catalogue articles...</span>
+          <span style={{ fontSize: 14 }}>{t('state.loading')}</span>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       ) : articles.length === 0 && !search && !categoryFilter ? (
@@ -384,10 +388,10 @@ export default function Catalogue() {
             ?
           </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>
-            No articles found
+            {t('empty.articles')}
           </div>
           <div style={{ fontSize: 13, color: '#9ca3af', maxWidth: 320, textAlign: 'center' }}>
-            Import a CSV file with your NPK article catalogue to get started.
+            {t('empty.hint')}
           </div>
         </div>
       ) : (
@@ -395,12 +399,19 @@ export default function Catalogue() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['NPK Number', 'Description', 'Unit', 'Category', 'Median Price (CHF)', 'Observations'].map(
-                  (h) => (
+                {[
+                  t('table.npkNumber'),
+                  t('table.description'),
+                  t('table.unit'),
+                  t('table.category'),
+                  t('table.medianPrice'),
+                  t('table.observations'),
+                ].map(
+                  (h, i) => (
                     <th
                       key={h}
                       style={{
-                        textAlign: h === 'Median Price (CHF)' ? 'right' : 'left',
+                        textAlign: i === 4 ? 'right' : 'left',
                         padding: '10px 12px',
                         borderBottom: '2px solid #e5e7eb',
                         fontSize: 13,
@@ -424,7 +435,7 @@ export default function Catalogue() {
                     colSpan={6}
                     style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                   >
-                    No articles found
+                    {t('empty.articles')}
                   </td>
                 </tr>
               )}
@@ -471,7 +482,7 @@ export default function Catalogue() {
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {article.medianPriceCents != null ? formatCHF(article.medianPriceCents) : '—'}
+                    {article.medianPriceCents != null ? formatAmount(article.medianPriceCents) : '—'}
                   </td>
                   <td
                     style={{

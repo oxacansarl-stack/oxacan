@@ -1,7 +1,10 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, apiList, ApiError, formatCHF, PageMeta } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiList, ApiError, PageMeta } from '../lib/api';
+import { formatMoney, formatDate, formatMinutes, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 import { useCurrentUser } from '../lib/current-user';
 
 /* ------------------------------------------------------------------ */
@@ -142,6 +145,7 @@ function StatCard({ label, value, loading, error, accentColor }: StatCardProps) 
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { t } = useTranslation('dashboard');
   const { role } = useCurrentUser();
   // Offers and invoices are office data; don't request them for field roles.
   const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
@@ -211,8 +215,8 @@ export default function Dashboard() {
 
   function getError(query: { error: ApiError | null }): string | undefined {
     if (!query.error || isForbidden(query.error)) return undefined;
-    if (query.error.status === 401) return 'Login required';
-    return query.error.message || 'Unavailable';
+    if (query.error.status === 401) return t('stats.loginRequired');
+    return errorMessage(query.error, t('stats.unavailable'));
   }
 
   const canSeeOffers = isOffice && !isForbidden(recentOffers.error);
@@ -239,7 +243,7 @@ export default function Dashboard() {
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 24 }}>
-        Dashboard
+        {t('title')}
       </h1>
 
       {/* ============================================================ */}
@@ -254,29 +258,29 @@ export default function Dashboard() {
         }}
       >
         <StatCard
-          label="Active Projects"
+          label={t('stats.activeProjects')}
           value={statValue(activeProjects, getCount(activeProjects))}
           loading={activeProjects.isLoading}
           error={getError(activeProjects)}
           accentColor="#2563eb"
         />
         <StatCard
-          label="Open Offers"
+          label={t('stats.openOffers')}
           value={statValue(openOffers, getCount(openOffers))}
           loading={openOffers.isLoading}
           error={getError(openOffers)}
           accentColor="#f59e0b"
         />
         <StatCard
-          label="Pending Invoices"
+          label={t('stats.pendingInvoices')}
           value={statValue(pendingInvoices, getCount(pendingInvoices))}
           loading={pendingInvoices.isLoading}
           error={getError(pendingInvoices)}
           accentColor="#ef4444"
         />
         <StatCard
-          label="This Month Revenue"
-          value={statValue(paidInvoices, `CHF ${formatCHF(thisMonthRevenue)}`)}
+          label={t('stats.monthRevenue')}
+          value={statValue(paidInvoices, formatMoney(thisMonthRevenue))}
           loading={paidInvoices.isLoading}
           error={getError(paidInvoices)}
           accentColor="#16a34a"
@@ -287,18 +291,18 @@ export default function Dashboard() {
       {/*  Quick Actions                                                */}
       {/* ============================================================ */}
       <div style={{ marginBottom: 32 }}>
-        <h2 style={sectionTitleStyle}>Quick Actions</h2>
+        <h2 style={sectionTitleStyle}>{t('quickActions.title')}</h2>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {isOffice && (
             <>
               <button style={quickActionStyle} onClick={() => navigate('/offers')}>
-                + New Offer
+                {t('quickActions.newOffer')}
               </button>
               <button
                 style={{ ...quickActionStyle, background: '#16a34a' }}
                 onClick={() => navigate('/invoices')}
               >
-                + New Invoice
+                {t('quickActions.newInvoice')}
               </button>
             </>
           )}
@@ -306,13 +310,13 @@ export default function Dashboard() {
             style={{ ...quickActionStyle, background: '#7c3aed' }}
             onClick={() => navigate('/timekeeping')}
           >
-            Clock In
+            {t('quickActions.clockIn')}
           </button>
           <button
             style={{ ...quickActionStyle, background: '#0ea5e9' }}
             onClick={() => navigate('/daily-reports')}
           >
-            + New Report
+            {t('quickActions.newReport')}
           </button>
         </div>
       </div>
@@ -322,9 +326,9 @@ export default function Dashboard() {
       {/* ============================================================ */}
       {canSeeInvoices && (
       <div style={{ ...cardStyle, marginBottom: 32 }}>
-        <h2 style={{ ...sectionTitleStyle, marginBottom: 16 }}>Financial Overview</h2>
+        <h2 style={{ ...sectionTitleStyle, marginBottom: 16 }}>{t('financial.title')}</h2>
         {recentInvoices.isLoading ? (
-          <div style={{ color: '#6b7280', fontSize: 14 }}>Loading...</div>
+          <div style={{ color: '#6b7280', fontSize: 14 }}>{t('common:state.loading')}</div>
         ) : (
           <div>
             {/* Invoiced bar */}
@@ -338,9 +342,9 @@ export default function Dashboard() {
                   marginBottom: 4,
                 }}
               >
-                <span>Total Invoiced</span>
+                <span>{t('financial.totalInvoiced')}</span>
                 <span style={{ fontWeight: 600, color: '#111827' }}>
-                  CHF {formatCHF(totalInvoiced)}
+                  {formatMoney(totalInvoiced)}
                 </span>
               </div>
               <div
@@ -373,9 +377,9 @@ export default function Dashboard() {
                   marginBottom: 4,
                 }}
               >
-                <span>Total Paid</span>
+                <span>{t('financial.totalPaid')}</span>
                 <span style={{ fontWeight: 600, color: '#16a34a' }}>
-                  CHF {formatCHF(totalPaid)}
+                  {formatMoney(totalPaid)}
                 </span>
               </div>
               <div
@@ -408,14 +412,14 @@ export default function Dashboard() {
                 fontSize: 14,
               }}
             >
-              <span style={{ color: '#6b7280' }}>Outstanding</span>
+              <span style={{ color: '#6b7280' }}>{t('financial.outstanding')}</span>
               <span
                 style={{
                   fontWeight: 700,
                   color: outstanding > 0 ? '#dc2626' : '#16a34a',
                 }}
               >
-                CHF {formatCHF(outstanding)}
+                {formatMoney(outstanding)}
               </span>
             </div>
           </div>
@@ -426,7 +430,7 @@ export default function Dashboard() {
       {/* ============================================================ */}
       {/*  Recent Activity — 3-column grid                              */}
       {/* ============================================================ */}
-      <h2 style={sectionTitleStyle}>Recent Activity</h2>
+      <h2 style={sectionTitleStyle}>{t('recent.title')}</h2>
       <div
         style={{
           display: 'grid',
@@ -439,14 +443,14 @@ export default function Dashboard() {
         {canSeeOffers && (
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            Recent Offers
+            {t('recent.offers')}
           </h3>
           {recentOffers.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
           ) : recentOffers.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentOffers.error.message}</div>
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentOffers.error)}</div>
           ) : unwrapArray<Offer>(recentOffers.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>No offers yet</div>
+            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noOffers')}</div>
           ) : (
             <div>
               {unwrapArray<Offer>(recentOffers.data)
@@ -472,9 +476,7 @@ export default function Dashboard() {
                           {offer.projectName}
                         </div>
                         <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          {offer.createdAt
-                            ? new Date(offer.createdAt).toLocaleDateString('fr-CH')
-                            : ''}
+                          {offer.createdAt ? formatDate(offer.createdAt) : ''}
                         </div>
                       </div>
                       <span
@@ -485,10 +487,9 @@ export default function Dashboard() {
                           fontWeight: 600,
                           background: colors.bg,
                           color: colors.fg,
-                          textTransform: 'capitalize',
                         }}
                       >
-                        {offer.status?.replace(/_/g, ' ')}
+                        {statusLabel('offer', offer.status)}
                       </span>
                     </div>
                   );
@@ -502,14 +503,14 @@ export default function Dashboard() {
         {canSeeInvoices && (
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            Recent Invoices
+            {t('recent.invoices')}
           </h3>
           {recentInvoices.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
           ) : recentInvoices.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentInvoices.error.message}</div>
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentInvoices.error)}</div>
           ) : unwrapArray<Invoice>(recentInvoices.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>No invoices yet</div>
+            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noInvoices')}</div>
           ) : (
             <div>
               {unwrapArray<Invoice>(recentInvoices.data)
@@ -532,10 +533,10 @@ export default function Dashboard() {
                     >
                       <div>
                         <div style={{ fontWeight: 500, color: '#2563eb' }}>
-                          {inv.invoiceNumber || 'Draft'}
+                          {inv.invoiceNumber || t('recent.draftInvoice')}
                         </div>
                         <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          CHF {formatCHF(inv.totalTtcCents || 0)}
+                          {formatMoney(inv.totalTtcCents || 0)}
                         </div>
                       </div>
                       <span
@@ -546,10 +547,9 @@ export default function Dashboard() {
                           fontWeight: 600,
                           background: colors.bg,
                           color: colors.fg,
-                          textTransform: 'capitalize',
                         }}
                       >
-                        {inv.status?.replace(/_/g, ' ')}
+                        {statusLabel('invoice', inv.status)}
                       </span>
                     </div>
                   );
@@ -562,21 +562,19 @@ export default function Dashboard() {
         {/* Recent Time Entries */}
         <div style={cardStyle}>
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            Recent Time Entries
+            {t('recent.timeEntries')}
           </h3>
           {recentTime.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>Loading...</div>
+            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
           ) : recentTime.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{recentTime.error.message}</div>
+            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentTime.error)}</div>
           ) : unwrapArray<TimeEntry>(recentTime.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>No time entries yet</div>
+            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noTimeEntries')}</div>
           ) : (
             <div>
               {unwrapArray<TimeEntry>(recentTime.data)
                 .slice(0, 5)
                 .map((entry) => {
-                  const hours = Math.floor((entry.durationMinutes || 0) / 60);
-                  const mins = (entry.durationMinutes || 0) % 60;
                   const colors = STATUS_COLORS[entry.status] ?? STATUS_COLORS.pending;
                   return (
                     <div
@@ -592,13 +590,11 @@ export default function Dashboard() {
                     >
                       <div>
                         <div style={{ fontWeight: 500, color: '#111827' }}>
-                          {entry.project?.name || 'Project'}
+                          {entry.project?.name || t('recent.project')}
                         </div>
                         <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          {entry.date
-                            ? new Date(entry.date).toLocaleDateString('fr-CH')
-                            : ''}{' '}
-                          {hours > 0 || mins > 0 ? `${hours}h${mins > 0 ? ` ${mins}m` : ''}` : ''}
+                          {entry.date ? formatDate(entry.date) : ''}{' '}
+                          {entry.durationMinutes ? formatMinutes(entry.durationMinutes) : ''}
                         </div>
                       </div>
                       <span
@@ -609,10 +605,9 @@ export default function Dashboard() {
                           fontWeight: 600,
                           background: colors.bg,
                           color: colors.fg,
-                          textTransform: 'capitalize',
                         }}
                       >
-                        {entry.status?.replace(/_/g, ' ') || 'active'}
+                        {entry.status ? statusLabel('timeEntry', entry.status) : t('recent.openEntry')}
                       </span>
                     </div>
                   );

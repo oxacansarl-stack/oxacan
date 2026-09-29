@@ -1,0 +1,87 @@
+{
+  "loginRequired": "Connexion requise",
+  "notFound": "Projet introuvable",
+  "back": "← Retour aux projets",
+  "reference": "Réf. : {{reference}}",
+  "progress": "Avancement",
+  "summary": {
+    "budget": "Budget HT",
+    "actualCost": "Coût réel",
+    "manager": "Chef de projet",
+    "start": "Début",
+    "end": "Fin"
+  },
+  "tabs": {
+    "lots": "Lots",
+    "milestones": "Jalons",
+    "tasks": "Tâches",
+    "gantt": "Diagramme de Gantt"
+  },
+  "lots": {
+    "title": "Lots ({{count}})",
+    "add": "+ Ajouter un lot",
+    "submit": "Ajouter le lot",
+    "namePlaceholder": "Nom *",
+    "descriptionPlaceholder": "Description",
+    "budgetPlaceholder": "Budget (CHF)",
+    "empty": "Aucun lot défini",
+    "table": {
+      "name": "Nom",
+      "description": "Description",
+      "budget": "Budget (CHF)",
+      "tasks": "Tâches"
+    }
+  },
+  "milestones": {
+    "title": "Jalons ({{count}})",
+    "add": "+ Ajouter un jalon",
+    "submit": "Ajouter le jalon",
+    "namePlaceholder": "Nom du jalon *",
+    "empty": "Aucun jalon défini",
+    "markCompleted": "Marquer comme atteint",
+    "table": {
+      "name": "Nom",
+      "targetDate": "Date prévue",
+      "completedDate": "Date d'achèvement",
+      "status": "Statut",
+      "actions": "Actions"
+    }
+  },
+  "tasks": {
+    "title": "Tâches ({{count}})",
+    "add": "+ Ajouter une tâche",
+    "submit": "Ajouter la tâche",
+    "allLots": "Tous les lots",
+    "newTask": "Nouvelle tâche",
+    "titlePlaceholder": "Titre *",
+    "selectLot": "Sélectionner un lot",
+    "descriptionPlaceholder": "Description",
+    "plannedStart": "Début prévu",
+    "plannedEnd": "Fin prévue",
+    "estimatedHours": "Heures estimées",
+    "assigneePlaceholder": "Responsable (ID utilisateur)",
+    "empty": "Aucune tâche trouvée",
+    "unassigned": "Sans lot",
+    "table": {
+      "title": "Titre",
+      "status": "Statut",
+      "priority": "Priorité",
+      "assignedTo": "Assignée à",
+      "start": "Début",
+      "end": "Fin",
+      "progress": "Avancement",
+      "dependencies": "Dépendances"
+    }
+  },
+  "adding": "Ajout…",
+  "gantt": {
+    "title": "Diagramme de Gantt",
+    "task": "Tâche",
+    "noTasks": "Aucune tâche avec des dates prévues pour le diagramme de Gantt.",
+    "noDates": "Aucune date disponible pour le diagramme de Gantt.",
+    "unassigned": "Sans lot",
+    "barTitle": "{{title}}\n{{start}} – {{end}}\nStatut : {{status}}",
+    "milestoneTitle": "Jalon : {{name}}\n{{date}}",
+    "today": "Aujourd'hui"
+  }
+}

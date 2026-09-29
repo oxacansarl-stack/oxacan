@@ -1,7 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPatch, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPatch, ApiError } from '../lib/api';
+import { formatMoney, formatDate, statusLabel, enumLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -185,10 +188,6 @@ const buttonSecondaryStyle: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function userName(u?: UserRef | null): string {
   return u ? `${u.firstName} ${u.lastName}`.trim() : '';
 }
@@ -222,11 +221,11 @@ function daysBetween(a: Date, b: Date): number {
 
 type TabKey = 'lots' | 'milestones' | 'tasks' | 'gantt';
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'lots', label: 'Lots' },
-  { key: 'milestones', label: 'Milestones' },
-  { key: 'tasks', label: 'Tasks' },
-  { key: 'gantt', label: 'Gantt Chart' },
+const TABS: { key: TabKey }[] = [
+  { key: 'lots' },
+  { key: 'milestones' },
+  { key: 'tasks' },
+  { key: 'gantt' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -236,6 +235,7 @@ const TABS: { key: TabKey; label: string }[] = [
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation('projectDetail');
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<TabKey>('lots');
@@ -414,19 +414,19 @@ export default function ProjectDetail() {
   /* --- Render --- */
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
   }
 
   if (isLoading) {
-    return <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>;
+    return <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>;
   }
 
   if (error && error.status !== 404) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>;
   }
 
   if (!project) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Project not found</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('notFound')}</div>;
   }
 
   const colors = STATUS_COLORS[project.status] ?? STATUS_COLORS.planning;
@@ -449,7 +449,7 @@ export default function ProjectDetail() {
           marginBottom: 16,
         }}
       >
-        &larr; Back to Projects
+        {t('back')}
       </button>
 
       {/* Header */}
@@ -468,7 +468,7 @@ export default function ProjectDetail() {
           <div style={{ fontSize: 14, color: '#6b7280', display: 'flex', gap: 12, alignItems: 'center' }}>
             <span>{project.client?.name ?? '-'}</span>
             <span style={{ color: '#d1d5db' }}>|</span>
-            <span>Ref: {project.reference || '-'}</span>
+            <span>{t('reference', { reference: project.reference || '-' })}</span>
             <span style={{ color: '#d1d5db' }}>|</span>
             <span
               style={{
@@ -481,7 +481,7 @@ export default function ProjectDetail() {
                 color: colors.fg,
               }}
             >
-              {statusLabel(project.status)}
+              {statusLabel('project', project.status)}
             </span>
           </div>
         </div>
@@ -490,7 +490,7 @@ export default function ProjectDetail() {
       {/* Progress bar (large) */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Progress</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{t('progress')}</span>
           <span style={{ fontSize: 13, fontWeight: 600, color: progressColor }}>{progressPct}%</span>
         </div>
         <div
@@ -524,22 +524,22 @@ export default function ProjectDetail() {
         }}
       >
         <SummaryCard
-          label="Budget HT"
-          value={project.budgetHtCents != null ? `CHF ${formatCHF(project.budgetHtCents)}` : '—'}
+          label={t('summary.budget')}
+          value={project.budgetHtCents != null ? formatMoney(project.budgetHtCents) : '—'}
           highlight
         />
         <SummaryCard
-          label="Actual Cost"
-          value={project.actualCostCents != null ? `CHF ${formatCHF(project.actualCostCents)}` : '—'}
+          label={t('summary.actualCost')}
+          value={project.actualCostCents != null ? formatMoney(project.actualCostCents) : '—'}
         />
-        <SummaryCard label="Manager" value={userName(project.manager) || '-'} />
+        <SummaryCard label={t('summary.manager')} value={userName(project.manager) || '-'} />
         <SummaryCard
-          label="Start"
-          value={project.startDate ? new Date(project.startDate).toLocaleDateString('fr-CH') : '-'}
+          label={t('summary.start')}
+          value={project.startDate ? formatDate(project.startDate) : '-'}
         />
         <SummaryCard
-          label="End"
-          value={project.endDate ? new Date(project.endDate).toLocaleDateString('fr-CH') : '-'}
+          label={t('summary.end')}
+          value={project.endDate ? formatDate(project.endDate) : '-'}
         />
       </div>
 
@@ -569,7 +569,7 @@ export default function ProjectDetail() {
               transition: 'color 0.15s',
             }}
           >
-            {tab.label}
+            {t(`tabs.${tab.key}`)}
           </button>
         ))}
       </div>
@@ -586,13 +586,13 @@ export default function ProjectDetail() {
             }}
           >
             <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              Lots ({lots.length})
+              {t('lots.title', { count: lots.length })}
             </h2>
             <button
               style={buttonStyle}
               onClick={() => setShowLotForm(!showLotForm)}
             >
-              {showLotForm ? 'Cancel' : '+ Add Lot'}
+              {showLotForm ? t('common:actions.cancel') : t('lots.add')}
             </button>
           </div>
 
@@ -616,13 +616,13 @@ export default function ProjectDetail() {
               >
                 <input
                   style={inputStyle}
-                  placeholder="Name *"
+                  placeholder={t('lots.namePlaceholder')}
                   value={lotForm.name}
                   onChange={(e) => setLotForm({ ...lotForm, name: e.target.value })}
                 />
                 <input
                   style={inputStyle}
-                  placeholder="Description"
+                  placeholder={t('lots.descriptionPlaceholder')}
                   value={lotForm.description}
                   onChange={(e) => setLotForm({ ...lotForm, description: e.target.value })}
                 />
@@ -631,7 +631,7 @@ export default function ProjectDetail() {
                   type="number"
                   min={0}
                   step="0.05"
-                  placeholder="Budget (CHF)"
+                  placeholder={t('lots.budgetPlaceholder')}
                   value={lotForm.budgetChf}
                   onChange={(e) => setLotForm({ ...lotForm, budgetChf: e.target.value })}
                 />
@@ -641,23 +641,23 @@ export default function ProjectDetail() {
                 onClick={() => lotForm.name && addLotMutation.mutate(lotForm)}
                 disabled={addLotMutation.isPending}
               >
-                {addLotMutation.isPending ? 'Adding...' : 'Add Lot'}
+                {addLotMutation.isPending ? t('adding') : t('lots.submit')}
               </button>
               {addLotMutation.error && (
                 <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {addLotMutation.error.message}
+                  {errorMessage(addLotMutation.error)}
                 </span>
               )}
             </div>
           )}
 
           {lots.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>No lots defined</div>
+            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('lots.empty')}</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Name', 'Description', 'Budget (CHF)', 'Tasks'].map((h) => (
+                  {(['name', 'description', 'budget', 'tasks'] as const).map((h) => (
                     <th
                       key={h}
                       style={{
@@ -671,7 +671,7 @@ export default function ProjectDetail() {
                         letterSpacing: 0.5,
                       }}
                     >
-                      {h}
+                      {t(`lots.table.${h}`)}
                     </th>
                   ))}
                 </tr>
@@ -686,7 +686,7 @@ export default function ProjectDetail() {
                       {lot.description || '-'}
                     </td>
                     <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                      {lot.budgetCents != null ? `CHF ${formatCHF(lot.budgetCents)}` : '—'}
+                      {lot.budgetCents != null ? formatMoney(lot.budgetCents) : '—'}
                     </td>
                     <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
                       {lotTaskCounts.get(lot.id) ?? 0}
@@ -711,13 +711,13 @@ export default function ProjectDetail() {
             }}
           >
             <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              Milestones ({milestones.length})
+              {t('milestones.title', { count: milestones.length })}
             </h2>
             <button
               style={buttonStyle}
               onClick={() => setShowMilestoneForm(!showMilestoneForm)}
             >
-              {showMilestoneForm ? 'Cancel' : '+ Add Milestone'}
+              {showMilestoneForm ? t('common:actions.cancel') : t('milestones.add')}
             </button>
           </div>
 
@@ -741,7 +741,7 @@ export default function ProjectDetail() {
               >
                 <input
                   style={inputStyle}
-                  placeholder="Milestone Name *"
+                  placeholder={t('milestones.namePlaceholder')}
                   value={milestoneForm.name}
                   onChange={(e) => setMilestoneForm({ ...milestoneForm, name: e.target.value })}
                 />
@@ -759,11 +759,11 @@ export default function ProjectDetail() {
                 }
                 disabled={addMilestoneMutation.isPending}
               >
-                {addMilestoneMutation.isPending ? 'Adding...' : 'Add Milestone'}
+                {addMilestoneMutation.isPending ? t('adding') : t('milestones.submit')}
               </button>
               {addMilestoneMutation.error && (
                 <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {addMilestoneMutation.error.message}
+                  {errorMessage(addMilestoneMutation.error)}
                 </span>
               )}
             </div>
@@ -771,17 +771,17 @@ export default function ProjectDetail() {
 
           {completeMilestoneMutation.error && (
             <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
-              {completeMilestoneMutation.error.message}
+              {errorMessage(completeMilestoneMutation.error)}
             </div>
           )}
 
           {milestones.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>No milestones defined</div>
+            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('milestones.empty')}</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Name', 'Target Date', 'Completed Date', 'Status', 'Actions'].map((h) => (
+                  {(['name', 'targetDate', 'completedDate', 'status', 'actions'] as const).map((h) => (
                     <th
                       key={h}
                       style={{
@@ -795,7 +795,7 @@ export default function ProjectDetail() {
                         letterSpacing: 0.5,
                       }}
                     >
-                      {h}
+                      {t(`milestones.table.${h}`)}
                     </th>
                   ))}
                 </tr>
@@ -809,10 +809,10 @@ export default function ProjectDetail() {
                         {m.name}
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                        {m.targetDate ? new Date(m.targetDate).toLocaleDateString('fr-CH') : '-'}
+                        {m.targetDate ? formatDate(m.targetDate) : '-'}
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, color: '#6b7280' }}>
-                        {m.completedDate ? new Date(m.completedDate).toLocaleDateString('fr-CH') : '-'}
+                        {m.completedDate ? formatDate(m.completedDate) : '-'}
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
                         <span
@@ -826,7 +826,7 @@ export default function ProjectDetail() {
                             color: mColors.fg,
                           }}
                         >
-                          {statusLabel(m.status)}
+                          {statusLabel('milestone', m.status)}
                         </span>
                       </td>
                       <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
@@ -843,7 +843,7 @@ export default function ProjectDetail() {
                             onClick={() => completeMilestoneMutation.mutate(m.id)}
                             disabled={completeMilestoneMutation.isPending}
                           >
-                            Mark Completed
+                            {t('milestones.markCompleted')}
                           </button>
                         )}
                       </td>
@@ -868,13 +868,13 @@ export default function ProjectDetail() {
             }}
           >
             <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              Tasks ({tasks.length})
+              {t('tasks.title', { count: tasks.length })}
             </h2>
             <button
               style={buttonStyle}
               onClick={() => setShowTaskForm(!showTaskForm)}
             >
-              {showTaskForm ? 'Cancel' : '+ Add Task'}
+              {showTaskForm ? t('common:actions.cancel') : t('tasks.add')}
             </button>
           </div>
 
@@ -885,7 +885,7 @@ export default function ProjectDetail() {
               value={taskLotFilter}
               onChange={(e) => setTaskLotFilter(e.target.value)}
             >
-              <option value="">All Lots</option>
+              <option value="">{t('tasks.allLots')}</option>
               {lots.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
@@ -906,7 +906,7 @@ export default function ProjectDetail() {
               }}
             >
               <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
-                New Task
+                {t('tasks.newTask')}
               </div>
               <div
                 style={{
@@ -918,7 +918,7 @@ export default function ProjectDetail() {
               >
                 <input
                   style={inputStyle}
-                  placeholder="Title *"
+                  placeholder={t('tasks.titlePlaceholder')}
                   value={taskForm.title}
                   onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
                 />
@@ -927,7 +927,7 @@ export default function ProjectDetail() {
                   value={taskForm.lotId}
                   onChange={(e) => setTaskForm({ ...taskForm, lotId: e.target.value })}
                 >
-                  <option value="">Select Lot</option>
+                  <option value="">{t('tasks.selectLot')}</option>
                   {lots.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.name}
@@ -941,7 +941,7 @@ export default function ProjectDetail() {
                 >
                   {TASK_PRIORITIES.map((p) => (
                     <option key={p} value={p}>
-                      {statusLabel(p)}
+                      {enumLabel('taskPriority', p)}
                     </option>
                   ))}
                 </select>
@@ -956,30 +956,30 @@ export default function ProjectDetail() {
               >
                 <input
                   style={inputStyle}
-                  placeholder="Description"
+                  placeholder={t('tasks.descriptionPlaceholder')}
                   value={taskForm.description}
                   onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
                 />
                 <input
                   style={inputStyle}
                   type="date"
-                  placeholder="Planned Start"
+                  placeholder={t('tasks.plannedStart')}
                   value={taskForm.plannedStart}
                   onChange={(e) => setTaskForm({ ...taskForm, plannedStart: e.target.value })}
-                  title="Planned Start"
+                  title={t('tasks.plannedStart')}
                 />
                 <input
                   style={inputStyle}
                   type="date"
-                  placeholder="Planned End"
+                  placeholder={t('tasks.plannedEnd')}
                   value={taskForm.plannedEnd}
                   onChange={(e) => setTaskForm({ ...taskForm, plannedEnd: e.target.value })}
-                  title="Planned End"
+                  title={t('tasks.plannedEnd')}
                 />
                 <input
                   style={inputStyle}
                   type="number"
-                  placeholder="Est. Hours"
+                  placeholder={t('tasks.estimatedHours')}
                   value={taskForm.estimatedHours}
                   onChange={(e) =>
                     setTaskForm({
@@ -990,7 +990,7 @@ export default function ProjectDetail() {
                 />
                 <input
                   style={inputStyle}
-                  placeholder="Assignee (user ID)"
+                  placeholder={t('tasks.assigneePlaceholder')}
                   value={taskForm.assignedTo}
                   onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
                 />
@@ -1012,11 +1012,11 @@ export default function ProjectDetail() {
                 }}
                 disabled={addTaskMutation.isPending}
               >
-                {addTaskMutation.isPending ? 'Adding...' : 'Add Task'}
+                {addTaskMutation.isPending ? t('adding') : t('tasks.submit')}
               </button>
               {addTaskMutation.error && (
                 <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {addTaskMutation.error.message}
+                  {errorMessage(addTaskMutation.error)}
                 </span>
               )}
             </div>
@@ -1024,13 +1024,13 @@ export default function ProjectDetail() {
 
           {updateTaskStatusMutation.error && (
             <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
-              {updateTaskStatusMutation.error.message}
+              {errorMessage(updateTaskStatusMutation.error)}
             </div>
           )}
 
           {/* Tasks grouped by lot */}
           {filteredTasks.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>No tasks found</div>
+            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('tasks.empty')}</div>
           ) : (
             Array.from(tasksByLot.entries()).map(([lotId, lotTasks]) => (
               <div key={lotId} style={{ marginBottom: 24 }}>
@@ -1046,12 +1046,12 @@ export default function ProjectDetail() {
                     borderRadius: 4,
                   }}
                 >
-                  {lotNameMap.get(lotId) ?? 'Unassigned'}
+                  {lotNameMap.get(lotId) ?? t('tasks.unassigned')}
                 </h3>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {['Title', 'Status', 'Priority', 'Assigned To', 'Start', 'End', 'Progress', 'Dependencies'].map((h) => (
+                      {(['title', 'status', 'priority', 'assignedTo', 'start', 'end', 'progress', 'dependencies'] as const).map((h) => (
                         <th
                           key={h}
                           style={{
@@ -1065,20 +1065,20 @@ export default function ProjectDetail() {
                             letterSpacing: 0.5,
                           }}
                         >
-                          {h}
+                          {t(`tasks.table.${h}`)}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {lotTasks.map((t) => {
-                      const tColors = TASK_STATUS_COLORS[t.status] ?? TASK_STATUS_COLORS.todo;
-                      const pColors = PRIORITY_COLORS[t.priority] ?? PRIORITY_COLORS.normal;
-                      const taskProg = Math.min(100, Math.max(0, t.progressPercent ?? 0));
+                    {lotTasks.map((task) => {
+                      const tColors = TASK_STATUS_COLORS[task.status] ?? TASK_STATUS_COLORS.todo;
+                      const pColors = PRIORITY_COLORS[task.priority] ?? PRIORITY_COLORS.normal;
+                      const taskProg = Math.min(100, Math.max(0, task.progressPercent ?? 0));
                       return (
-                        <tr key={t.id}>
+                        <tr key={task.id}>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13, fontWeight: 500 }}>
-                            {t.title}
+                            {task.title}
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6' }}>
                             <select
@@ -1092,17 +1092,17 @@ export default function ProjectDetail() {
                                 border: 'none',
                                 cursor: 'pointer',
                               }}
-                              value={t.status}
+                              value={task.status}
                               onChange={(e) =>
                                 updateTaskStatusMutation.mutate({
-                                  taskId: t.id,
+                                  taskId: task.id,
                                   status: e.target.value,
                                 })
                               }
                             >
                               {TASK_STATUSES.map((s) => (
                                 <option key={s} value={s}>
-                                  {statusLabel(s)}
+                                  {statusLabel('task', s)}
                                 </option>
                               ))}
                             </select>
@@ -1119,17 +1119,17 @@ export default function ProjectDetail() {
                                 color: pColors.fg,
                               }}
                             >
-                              {statusLabel(t.priority)}
+                              {enumLabel('taskPriority', task.priority)}
                             </span>
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-                            {userName(t.assignee) || '-'}
+                            {userName(task.assignee) || '-'}
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {t.plannedStart ? new Date(t.plannedStart).toLocaleDateString('fr-CH') : '-'}
+                            {task.plannedStart ? formatDate(task.plannedStart) : '-'}
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {t.plannedEnd ? new Date(t.plannedEnd).toLocaleDateString('fr-CH') : '-'}
+                            {task.plannedEnd ? formatDate(task.plannedEnd) : '-'}
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1155,8 +1155,8 @@ export default function ProjectDetail() {
                             </div>
                           </td>
                           <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {t.dependencies && t.dependencies.length > 0
-                              ? t.dependencies.map((d) => d.predecessorTitle ?? d.predecessorId).join(', ')
+                            {task.dependencies && task.dependencies.length > 0
+                              ? task.dependencies.map((d) => d.predecessorTitle ?? d.predecessorId).join(', ')
                               : '-'}
                           </td>
                         </tr>
@@ -1183,6 +1183,7 @@ export default function ProjectDetail() {
 /* ------------------------------------------------------------------ */
 
 function GanttChart({ data }: { data: GanttData | null }) {
+  const { t, i18n } = useTranslation('projectDetail');
   const PX_PER_DAY = 3;
   const ROW_HEIGHT = 32;
   const LABEL_WIDTH = 220;
@@ -1192,7 +1193,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
   if (!data || data.tasks.length === 0) {
     return (
       <div style={{ color: '#9ca3af', fontSize: 14, padding: 20 }}>
-        No tasks with planned dates available for the Gantt chart.
+        {t('gantt.noTasks')}
       </div>
     );
   }
@@ -1210,7 +1211,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
   if (allDates.length === 0) {
     return (
       <div style={{ color: '#9ca3af', fontSize: 14, padding: 20 }}>
-        No date data available for the Gantt chart.
+        {t('gantt.noDates')}
       </div>
     );
   }
@@ -1229,10 +1230,10 @@ function GanttChart({ data }: { data: GanttData | null }) {
 
   /* Group tasks by lot */
   const lotGroups = new Map<string, GanttTask[]>();
-  for (const t of data.tasks) {
-    const key = t.lotName || 'Unassigned';
+  for (const task of data.tasks) {
+    const key = task.lotName || t('gantt.unassigned');
     if (!lotGroups.has(key)) lotGroups.set(key, []);
-    lotGroups.get(key)!.push(t);
+    lotGroups.get(key)!.push(task);
   }
 
   /* Build rows for rendering */
@@ -1270,7 +1271,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
   while (cursor <= endDate) {
     const offset = daysBetween(startDate, cursor);
     months.push({
-      label: cursor.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      label: cursor.toLocaleDateString(`${i18n.language}-CH`, { month: 'short', year: '2-digit' }),
       x: offset * PX_PER_DAY,
     });
     cursor.setMonth(cursor.getMonth() + 1);
@@ -1322,7 +1323,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
   return (
     <div>
       <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>
-        Gantt Chart
+        {t('gantt.title')}
       </h2>
       <div
         style={{
@@ -1355,7 +1356,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
               textTransform: 'uppercase',
             }}
           >
-            Task
+            {t('gantt.task')}
           </div>
           {rows.map((r, i) => {
             if (r.type === 'lot_header') {
@@ -1466,11 +1467,11 @@ function GanttChart({ data }: { data: GanttData | null }) {
                 }
 
                 yPos += ROW_HEIGHT;
-                const t = r.task!;
-                const barStart = dayOffset(t.plannedStart) * PX_PER_DAY;
-                const barEnd = dayOffset(t.plannedEnd) * PX_PER_DAY;
+                const task = r.task!;
+                const barStart = dayOffset(task.plannedStart) * PX_PER_DAY;
+                const barEnd = dayOffset(task.plannedEnd) * PX_PER_DAY;
                 const barWidth = Math.max(barEnd - barStart, PX_PER_DAY);
-                const barColor = GANTT_BAR_COLORS[t.status] ?? GANTT_BAR_COLORS.todo;
+                const barColor = GANTT_BAR_COLORS[task.status] ?? GANTT_BAR_COLORS.todo;
 
                 return (
                   <div key={`row-${i}`}>
@@ -1499,7 +1500,12 @@ function GanttChart({ data }: { data: GanttData | null }) {
                         cursor: 'default',
                         minWidth: 4,
                       }}
-                      title={`${t.title}\n${t.plannedStart} - ${t.plannedEnd}\nStatus: ${statusLabel(t.status)}`}
+                      title={t('gantt.barTitle', {
+                        title: task.title,
+                        start: formatDate(task.plannedStart),
+                        end: formatDate(task.plannedEnd),
+                        status: statusLabel('task', task.status),
+                      })}
                     />
                   </div>
                 );
@@ -1523,7 +1529,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
                     transform: 'rotate(45deg)',
                     borderRadius: 2,
                   }}
-                  title={`Milestone: ${m.name}\n${m.date}`}
+                  title={t('gantt.milestoneTitle', { name: m.name, date: formatDate(m.date) })}
                 />
               );
             })}
@@ -1540,7 +1546,7 @@ function GanttChart({ data }: { data: GanttData | null }) {
                   borderLeft: '2px dashed #ef4444',
                   zIndex: 2,
                 }}
-                title="Today"
+                title={t('gantt.today')}
               />
             )}
 

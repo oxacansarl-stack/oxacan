@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiGet, apiList, apiPost } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { enumLabel, formatDate } from '../lib/format';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -80,13 +83,7 @@ const tdStyle: React.CSSProperties = {
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('fr-CH');
-}
-
-function errMsg(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
-}
+const tabLabelKeys = { Locations: 'tabs.locations', Items: 'tabs.items', Movements: 'tabs.movements' } as const;
 
 /* ── Sub-components ────────────────────────────────────────────────── */
 
@@ -130,11 +127,12 @@ function EmptyState({ message }: { message: string }) {
 }
 
 function LoadingState() {
+  const { t } = useTranslation();
   return (
     <div style={{
       textAlign: 'center', padding: '48px 16px', color: '#6b7280', fontSize: 14,
     }}>
-      Loading...
+      {t('state.loading')}
     </div>
   );
 }
@@ -142,6 +140,7 @@ function LoadingState() {
 /* ── Locations Tab ─────────────────────────────────────────────────── */
 
 function LocationsTab() {
+  const { t } = useTranslation('stock');
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -159,10 +158,10 @@ function LocationsTab() {
       setLocations(items);
       setTotal(meta?.total ?? items.length);
     } catch (err) {
-      setError(errMsg(err, 'Failed to load locations'));
+      setError(errorMessage(err, t('messages.loadLocationsFailed')));
     }
     setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -175,7 +174,7 @@ function LocationsTab() {
       setName(''); setAddress(''); setShowForm(false);
       await load();
     } catch (err) {
-      setError(errMsg(err, 'Failed to create location'));
+      setError(errorMessage(err, t('messages.createLocationFailed')));
     }
     setSaving(false);
   };
@@ -186,10 +185,10 @@ function LocationsTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          Storage Locations ({total})
+          {t('locations.heading', { count: total })}
         </h3>
         <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? 'Cancel' : '+ New Location'}
+          {showForm ? t('common:actions.cancel') : t('locations.new')}
         </button>
       </div>
 
@@ -200,33 +199,33 @@ function LocationsTab() {
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
           padding: 20, marginBottom: 20,
         }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>Create Location</div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('locations.formTitle')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Name *</label>
-              <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Main warehouse" />
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.name')}</label>
+              <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder={t('locations.namePlaceholder')} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Type *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.type')}</label>
               <select style={inputStyle} value={type} onChange={e => setType(e.target.value as 'warehouse' | 'vehicle' | 'site')}>
-                <option value="warehouse">Warehouse</option>
-                <option value="vehicle">Vehicle</option>
-                <option value="site">Site</option>
+                <option value="warehouse">{enumLabel('stockLocationType', 'warehouse')}</option>
+                <option value="vehicle">{enumLabel('stockLocationType', 'vehicle')}</option>
+                <option value="site">{enumLabel('stockLocationType', 'site')}</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Address</label>
-              <input style={inputStyle} value={address} onChange={e => setAddress(e.target.value)} placeholder="Optional" />
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.address')}</label>
+              <input style={inputStyle} value={address} onChange={e => setAddress(e.target.value)} placeholder={t('locations.optional')} />
             </div>
           </div>
           <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? 'Creating...' : 'Create Location'}
+            {saving ? t('locations.creating') : t('locations.create')}
           </button>
         </form>
       )}
 
       {locations.length === 0 ? (
-        <EmptyState message="No locations found" />
+        <EmptyState message={t('locations.empty')} />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {locations.map(loc => {
@@ -238,12 +237,12 @@ function LocationsTab() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                   <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>{loc.name}</span>
-                  <Badge label={loc.type} bg={badge.bg} color={badge.color} />
+                  <Badge label={enumLabel('stockLocationType', loc.type)} bg={badge.bg} color={badge.color} />
                 </div>
                 {loc.address && (
                   <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>{loc.address}</div>
                 )}
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>Created {fmtDate(loc.createdAt)}</div>
+                <div style={{ fontSize: 12, color: '#9ca3af' }}>{t('locations.created', { date: formatDate(loc.createdAt) })}</div>
               </div>
             );
           })}
@@ -256,6 +255,7 @@ function LocationsTab() {
 /* ── Items Tab ─────────────────────────────────────────────────────── */
 
 function ItemsTab() {
+  const { t } = useTranslation('stock');
   const [items, setItems] = useState<StockItem[]>([]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,10 +283,10 @@ function ItemsTab() {
       setItems(itemsRes ?? []);
       setLocations(locsRes ?? []);
     } catch (err) {
-      setError(errMsg(err, 'Failed to load stock items'));
+      setError(errorMessage(err, t('messages.loadItemsFailed')));
     }
     setLoading(false);
-  }, [filterLocation, belowOnly]);
+  }, [filterLocation, belowOnly, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -305,7 +305,7 @@ function ItemsTab() {
       setShowForm(false);
       await load();
     } catch (err) {
-      setError(errMsg(err, 'Failed to add stock item'));
+      setError(errorMessage(err, t('messages.addItemFailed')));
     }
     setSaving(false);
   };
@@ -318,7 +318,7 @@ function ItemsTab() {
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: '0 0 220px' }}>
           <select style={inputStyle} value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
-            <option value="">All locations</option>
+            <option value="">{t('items.allLocations')}</option>
             {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </div>
@@ -331,11 +331,11 @@ function ItemsTab() {
           }}
           onClick={() => setBelowOnly(v => !v)}
         >
-          {belowOnly ? '!! Below threshold' : 'Below threshold only'}
+          {belowOnly ? t('items.belowThresholdActive') : t('items.belowThresholdOnly')}
         </button>
         <div style={{ flex: 1 }} />
         <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? 'Cancel' : '+ Add Item'}
+          {showForm ? t('common:actions.cancel') : t('items.new')}
         </button>
       </div>
 
@@ -346,47 +346,47 @@ function ItemsTab() {
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
           padding: 20, marginBottom: 20,
         }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>Add Stock Item</div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('items.formTitle')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Article ID *</label>
-              <input style={inputStyle} value={newArticleId} onChange={e => setNewArticleId(e.target.value)} placeholder="Article ID" />
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.articleId')}</label>
+              <input style={inputStyle} value={newArticleId} onChange={e => setNewArticleId(e.target.value)} placeholder={t('items.articleIdPlaceholder')} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Location *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.location')}</label>
               <select style={inputStyle} value={newLocationId} onChange={e => setNewLocationId(e.target.value)}>
-                <option value="">Select location</option>
+                <option value="">{t('items.selectLocation')}</option>
                 {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Quantity</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.quantity')}</label>
               <input style={inputStyle} type="number" min={0} value={newQuantity} onChange={e => setNewQuantity(e.target.value)} placeholder="0" />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Min Threshold</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.minThreshold')}</label>
               <input style={inputStyle} type="number" min={0} value={newThreshold} onChange={e => setNewThreshold(e.target.value)} placeholder="0" />
             </div>
           </div>
           <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? 'Adding...' : 'Add Item'}
+            {saving ? t('items.adding') : t('items.add')}
           </button>
         </form>
       )}
 
       {items.length === 0 ? (
-        <EmptyState message="No stock items found" />
+        <EmptyState message={t('items.empty')} />
       ) : (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle}>Article / Designation</th>
-                <th style={thStyle}>Location</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Quantity</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Min Threshold</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Created</th>
+                <th style={thStyle}>{t('items.table.article')}</th>
+                <th style={thStyle}>{t('items.table.location')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('items.table.quantity')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('items.table.minThreshold')}</th>
+                <th style={thStyle}>{t('items.table.status')}</th>
+                <th style={thStyle}>{t('items.table.created')}</th>
               </tr>
             </thead>
             <tbody>
@@ -414,12 +414,12 @@ function ItemsTab() {
                     </td>
                     <td style={tdStyle}>
                       {isLow
-                        ? <Badge label="Low Stock" bg="#fee2e2" color="#991b1b" />
-                        : <Badge label="OK" bg="#dcfce7" color="#166534" />
+                        ? <Badge label={t('items.lowStock')} bg="#fee2e2" color="#991b1b" />
+                        : <Badge label={t('items.ok')} bg="#dcfce7" color="#166534" />
                       }
                     </td>
                     <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>
-                      {fmtDate(item.createdAt)}
+                      {formatDate(item.createdAt)}
                     </td>
                   </tr>
                 );
@@ -435,6 +435,7 @@ function ItemsTab() {
 /* ── Movements Tab ─────────────────────────────────────────────────── */
 
 function MovementsTab() {
+  const { t } = useTranslation('stock');
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState<StockItem[]>([]);
@@ -464,10 +465,10 @@ function MovementsTab() {
       setItems(itemsRes ?? []);
       setLocations(locsRes ?? []);
     } catch (err) {
-      setError(errMsg(err, 'Failed to load movements'));
+      setError(errorMessage(err, t('messages.loadMovementsFailed')));
     }
     setLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -492,7 +493,7 @@ function MovementsTab() {
       setShowForm(false);
       await load();
     } catch (err) {
-      setError(errMsg(err, 'Failed to record movement'));
+      setError(errorMessage(err, t('messages.recordMovementFailed')));
     }
     setSaving(false);
   };
@@ -510,10 +511,10 @@ function MovementsTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          Movement Log ({total})
+          {t('movements.heading', { count: total })}
         </h3>
         <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? 'Cancel' : '+ Record Movement'}
+          {showForm ? t('common:actions.cancel') : t('movements.new')}
         </button>
       </div>
 
@@ -524,12 +525,12 @@ function MovementsTab() {
           background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
           padding: 20, marginBottom: 20,
         }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>Record Movement</div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('movements.formTitle')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Stock Item *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.stockItem')}</label>
               <select style={inputStyle} value={newItemId} onChange={e => setNewItemId(e.target.value)}>
-                <option value="">Select item</option>
+                <option value="">{t('movements.selectItem')}</option>
                 {items.map(it => (
                   <option key={it.id} value={it.id}>
                     {it.canonicalArticle?.description ?? it.canonicalArticleId ?? it.id}
@@ -539,31 +540,31 @@ function MovementsTab() {
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Type *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.type')}</label>
               <select style={inputStyle} value={newType} onChange={e => setNewType(e.target.value as 'in' | 'out' | 'transfer' | 'adjustment')}>
-                <option value="in">In</option>
-                <option value="out">Out</option>
-                <option value="transfer">Transfer</option>
-                <option value="adjustment">Adjustment</option>
+                <option value="in">{enumLabel('stockMovementType', 'in')}</option>
+                <option value="out">{enumLabel('stockMovementType', 'out')}</option>
+                <option value="transfer">{enumLabel('stockMovementType', 'transfer')}</option>
+                <option value="adjustment">{enumLabel('stockMovementType', 'adjustment')}</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Quantity *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.quantity')}</label>
               <input style={inputStyle} type="number" min={0} value={newQty} onChange={e => setNewQty(e.target.value)} placeholder="0" />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Reference</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.reference')}</label>
               <input style={inputStyle} value={newRef} onChange={e => setNewRef(e.target.value)} placeholder="BL-2024-001" />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Project ID</label>
-              <input style={inputStyle} value={newProjectId} onChange={e => setNewProjectId(e.target.value)} placeholder="Optional" />
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.projectId')}</label>
+              <input style={inputStyle} value={newProjectId} onChange={e => setNewProjectId(e.target.value)} placeholder={t('movements.optional')} />
             </div>
             {newType === 'transfer' && (
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>To Location *</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.toLocation')}</label>
                 <select style={inputStyle} value={newToLocationId} onChange={e => setNewToLocationId(e.target.value)}>
-                  <option value="">Select location</option>
+                  <option value="">{t('movements.selectLocation')}</option>
                   {locations
                     .filter(l => l.id !== items.find(it => it.id === newItemId)?.locationId)
                     .map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -572,25 +573,25 @@ function MovementsTab() {
             )}
           </div>
           <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? 'Recording...' : 'Record Movement'}
+            {saving ? t('movements.recording') : t('movements.record')}
           </button>
         </form>
       )}
 
       {movements.length === 0 ? (
-        <EmptyState message="No movements recorded" />
+        <EmptyState message={t('movements.empty')} />
       ) : (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle}>Date</th>
-                <th style={thStyle}>Article</th>
-                <th style={thStyle}>Location</th>
-                <th style={thStyle}>Type</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Quantity</th>
-                <th style={thStyle}>Project</th>
-                <th style={thStyle}>Reference</th>
+                <th style={thStyle}>{t('movements.table.date')}</th>
+                <th style={thStyle}>{t('movements.table.article')}</th>
+                <th style={thStyle}>{t('movements.table.location')}</th>
+                <th style={thStyle}>{t('movements.table.type')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('movements.table.quantity')}</th>
+                <th style={thStyle}>{t('movements.table.project')}</th>
+                <th style={thStyle}>{t('movements.table.reference')}</th>
               </tr>
             </thead>
             <tbody>
@@ -599,7 +600,7 @@ function MovementsTab() {
                 return (
                   <tr key={mov.id}>
                     <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13, whiteSpace: 'nowrap' }}>
-                      {fmtDate(mov.createdAt)}
+                      {formatDate(mov.createdAt)}
                     </td>
                     <td style={tdStyle}>
                       {mov.stockItem?.canonicalArticle?.description ?? '-'}
@@ -608,7 +609,7 @@ function MovementsTab() {
                       {mov.stockItem?.location?.name ?? '-'}
                     </td>
                     <td style={tdStyle}>
-                      <Badge label={mov.type} bg={badge.bg} color={badge.color} />
+                      <Badge label={enumLabel('stockMovementType', mov.type)} bg={badge.bg} color={badge.color} />
                     </td>
                     <td style={{
                       ...tdStyle, textAlign: 'right', fontWeight: 600,
@@ -639,15 +640,16 @@ function MovementsTab() {
 const tabs: Tab[] = ['Locations', 'Items', 'Movements'];
 
 export default function Stock() {
+  const { t } = useTranslation('stock');
   const [activeTab, setActiveTab] = useState<Tab>('Locations');
 
   return (
     <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
       <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 4 }}>
-        Stock Management
+        {t('title')}
       </h2>
       <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 20, marginTop: 0 }}>
-        Manage inventory locations, stock levels, and material movements.
+        {t('subtitle')}
       </p>
 
       {/* Tab bar */}
@@ -658,7 +660,7 @@ export default function Stock() {
             background: activeTab === tab ? '#2563eb' : '#fff',
             color: activeTab === tab ? '#fff' : '#4b5563',
             fontSize: 13, fontWeight: 500, cursor: 'pointer',
-          }}>{tab}</button>
+          }}>{t(tabLabelKeys[tab])}</button>
         ))}
       </div>
 

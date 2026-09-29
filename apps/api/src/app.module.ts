@@ -35,6 +35,7 @@ import { AccountingModule } from './modules/accounting/accounting.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     SubscriptionModule,
     PortalModule,
     NotificationsModule,
+    DocumentsModule,
   ],
   providers: [
     TenantConnectionHook,

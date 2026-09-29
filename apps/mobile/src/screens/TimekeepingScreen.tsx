@@ -11,14 +11,15 @@ import {
 import { useField } from '../state/FieldContext';
 import { dayLabel, elapsed, hhmm, hours, shortTime } from '../lib/format';
 import type { TimeEntry } from '../lib/types';
+import { statusLabel, t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
-const STATUS_LABELS: Record<string, { text: string; color: string }> = {
-  draft: { text: 'Draft', color: '#64748b' },
-  submitted: { text: 'Submitted', color: '#1e40af' },
-  approved: { text: 'Approved', color: '#166534' },
-  rejected: { text: 'Rejected', color: '#b91c1c' },
+const STATUS_COLORS: Record<string, string> = {
+  draft: '#64748b',
+  submitted: '#1e40af',
+  approved: '#166534',
+  rejected: '#b91c1c',
 };
 
 export default function TimekeepingScreen() {
@@ -69,17 +70,19 @@ export default function TimekeepingScreen() {
 
   const header = (
     <View>
-      <Text style={styles.title}>Timekeeping</Text>
+      <Text style={styles.title}>{t('time.title')}</Text>
 
-      {loadError ? <Text style={styles.warning}>Offline — showing last known data.</Text> : null}
+      {loadError ? <Text style={styles.warning}>{t('state.offlineStale')}</Text> : null}
 
       {/* Timer display */}
       <View style={styles.timerCard}>
         <Text style={styles.timerLabel}>
-          {clock.state === 'in' ? `Clocked in since ${hhmm(clock.since)} · ${clock.projectName}` : 'Not clocked in'}
+          {clock.state === 'in'
+            ? t('time.clockedInSince', { time: hhmm(clock.since), project: clock.projectName })
+            : t('home.notClockedIn')}
         </Text>
         <Text style={styles.timerValue}>{clock.state === 'in' ? elapsed(clock.since, now) : '00:00:00'}</Text>
-        {clock.pending ? <Text style={styles.pending}>Waiting to sync</Text> : null}
+        {clock.pending ? <Text style={styles.pending}>{t('state.waitingToSync')}</Text> : null}
       </View>
 
       {/* Clock in/out button */}
@@ -93,13 +96,13 @@ export default function TimekeepingScreen() {
         disabled={busy || (!clockedIn && !selectedProject)}
         activeOpacity={0.8}
       >
-        <Text style={styles.clockButtonText}>{clockedIn ? 'Clock Out' : 'Clock In'}</Text>
+        <Text style={styles.clockButtonText}>{clockedIn ? t('clock.out') : t('clock.in')}</Text>
       </TouchableOpacity>
 
       {/* Project selector (only relevant before clocking in) */}
       {!clockedIn ? (
         <>
-          <Text style={styles.sectionHeader}>Project</Text>
+          <Text style={styles.sectionHeader}>{t('time.project')}</Text>
           <View style={styles.projectRow}>
             {projects.map((p) => (
               <TouchableOpacity
@@ -112,23 +115,23 @@ export default function TimekeepingScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
-            {projects.length === 0 ? <Text style={styles.muted}>No projects assigned to you.</Text> : null}
+            {projects.length === 0 ? <Text style={styles.muted}>{t('time.noProjects')}</Text> : null}
           </View>
         </>
       ) : null}
 
       {/* Recent entries */}
       <View style={styles.entriesHeader}>
-        <Text style={styles.sectionHeader}>Recent Entries</Text>
+        <Text style={styles.sectionHeader}>{t('time.recentEntries')}</Text>
         {drafts.length > 0 ? (
           <TouchableOpacity onPress={onSubmit} disabled={busy}>
-            <Text style={styles.submitLink}>Submit {drafts.length} draft{drafts.length > 1 ? 's' : ''}</Text>
+            <Text style={styles.submitLink}>{t('time.submitDrafts', { count: drafts.length })}</Text>
           </TouchableOpacity>
         ) : null}
       </View>
       {pendingReports > 0 ? (
         <Text style={styles.muted}>
-          {pendingReports} daily report{pendingReports > 1 ? 's' : ''} waiting to sync
+          {t('time.pendingReports', { count: pendingReports })}
         </Text>
       ) : null}
     </View>
@@ -141,7 +144,7 @@ export default function TimekeepingScreen() {
         data={entries}
         keyExtractor={(e) => e.id}
         ListHeaderComponent={header}
-        ListEmptyComponent={<Text style={styles.muted}>No time entries yet.</Text>}
+        ListEmptyComponent={<Text style={styles.muted}>{t('time.noEntries')}</Text>}
         renderItem={({ item }) => <EntryRow entry={item} />}
         contentContainerStyle={{ paddingBottom: 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -152,21 +155,21 @@ export default function TimekeepingScreen() {
 }
 
 function EntryRow({ entry }: { entry: TimeEntry }) {
-  const status = STATUS_LABELS[entry.status] ?? { text: entry.status, color: '#64748b' };
+  const statusColor = STATUS_COLORS[entry.status] ?? '#64748b';
   return (
     <View style={styles.entryRow}>
       <View>
         <Text style={styles.entryDate}>{dayLabel(String(entry.date))}</Text>
         <Text style={styles.entryTime}>
-          {shortTime(entry.startTime)} - {shortTime(entry.endTime)}
+          {shortTime(entry.startTime)} – {shortTime(entry.endTime)}
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end', flexShrink: 1, marginLeft: 12 }}>
-        <Text style={styles.entryHours}>{entry.totalMinutes == null ? '--' : hours(entry.totalMinutes)}</Text>
+        <Text style={styles.entryHours}>{entry.totalMinutes == null ? t('state.notAvailable') : hours(entry.totalMinutes)}</Text>
         <Text style={styles.entryProject} numberOfLines={1}>
           {entry.project?.name ?? ''}
         </Text>
-        <Text style={[styles.entryStatus, { color: status.color }]}>{status.text}</Text>
+        <Text style={[styles.entryStatus, { color: statusColor }]}>{statusLabel('timeEntry', entry.status)}</Text>
       </View>
     </View>
   );

@@ -13,6 +13,7 @@ import HomeScreen from './screens/HomeScreen';
 import TasksScreen from './screens/TasksScreen';
 import TimekeepingScreen from './screens/TimekeepingScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import { t } from './i18n';
 
 /* ── Navigation type definitions ─────────────────────────── */
 
@@ -102,13 +103,15 @@ function MainTabs() {
         name="Home"
         component={HomeStackScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="H" focused={focused} />,
+          title: t('tabs.home'),
+          tabBarIcon: ({ focused }) => <TabIcon label="A" focused={focused} />,
         }}
       />
       <Tab.Screen
         name="Tasks"
         component={TasksStackScreen}
         options={{
+          title: t('tabs.tasks'),
           tabBarIcon: ({ focused }) => <TabIcon label="T" focused={focused} />,
         }}
       />
@@ -116,13 +119,15 @@ function MainTabs() {
         name="Time"
         component={TimeStackScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon label="C" focused={focused} />,
+          title: t('tabs.time'),
+          tabBarIcon: ({ focused }) => <TabIcon label="H" focused={focused} />,
         }}
       />
       <Tab.Screen
         name="Profile"
         component={ProfileStackScreen}
         options={{
+          title: t('tabs.profile'),
           tabBarIcon: ({ focused }) => <TabIcon label="P" focused={focused} />,
         }}
       />
@@ -157,7 +162,7 @@ function Root() {
     return (
       <Centered>
         <Text style={{ fontSize: 16, fontWeight: '600', color: '#334155', marginBottom: 8 }}>
-          Could not load your profile
+          {t('auth.profileLoadFailed')}
         </Text>
         <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 20, textAlign: 'center' }}>
           {profileError}
@@ -166,10 +171,10 @@ function Root() {
           onPress={retryProfile}
           style={{ backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, marginBottom: 12 }}
         >
-          <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Retry</Text>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>{t('actions.retry')}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => signOut()}>
-          <Text style={{ fontSize: 14, color: '#dc2626' }}>Sign out</Text>
+          <Text style={{ fontSize: 14, color: '#dc2626' }}>{t('auth.signOut')}</Text>
         </TouchableOpacity>
       </Centered>
     );

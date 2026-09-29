@@ -74,6 +74,27 @@ export async function apiList<T = unknown>(path: string): Promise<{ items: T[]; 
   return { items: env.data ?? [], meta: env.meta as unknown as PageMeta };
 }
 
+/** Downloads a file endpoint (e.g. a PDF) with the caller's token, using the server's filename. */
+export async function apiDownload(path: string, fallbackName = 'document.pdf'): Promise<void> {
+  const token = await getAccessToken();
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    const body = await res.json().catch(() => null);
+    const err = isEnvelope(body) ? body.error : null;
+    throw new ApiError(res.status, err?.message || res.statusText, err?.code, err?.details);
+  }
+  const filename = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 const withBody = (method: string, body?: unknown): RequestInit => ({
   method,
   body: body != null ? JSON.stringify(body) : undefined,
@@ -85,7 +106,5 @@ export const apiPut = <T = unknown>(path: string, body?: unknown) => api<T>(path
 export const apiPatch = <T = unknown>(path: string, body?: unknown) => api<T>(path, withBody('PATCH', body));
 export const apiDelete = <T = unknown>(path: string) => api<T>(path, { method: 'DELETE' });
 
-/** Format centimes to CHF string (e.g. 12345 → "123.45") */
-export function formatCHF(centimes: number): string {
-  return (centimes / 100).toFixed(2);
-}
+/** @deprecated Use formatAmount / formatMoney from './format'. Kept so existing pages keep working. */
+export { formatAmount as formatCHF } from './format';

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from 'pg';
 import {
-  apiClient, tokenFor, createProject, USER_A, COMPANY_A, TEST_DB, WORKER_1_A, PM_A,
+  apiClient, tokenFor, createProject, USER_A, USER_B, COMPANY_A, TEST_DB, WORKER_1_A, PM_A, BASE_URL,
 } from './setup';
 
 const admin = apiClient(tokenFor(USER_A.authId));
@@ -279,5 +279,74 @@ describe('Offline clock-in/out', () => {
     expect(out.endTime.slice(0, 5)).toBe(zurichTime(tappedOut));
     expect(out.totalMinutes).toBe(120);
     expect(out.syncedAt).toBeTruthy();
+  });
+});
+
+describe('Offer totals and numbering', () => {
+  it('totals BASE lines at selling price (cost × margin) and numbers offers', async () => {
+    const client = await ok(admin.post('/clients', { name: 'Pricing client' }));
+    const offer = await ok(admin.post('/offers', { projectName: 'Pricing', clientId: client.id, marginFactor: 120, vatRate: 810 }));
+    expect(offer.reference).toMatch(/^OFF-\d{4}-\d{4}$/);
+    await ok(admin.post(`/offers/${offer.id}/lines`, { description: 'Base', unit: 'm2', quantity: 10, unitPriceCents: 1000 }));
+    await ok(admin.post(`/offers/${offer.id}/lines`, { description: 'Option', unit: 'pce', quantity: 1, unitPriceCents: 50000, variantType: 'OPTION' }));
+    await ok(admin.post(`/offers/${offer.id}/lines`, { description: 'Variante', unit: 'pce', quantity: 1, unitPriceCents: 70000, variantType: 'VARIANTE' }));
+    const totals = await ok(admin.post(`/offers/${offer.id}/recalculate`));
+    expect(totals.totalHtCents).toBe(12000);
+    expect(totals.totalVatCents).toBe(972);
+    expect(totals.totalTtcCents).toBe(12970);
+  });
+});
+
+describe('PDF documents', () => {
+  const download = async (path: string, authId = USER_A.authId) => {
+    const res = await fetch(`${BASE_URL}${path}`, { headers: { Authorization: `Bearer ${tokenFor(authId)}` } });
+    const body = Buffer.from(await res.arrayBuffer());
+    return { status: res.status, type: res.headers.get('content-type'), disposition: res.headers.get('content-disposition') ?? '', body };
+  };
+
+  it('renders invoice, credit note, offer and site-meeting PDFs', async () => {
+    const projectId = await createProject(admin, 'PDF project');
+    const project = await ok(admin.get(`/projects/${projectId}`));
+    const inv = await ok(
+      admin.post('/invoices', {
+        projectId, clientId: project.clientId, type: 'invoice',
+        lines: [{ description: 'Travaux « spéciaux » à l’étage', unit: 'h', quantity: 3, unitPriceCents: 9500 }],
+      }),
+    );
+    const invoicePdf = await download(`/invoices/${inv.id}/pdf`);
+    expect(invoicePdf.status).toBe(200);
+    expect(invoicePdf.type).toBe('application/pdf');
+    expect(invoicePdf.disposition).toContain(`Facture-${inv.invoiceNumber}.pdf`);
+    expect(invoicePdf.body.subarray(0, 5).toString()).toBe('%PDF-');
+
+    await ok(admin.patch(`/invoices/${inv.id}/status`, { status: 'sent' }));
+    const credit = await ok(admin.post(`/invoices/${inv.id}/credit-note`));
+    expect((await download(`/invoices/${credit.id}/pdf`)).disposition).toContain('Note-de-credit');
+
+    const offers: any[] = await ok(admin.get('/offers?limit=100'));
+    expect((await download(`/offers/${offers[0].id}/pdf`)).status).toBe(200);
+
+    const meeting = await ok(admin.post('/meetings', { projectId, meetingDate: '2026-09-29T08:00:00Z', location: 'Chantier' }));
+    await ok(admin.post(`/meetings/${meeting.id}/attendees`, { name: 'Jean Dupont', attendance: 'present' }));
+    const meetingPdf = await download(`/meetings/${meeting.id}/pdf`);
+    expect(meetingPdf.status).toBe(200);
+    expect(meetingPdf.disposition).toContain('PV-chantier-1');
+  });
+
+  it('restricts documents by role and tenant', async () => {
+    const invoices: any[] = await ok(admin.get('/invoices?limit=1'));
+    expect((await download(`/invoices/${invoices[0].id}/pdf`, WORKER_1_A.authId)).status).toBe(403);
+    expect((await download(`/invoices/${invoices[0].id}/pdf`, USER_B.authId)).status).toBe(404);
+  });
+});
+
+describe('Company banking settings', () => {
+  it('normalises a valid Swiss IBAN and rejects invalid or foreign ones', async () => {
+    expect((await admin.put('/settings', { iban: 'DE89 3704 0044 0532 0130 00' })).status).toBe(400);
+    expect((await admin.put('/settings', { iban: 'CH44 3199 9123 0008 8901 3' })).status).toBe(400);
+    await ok(admin.put('/settings', { iban: 'ch44 3199 9123 0008 8901 2', defaultPaymentTermsDays: 20 }));
+    const settings = await ok(admin.get('/settings'));
+    expect(settings.iban).toBe('CH4431999123000889012');
+    expect(settings.defaultPaymentTermsDays).toBe(20);
   });
 });

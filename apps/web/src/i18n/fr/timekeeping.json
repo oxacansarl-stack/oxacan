@@ -1,0 +1,62 @@
+{
+  "title": "Timbrage",
+  "subtitle": "Timbrez vos arrivées et départs et gérez vos heures",
+  "clock": {
+    "currentlyClockedIn": "Timbrage en cours",
+    "projectFallback": "Projet",
+    "startedAt": "Arrivée à {{time}}",
+    "elapsed": "Temps écoulé",
+    "clockIn": "Timbrer l'arrivée",
+    "clockOut": "Timbrer le départ",
+    "project": "Projet",
+    "selectProject": "Sélectionnez un projet…",
+    "category": "Catégorie",
+    "notes": "Remarques (facultatif)",
+    "notesPlaceholder": "Sur quoi travaillez-vous ?"
+  },
+  "summary": {
+    "normal": "Heures normales",
+    "overtime": "Heures supplémentaires",
+    "travel": "Déplacement",
+    "break": "Pause",
+    "totalCost": "Coût total"
+  },
+  "filters": {
+    "from": "Du",
+    "to": "au"
+  },
+  "actions": {
+    "submitDrafts": "Soumettre tous les brouillons",
+    "approve": "Valider ({{count}})",
+    "reject": "Refuser ({{count}})"
+  },
+  "table": {
+    "date": "Date",
+    "project": "Projet",
+    "start": "Début",
+    "end": "Fin",
+    "break": "Pause",
+    "normal": "Normal",
+    "overtime": "Heures sup.",
+    "travel": "Déplacement",
+    "status": "Statut",
+    "cost": "Coût",
+    "active": "En cours",
+    "reason": "Motif : {{reason}}"
+  },
+  "empty": "Aucun timbrage trouvé",
+  "prompts": {
+    "rejectionReason": "Motif du refus :"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les timbrages.",
+    "clockInFailed": "Le timbrage d'arrivée a échoué.",
+    "clockOutFailed": "Le timbrage de départ a échoué.",
+    "noDraftsToSubmit": "Aucun timbrage terminé en brouillon à soumettre.",
+    "submitFailed": "La soumission a échoué.",
+    "approveFailed": "La validation a échoué.",
+    "rejectFailed": "Le refus a échoué.",
+    "approveForbidden": "Vous ne pouvez valider que les timbrages des membres de votre équipe (pas les vôtres).",
+    "rejectForbidden": "Vous ne pouvez refuser que les timbrages des membres de votre équipe (pas les vôtres)."
+  }
+}

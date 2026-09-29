@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiList, apiPost, ApiError } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiList, apiPost } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
+import { errorMessage } from '../lib/errors';
+import { enumLabel, formatAmount, formatDate, formatMoney, statusLabel } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -77,24 +80,19 @@ const ACCOUNT_TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
 const TABS = ['accounts', 'entries', 'ledger', 'export'] as const;
 type Tab = typeof TABS[number];
 
-const TAB_LABELS: Record<Tab, string> = {
-  accounts: 'Chart of Accounts',
-  entries: 'Journal Entries',
-  ledger: 'Ledger',
-  export: 'Export',
-};
+const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-// Exact to the centime — ledger amounts must never be display-rounded.
-const displayCHF = (cents: number): string => `CHF ${(cents / 100).toFixed(2)}`;
-
-const displayAmount = (cents: number): string => (cents / 100).toFixed(2);
-
-const errorMessage = (e: unknown, fallback: string): string =>
-  e instanceof ApiError || e instanceof Error ? e.message || fallback : fallback;
+/** Fiduciary CSV cells that hold DB values are shown translated in the preview (the file itself is unchanged). */
+const exportCellLabel = (column: string, value: string): string => {
+  if (!value) return value;
+  if (column === 'Type') return enumLabel('accountType', value);
+  if (column === 'Status') return statusLabel('invoice', value);
+  return value;
+};
 
 const entryTotalDebit = (e: JournalEntry): number =>
   (e.lines ?? []).reduce((sum, l) => sum + (l.debitCents || 0), 0);
@@ -195,6 +193,7 @@ const tdStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export default function Accounting() {
+  const { t } = useTranslation('accounting');
   // Project managers may only run the fiduciary export (PRD §3.2); the ledger is admin-only.
   const isAdmin = useCurrentUser().role === 'ADMIN';
   const visibleTabs: readonly Tab[] = isAdmin ? TABS : ['export'];
@@ -269,7 +268,7 @@ export default function Accounting() {
       const items = await apiGet<Account[]>('/accounting/accounts?limit=500');
       setAccounts(Array.isArray(items) ? items : []);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load accounts'));
+      setError(errorMessage(e, t('errors.loadAccounts')));
     } finally {
       setAccountsLoading(false);
     }
@@ -286,7 +285,7 @@ export default function Accounting() {
       setEntries(items);
       setEntriesTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load entries'));
+      setError(errorMessage(e, t('errors.loadEntries')));
     } finally {
       setEntriesLoading(false);
     }
@@ -304,7 +303,7 @@ export default function Accounting() {
       const res = await apiGet<{ accountId: string; entries: LedgerEntry[] }>(path);
       setLedgerEntries(res?.entries ?? []);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load ledger'));
+      setError(errorMessage(e, t('errors.loadLedger')));
     } finally {
       setLedgerLoading(false);
     }
@@ -323,7 +322,7 @@ export default function Accounting() {
 
   const createAccount = async () => {
     if (!accountForm.accountNumber || !accountForm.name) {
-      setError('Account number and name are required');
+      setError(t('validation.accountRequired'));
       return;
     }
     try {
@@ -337,17 +336,17 @@ export default function Accounting() {
       setAccountForm({ accountNumber: '', name: '', type: 'asset', parentId: '' });
       fetchAccounts();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to create account'));
+      setError(errorMessage(e, t('errors.createAccount')));
     }
   };
 
   const seedDefaults = async () => {
-    if (!confirm('Seed Swiss default chart of accounts? This will create standard accounts if they do not exist.')) return;
+    if (!confirm(t('confirm.seedDefaults'))) return;
     try {
       await apiPost('/accounting/accounts/seed');
       fetchAccounts();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to seed defaults'));
+      setError(errorMessage(e, t('errors.seedDefaults')));
     }
   };
 
@@ -374,21 +373,21 @@ export default function Accounting() {
   const createEntry = async () => {
     setEntryError('');
     if (!entryForm.entryDate || !entryForm.description) {
-      setEntryError('Date and description are required');
+      setEntryError(t('validation.entryRequired'));
       return;
     }
     if (!isBalanced) {
-      setEntryError('Debits and credits must be equal and greater than zero');
+      setEntryError(t('validation.unbalanced'));
       return;
     }
     const hasEmpty = entryLines.some(l => !l.accountId);
     if (hasEmpty) {
-      setEntryError('All lines must have an account selected');
+      setEntryError(t('validation.lineAccount'));
       return;
     }
     const validAmount = (c: number) => Number.isInteger(c) && c >= 0;
     if (entryLines.some(l => !validAmount(l.debitCents) || !validAmount(l.creditCents))) {
-      setEntryError('Amounts must be positive');
+      setEntryError(t('validation.positiveAmounts'));
       return;
     }
     try {
@@ -410,17 +409,17 @@ export default function Accounting() {
       ]);
       fetchEntries();
     } catch (e) {
-      setEntryError(errorMessage(e, 'Failed to create entry'));
+      setEntryError(errorMessage(e, t('errors.createEntry')));
     }
   };
 
   const postEntry = async (id: string) => {
-    if (!confirm('Post this entry? This action is irreversible.')) return;
+    if (!confirm(t('confirm.postEntry'))) return;
     try {
       await apiPost(`/accounting/entries/${id}/post`);
       fetchEntries();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to post entry'));
+      setError(errorMessage(e, t('errors.postEntry')));
     }
   };
 
@@ -430,13 +429,13 @@ export default function Accounting() {
 
   const generateExport = async () => {
     if (!exportDateFrom || !exportDateTo) {
-      setError('Both dates are required for export');
+      setError(t('validation.exportDates'));
       return;
     }
     setExportLoading(true);
     try {
       if (exportDateFrom > exportDateTo) {
-        setError('"From" must not be after "To"');
+        setError(t('validation.exportRange'));
         return;
       }
       const res = await apiGet<FiduciaryExport>(
@@ -444,7 +443,7 @@ export default function Accounting() {
       );
       setExportData(res);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to generate export'));
+      setError(errorMessage(e, t('errors.generateExport')));
     } finally {
       setExportLoading(false);
     }
@@ -508,8 +507,8 @@ export default function Accounting() {
     <div>
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>Accounting</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Chart of accounts, journal entries, ledger, and fiduciary export</p>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
       </div>
 
       {error && (
@@ -537,7 +536,7 @@ export default function Accounting() {
               marginBottom: -2,
             }}
           >
-            {TAB_LABELS[tab]}
+            {t(`tabs.${tab}`)}
           </button>
         ))}
       </div>
@@ -551,20 +550,20 @@ export default function Accounting() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 8 }}>
               <button style={btnPrimary} onClick={() => setShowAccountForm(!showAccountForm)}>
-                {showAccountForm ? 'Cancel' : '+ New Account'}
+                {showAccountForm ? t('common:actions.cancel') : t('accounts.newAccount')}
               </button>
               <button style={btnWarning} onClick={seedDefaults}>
-                Seed Swiss Defaults
+                {t('accounts.seedDefaults')}
               </button>
             </div>
           </div>
 
           {showAccountForm && (
             <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Create Account</h3>
+              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('accounts.createTitle')}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Account Number *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.accountNumber')}</label>
                   <input
                     style={inputStyle}
                     value={accountForm.accountNumber}
@@ -573,36 +572,34 @@ export default function Accounting() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Name *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.name')}</label>
                   <input
                     style={inputStyle}
                     value={accountForm.name}
                     onChange={e => setAccountForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="Account name"
+                    placeholder={t('accounts.namePlaceholder')}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Type</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.type')}</label>
                   <select
                     style={inputStyle}
                     value={accountForm.type}
                     onChange={e => setAccountForm(f => ({ ...f, type: e.target.value as Account['type'] }))}
                   >
-                    <option value="asset">Asset</option>
-                    <option value="liability">Liability</option>
-                    <option value="equity">Equity</option>
-                    <option value="revenue">Revenue</option>
-                    <option value="expense">Expense</option>
+                    {ACCOUNT_TYPES.map(type => (
+                      <option key={type} value={type}>{enumLabel('accountType', type)}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Parent Account</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.parentAccount')}</label>
                   <select
                     style={inputStyle}
                     value={accountForm.parentId}
                     onChange={e => setAccountForm(f => ({ ...f, parentId: e.target.value }))}
                   >
-                    <option value="">None (top-level)</option>
+                    <option value="">{t('accounts.noParent')}</option>
                     {accounts
                       .filter(a => a.type === accountForm.type)
                       .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
@@ -613,26 +610,26 @@ export default function Accounting() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createAccount}>Create Account</button>
-                <button style={btnOutline} onClick={() => setShowAccountForm(false)}>Cancel</button>
+                <button style={btnPrimary} onClick={createAccount}>{t('accounts.create')}</button>
+                <button style={btnOutline} onClick={() => setShowAccountForm(false)}>{t('common:actions.cancel')}</button>
               </div>
             </div>
           )}
 
           {accountsLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading accounts...</p>
+            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('accounts.loading')}</p>
           ) : flatAccounts.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No accounts found. Seed Swiss defaults to get started.</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('accounts.empty')}</p>
           ) : (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th style={thStyle}>Number</th>
-                    <th style={thStyle}>Name</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>System</th>
-                    <th style={thStyle}>Active</th>
+                    <th style={thStyle}>{t('accounts.table.number')}</th>
+                    <th style={thStyle}>{t('accounts.table.name')}</th>
+                    <th style={thStyle}>{t('accounts.table.type')}</th>
+                    <th style={thStyle}>{t('accounts.table.system')}</th>
+                    <th style={thStyle}>{t('accounts.table.active')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -645,11 +642,11 @@ export default function Accounting() {
                         {a.name}
                       </td>
                       <td style={tdStyle}>
-                        <Badge color={ACCOUNT_TYPE_COLORS[a.type]}>{a.type}</Badge>
+                        <Badge color={ACCOUNT_TYPE_COLORS[a.type]}>{enumLabel('accountType', a.type)}</Badge>
                       </td>
                       <td style={tdStyle}>
                         {a.isSystem && (
-                          <span style={{ fontSize: 16 }} title="System account">
+                          <span style={{ fontSize: 16 }} title={t('accounts.systemAccount')}>
                             &#x1F512;
                           </span>
                         )}
@@ -676,37 +673,37 @@ export default function Accounting() {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <button style={btnPrimary} onClick={() => setShowEntryForm(!showEntryForm)}>
-              {showEntryForm ? 'Cancel' : '+ New Entry'}
+              {showEntryForm ? t('common:actions.cancel') : t('entries.newEntry')}
             </button>
           </div>
 
           {/* Filters */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>From</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.from')}</label>
               <input type="date" style={{ ...inputStyle, width: 160 }} value={entryDateFrom} onChange={e => { setEntryDateFrom(e.target.value); setEntriesPage(1); }} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>To</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.to')}</label>
               <input type="date" style={{ ...inputStyle, width: 160 }} value={entryDateTo} onChange={e => { setEntryDateTo(e.target.value); setEntriesPage(1); }} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Status</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.status')}</label>
               <select style={{ ...inputStyle, width: 140 }} value={entryPostedFilter} onChange={e => { setEntryPostedFilter(e.target.value as any); setEntriesPage(1); }}>
-                <option value="">All</option>
-                <option value="true">Posted</option>
-                <option value="false">Unposted</option>
+                <option value="">{t('entries.all')}</option>
+                <option value="true">{t('entries.posted')}</option>
+                <option value="false">{t('entries.unposted')}</option>
               </select>
             </div>
             <div style={{ alignSelf: 'flex-end' }}>
-              <button style={btnOutline} onClick={fetchEntries}>Apply</button>
+              <button style={btnOutline} onClick={fetchEntries}>{t('entries.apply')}</button>
             </div>
           </div>
 
           {/* Create entry form */}
           {showEntryForm && (
             <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Create Journal Entry</h3>
+              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('entries.createTitle')}</h3>
               {entryError && (
                 <div style={{ background: '#fee2e2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
                   {entryError}
@@ -715,7 +712,7 @@ export default function Accounting() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Date *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.date')}</label>
                   <input
                     type="date"
                     style={inputStyle}
@@ -724,34 +721,34 @@ export default function Accounting() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Description *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.description')}</label>
                   <input
                     style={inputStyle}
                     value={entryForm.description}
                     onChange={e => setEntryForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder="Entry description"
+                    placeholder={t('entries.descriptionPlaceholder')}
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Reference Type</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.referenceType')}</label>
                   <input
                     style={inputStyle}
                     value={entryForm.referenceType}
                     onChange={e => setEntryForm(f => ({ ...f, referenceType: e.target.value }))}
-                    placeholder="e.g. invoice, receipt"
+                    placeholder={t('entries.referenceTypePlaceholder')}
                   />
                 </div>
               </div>
 
               {/* Lines */}
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Lines</h4>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>{t('entries.lines')}</h4>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: '#f3f4f6' }}>
                     <tr>
-                      <th style={thStyle}>Account</th>
-                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>Debit (CHF)</th>
-                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>Credit (CHF)</th>
+                      <th style={thStyle}>{t('entries.account')}</th>
+                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>{t('entries.debitChf')}</th>
+                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>{t('entries.creditChf')}</th>
                       <th style={{ ...thStyle, width: 40 }}></th>
                     </tr>
                   </thead>
@@ -764,7 +761,7 @@ export default function Accounting() {
                             value={line.accountId}
                             onChange={e => updateEntryLine(idx, 'accountId', e.target.value)}
                           >
-                            <option value="">Select account</option>
+                            <option value="">{t('entries.selectAccount')}</option>
                             {flatAccounts.map(({ account: a, depth }) => (
                               <option key={a.id} value={a.id}>
                                 {' '.repeat(depth * 2)}{a.accountNumber} - {a.name}
@@ -804,12 +801,12 @@ export default function Accounting() {
                     ))}
                     {/* Totals row */}
                     <tr style={{ background: '#f9fafb' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>Total</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{t('entries.total')}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontFamily: 'monospace' }}>
-                        {displayAmount(totalDebits)}
+                        {formatAmount(totalDebits)}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontFamily: 'monospace' }}>
-                        {displayAmount(totalCredits)}
+                        {formatAmount(totalCredits)}
                       </td>
                       <td style={tdStyle} />
                     </tr>
@@ -819,52 +816,52 @@ export default function Accounting() {
 
               {/* Balance indicator */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                <button style={btnOutline} onClick={addEntryLine}>+ Add Line</button>
+                <button style={btnOutline} onClick={addEntryLine}>{t('entries.addLine')}</button>
                 <span style={{
                   fontSize: 13,
                   fontWeight: 600,
                   color: totalDebits === 0 && totalCredits === 0 ? '#6b7280' : isBalanced ? '#16a34a' : '#dc2626',
                 }}>
                   {totalDebits === 0 && totalCredits === 0
-                    ? 'Enter amounts'
+                    ? t('entries.enterAmounts')
                     : isBalanced
-                      ? 'Balanced'
-                      : `Unbalanced: difference ${displayCHF(Math.abs(totalDebits - totalCredits))}`
+                      ? t('entries.balanced')
+                      : t('entries.unbalanced', { amount: formatMoney(Math.abs(totalDebits - totalCredits)) })
                   }
                 </span>
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createEntry} disabled={!isBalanced}>Create Entry</button>
-                <button style={btnOutline} onClick={() => setShowEntryForm(false)}>Cancel</button>
+                <button style={btnPrimary} onClick={createEntry} disabled={!isBalanced}>{t('entries.create')}</button>
+                <button style={btnOutline} onClick={() => setShowEntryForm(false)}>{t('common:actions.cancel')}</button>
               </div>
             </div>
           )}
 
           {/* Entries table */}
           {entriesLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading entries...</p>
+            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('entries.loading')}</p>
           ) : entries.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No journal entries found</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('entries.empty')}</p>
           ) : (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th style={thStyle}>Entry #</th>
-                    <th style={thStyle}>Date</th>
-                    <th style={thStyle}>Description</th>
-                    <th style={thStyle}>Reference</th>
-                    <th style={thStyle}>Posted</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
-                    <th style={thStyle}>Actions</th>
+                    <th style={thStyle}>{t('entries.table.entryNumber')}</th>
+                    <th style={thStyle}>{t('entries.table.date')}</th>
+                    <th style={thStyle}>{t('entries.table.description')}</th>
+                    <th style={thStyle}>{t('entries.table.reference')}</th>
+                    <th style={thStyle}>{t('entries.table.posted')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('entries.table.total')}</th>
+                    <th style={thStyle}>{t('entries.table.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {entries.map(e => (
                     <tr key={e.id}>
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'monospace' }}>{e.entryNumber || e.id.slice(0, 8)}</td>
-                      <td style={tdStyle}>{new Date(e.entryDate).toLocaleDateString()}</td>
+                      <td style={tdStyle}>{formatDate(e.entryDate)}</td>
                       <td style={tdStyle}>{e.description}</td>
                       <td style={tdStyle}>{e.referenceType || '-'}</td>
                       <td style={tdStyle}>
@@ -873,7 +870,7 @@ export default function Accounting() {
                         </span>
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                        {displayCHF(entryTotalDebit(e))}
+                        {formatMoney(entryTotalDebit(e))}
                       </td>
                       <td style={tdStyle}>
                         {!e.isPosted && (
@@ -881,7 +878,7 @@ export default function Accounting() {
                             style={{ ...btnSuccess, padding: '4px 10px', fontSize: 12 }}
                             onClick={() => postEntry(e.id)}
                           >
-                            Post
+                            {t('entries.post')}
                           </button>
                         )}
                       </td>
@@ -896,13 +893,13 @@ export default function Accounting() {
           {entriesTotalPages > 1 && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
               <button style={btnOutline} disabled={entriesPage <= 1} onClick={() => setEntriesPage(p => Math.max(1, p - 1))}>
-                Previous
+                {t('common:actions.previous')}
               </button>
               <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                Page {entriesPage} of {entriesTotalPages}
+                {t('common:state.page', { page: entriesPage, total: entriesTotalPages })}
               </span>
               <button style={btnOutline} disabled={entriesPage >= entriesTotalPages} onClick={() => setEntriesPage(p => p + 1)}>
-                Next
+                {t('common:actions.next')}
               </button>
             </div>
           )}
@@ -917,13 +914,13 @@ export default function Accounting() {
         <>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Account *</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.account')}</label>
               <select
                 style={inputStyle}
                 value={ledgerAccountId}
                 onChange={e => setLedgerAccountId(e.target.value)}
               >
-                <option value="">Select account</option>
+                <option value="">{t('ledger.selectAccount')}</option>
                 {flatAccounts.map(({ account: a, depth }) => (
                   <option key={a.id} value={a.id}>
                     {' '.repeat(depth * 2)}{a.accountNumber} - {a.name}
@@ -932,49 +929,49 @@ export default function Accounting() {
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>From</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.from')}</label>
               <input type="date" style={{ ...inputStyle, width: 160 }} value={ledgerDateFrom} onChange={e => setLedgerDateFrom(e.target.value)} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>To</label>
+              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.to')}</label>
               <input type="date" style={{ ...inputStyle, width: 160 }} value={ledgerDateTo} onChange={e => setLedgerDateTo(e.target.value)} />
             </div>
             <button style={btnPrimary} onClick={fetchLedger} disabled={!ledgerAccountId}>
-              Load Ledger
+              {t('ledger.load')}
             </button>
           </div>
 
           {ledgerLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading ledger...</p>
+            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('ledger.loading')}</p>
           ) : !ledgerAccountId ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>Select an account to view its ledger</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('ledger.selectPrompt')}</p>
           ) : ledgerEntries.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No ledger entries for this account</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('ledger.empty')}</p>
           ) : (
             <>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: '#f9fafb' }}>
                     <tr>
-                      <th style={thStyle}>Date</th>
-                      <th style={thStyle}>Entry #</th>
-                      <th style={thStyle}>Description</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Debit</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Credit</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
+                      <th style={thStyle}>{t('ledger.table.date')}</th>
+                      <th style={thStyle}>{t('ledger.table.entryNumber')}</th>
+                      <th style={thStyle}>{t('ledger.table.description')}</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.debit')}</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.credit')}</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.balance')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ledgerEntries.map((entry, idx) => (
                       <tr key={`${entry.entryNumber}-${idx}`}>
-                        <td style={tdStyle}>{new Date(entry.entryDate).toLocaleDateString()}</td>
+                        <td style={tdStyle}>{formatDate(entry.entryDate)}</td>
                         <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{entry.entryNumber}</td>
                         <td style={tdStyle}>{entry.description}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
-                          {entry.debitCents > 0 ? displayAmount(entry.debitCents) : ''}
+                          {entry.debitCents > 0 ? formatAmount(entry.debitCents) : ''}
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
-                          {entry.creditCents > 0 ? displayAmount(entry.creditCents) : ''}
+                          {entry.creditCents > 0 ? formatAmount(entry.creditCents) : ''}
                         </td>
                         <td style={{
                           ...tdStyle,
@@ -983,7 +980,7 @@ export default function Accounting() {
                           fontFamily: 'monospace',
                           color: entry.balanceCents < 0 ? '#dc2626' : '#111827',
                         }}>
-                          {displayCHF(entry.balanceCents)}
+                          {formatMoney(entry.balanceCents)}
                         </td>
                       </tr>
                     ))}
@@ -1003,9 +1000,9 @@ export default function Accounting() {
                   justifyContent: 'space-between',
                   alignItems: 'center',
                 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#0369a1' }}>Closing Balance</span>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#0369a1' }}>{t('ledger.closingBalance')}</span>
                   <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>
-                    {displayCHF(ledgerEntries[ledgerEntries.length - 1].balanceCents)}
+                    {formatMoney(ledgerEntries[ledgerEntries.length - 1].balanceCents)}
                   </span>
                 </div>
               )}
@@ -1021,21 +1018,21 @@ export default function Accounting() {
       {activeTab === 'export' && (
         <>
           <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>Fiduciary Export</h3>
+            <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>{t('export.title')}</h3>
             <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-              Generate CSV files for your fiduciary. Select a date range and click Generate.
+              {t('export.help')}
             </p>
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>From *</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('export.from')}</label>
                 <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>To *</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('export.to')}</label>
                 <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} />
               </div>
               <button style={btnPrimary} onClick={generateExport} disabled={exportLoading}>
-                {exportLoading ? 'Generating...' : 'Generate Export'}
+                {exportLoading ? t('export.generating') : t('export.generate')}
               </button>
             </div>
           </div>
@@ -1046,9 +1043,9 @@ export default function Accounting() {
               {(() => {
                 const datasets: { key: string; label: string; csv: string; data: Record<string, string>[] }[] = [];
                 const sources: [string, string, string][] = [
-                  ['journal', 'Journal', exportData.journalCsv],
-                  ['balance', 'Balance', exportData.balanceCsv],
-                  ['clients', 'Clients', exportData.clientCsv],
+                  ['journal', t('export.datasets.journal'), exportData.journalCsv],
+                  ['balance', t('export.datasets.balance'), exportData.balanceCsv],
+                  ['clients', t('export.datasets.clients'), exportData.clientCsv],
                 ];
                 sources.forEach(([key, label, csv]) => {
                   const data = csv ? parseCsv(csv) : [];
@@ -1056,7 +1053,7 @@ export default function Accounting() {
                 });
 
                 if (datasets.length === 0) {
-                  return <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>No data to export</p>;
+                  return <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>{t('export.noData')}</p>;
                 }
 
                 return datasets.map(ds => (
@@ -1067,7 +1064,7 @@ export default function Accounting() {
                         style={{ ...btnOutline, fontSize: 12, padding: '4px 12px' }}
                         onClick={() => downloadCSV(ds.csv, `${ds.key}_${exportDateFrom}_${exportDateTo}.csv`)}
                       >
-                        Download CSV
+                        {t('export.downloadCsv')}
                       </button>
                     </div>
                     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 320 }}>
@@ -1075,16 +1072,16 @@ export default function Accounting() {
                         <thead style={{ background: '#f9fafb', position: 'sticky', top: 0 }}>
                           <tr>
                             {Object.keys(ds.data[0]).map(h => (
-                              <th key={h} style={thStyle}>{h}</th>
+                              <th key={h} style={thStyle}>{t(`export.columns.${h}`, { defaultValue: h })}</th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
                           {ds.data.slice(0, 100).map((row, ri) => (
                             <tr key={ri}>
-                              {Object.values(row).map((val, ci) => (
+                              {Object.entries(row).map(([col, val], ci) => (
                                 <td key={ci} style={{ ...tdStyle, fontSize: 13, whiteSpace: 'nowrap' }}>
-                                  {val == null ? '' : String(val)}
+                                  {val == null ? '' : exportCellLabel(col, String(val))}
                                 </td>
                               ))}
                             </tr>
@@ -1094,7 +1091,7 @@ export default function Accounting() {
                     </div>
                     {ds.data.length > 100 && (
                       <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                        Showing first 100 of {ds.data.length} rows. Download CSV for full data.
+                        {t('export.truncated', { count: ds.data.length })}
                       </p>
                     )}
                   </div>
@@ -1122,7 +1119,6 @@ function Badge({ color, children }: { color: { bg: string; fg: string }; childre
       fontWeight: 500,
       background: color.bg,
       color: color.fg,
-      textTransform: 'capitalize',
     }}>
       {children}
     </span>

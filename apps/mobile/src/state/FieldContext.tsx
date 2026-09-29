@@ -12,6 +12,8 @@ import {
 } from '../lib/offline-queue';
 import * as actions from '../lib/field-actions';
 import type { Project, TimeEntry, WeeklySummary } from '../lib/types';
+import { hhmm } from '../lib/format';
+import { t } from '../i18n';
 
 /** What the clock widget shows, combining server entries and queued actions. */
 export type ClockState =
@@ -63,7 +65,7 @@ function deriveClock(entries: TimeEntry[], queue: QueuedAction[], projects: Proj
       state: 'in',
       since: new Date(openQueued.timestamp),
       projectId: body?.projectId ?? null,
-      projectName: openQueued.label ?? projects.find((p) => p.id === body?.projectId)?.name ?? 'Project',
+      projectName: openQueued.label ?? projects.find((p) => p.id === body?.projectId)?.name ?? t('time.project'),
       pending: true,
       target: { queuedClockInId: openQueued.id },
     };
@@ -76,7 +78,7 @@ function deriveClock(entries: TimeEntry[], queue: QueuedAction[], projects: Proj
       state: 'in',
       since: entryStart(open),
       projectId: open.projectId,
-      projectName: open.project?.name ?? projects.find((p) => p.id === open.projectId)?.name ?? 'Project',
+      projectName: open.project?.name ?? projects.find((p) => p.id === open.projectId)?.name ?? t('time.project'),
       pending: false,
       target: { entryId: open.id },
     };
@@ -131,7 +133,7 @@ export function FieldProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setFailureReporter((failures) => {
       const lines = failures.map((f) => `• ${describe(f.action)}: ${f.message}`).join('\n');
-      Alert.alert('Some offline actions were rejected', lines);
+      Alert.alert(t('offline.rejectedTitle'), lines);
     });
 
     const unsubscribe = subscribe((q) => setQueue(q.filter((a) => a.userId === userId)));
@@ -163,16 +165,16 @@ export function FieldProvider({ children }: { children: React.ReactNode }) {
 
   const clockIn = useCallback(
     async (projectId: string) => {
-      const name = projects.find((p) => p.id === projectId)?.name ?? 'Project';
+      const name = projects.find((p) => p.id === projectId)?.name ?? t('time.project');
       try {
         const res = await actions.clockIn(userId, projectId, name);
         if (res.status === 'queued') {
-          Alert.alert('Saved offline', 'No connection. Your clock-in will be sent when you are back online.');
+          Alert.alert(t('offline.savedTitle'), t('offline.clockInQueued'));
         } else {
           await refresh();
         }
       } catch (err) {
-        Alert.alert('Clock-in failed', errorMessage(err));
+        Alert.alert(t('offline.clockInFailed'), errorMessage(err));
       }
     },
     [userId, projects, refresh],
@@ -183,12 +185,12 @@ export function FieldProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await actions.clockOut(userId, clock.target);
       if (res.status === 'queued') {
-        Alert.alert('Saved offline', 'No connection. Your clock-out will be sent when you are back online.');
+        Alert.alert(t('offline.savedTitle'), t('offline.clockOutQueued'));
       } else {
         await refresh();
       }
     } catch (err) {
-      Alert.alert('Clock-out failed', errorMessage(err));
+      Alert.alert(t('offline.clockOutFailed'), errorMessage(err));
     }
   }, [userId, clock, refresh]);
 
@@ -199,24 +201,22 @@ export function FieldProvider({ children }: { children: React.ReactNode }) {
       await actions.submitEntries(ids);
       await refresh();
     } catch (err) {
-      Alert.alert('Submit failed', isNetworkError(err) ? 'No connection. Try again when you are online.' : errorMessage(err));
+      Alert.alert(t('offline.submitFailed'), isNetworkError(err) ? t('offline.retryOnline') : errorMessage(err));
     }
   }, [entries, refresh]);
 
   const createDailyReport = useCallback(
     async (input: actions.DailyReportInput) => {
-      const name = projects.find((p) => p.id === input.projectId)?.name ?? 'Project';
+      const name = projects.find((p) => p.id === input.projectId)?.name ?? t('time.project');
       try {
         const res = await actions.createDailyReport(userId, input, name);
         Alert.alert(
-          res.status === 'queued' ? 'Saved offline' : 'Report sent',
-          res.status === 'queued'
-            ? 'No connection. The report will be sent when you are back online.'
-            : 'Your daily report was saved.',
+          res.status === 'queued' ? t('offline.savedTitle') : t('report.sentTitle'),
+          res.status === 'queued' ? t('offline.reportQueued') : t('report.sentMessage'),
         );
         return true;
       } catch (err) {
-        Alert.alert('Report not saved', errorMessage(err));
+        Alert.alert(t('report.failedTitle'), errorMessage(err));
         return false;
       }
     },
@@ -245,8 +245,9 @@ export function FieldProvider({ children }: { children: React.ReactNode }) {
 }
 
 function describe(a: QueuedAction): string {
-  const when = new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const what = a.kind === 'clock-in' ? 'Clock-in' : a.kind === 'clock-out' ? 'Clock-out' : 'Daily report';
+  const when = hhmm(new Date(a.timestamp));
+  const what =
+    a.kind === 'clock-in' ? t('clock.clockIn') : a.kind === 'clock-out' ? t('clock.clockOut') : t('report.kind');
   return `${what} (${when}${a.label ? `, ${a.label}` : ''})`;
 }
 

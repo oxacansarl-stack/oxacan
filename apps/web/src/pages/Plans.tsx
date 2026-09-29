@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, ApiError } from '../lib/api';
+import { enumLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 interface Plan {
   id: string;
@@ -68,6 +71,7 @@ const buttonStyle: React.CSSProperties = {
 const FILE_TYPES = ['pdf', 'dwg', 'dxf', 'png', 'jpg'] as const;
 
 export default function Plans() {
+  const { t } = useTranslation('plans');
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -96,7 +100,7 @@ export default function Plans() {
   });
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('common:auth.sessionExpired')}</div>;
   }
 
   return (
@@ -110,10 +114,10 @@ export default function Plans() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Plans
+          {t('title')}
         </h1>
         <button style={buttonStyle} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Upload Plan'}
+          {showForm ? t('common:actions.cancel') : t('actions.upload')}
         </button>
       </div>
 
@@ -138,13 +142,13 @@ export default function Plans() {
           >
             <input
               style={inputStyle}
-              placeholder="Plan name *"
+              placeholder={t('form.name')}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
             <input
               style={inputStyle}
-              placeholder="File URL (placeholder)"
+              placeholder={t('form.fileUrl')}
               value={form.fileUrl}
               onChange={(e) => setForm({ ...form, fileUrl: e.target.value })}
             />
@@ -153,21 +157,21 @@ export default function Plans() {
               value={form.fileType}
               onChange={(e) => setForm({ ...form, fileType: e.target.value })}
             >
-              {FILE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.toUpperCase()}
+              {FILE_TYPES.map((ft) => (
+                <option key={ft} value={ft}>
+                  {enumLabel('fileType', ft)}
                 </option>
               ))}
             </select>
             <input
               style={inputStyle}
-              placeholder="Floor (e.g. RDC, 1er, Sous-sol)"
+              placeholder={t('form.floor')}
               value={form.floor}
               onChange={(e) => setForm({ ...form, floor: e.target.value })}
             />
             <input
               style={inputStyle}
-              placeholder="Scale (e.g. 1:50)"
+              placeholder={t('form.scale')}
               value={form.scale}
               onChange={(e) => setForm({ ...form, scale: e.target.value })}
             />
@@ -177,11 +181,11 @@ export default function Plans() {
             onClick={() => form.name && createMutation.mutate(form)}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : 'Create Plan'}
+            {createMutation.isPending ? t('actions.creating') : t('actions.create')}
           </button>
           {createMutation.error && (
             <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-              {createMutation.error.message}
+              {errorMessage(createMutation.error, t('messages.createFailed'))}
             </span>
           )}
         </div>
@@ -189,12 +193,12 @@ export default function Plans() {
 
       {/* Plans grid */}
       {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : error ? (
-        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
+        <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error, t('messages.loadFailed'))}</div>
       ) : plans.length === 0 ? (
         <div style={{ color: '#9ca3af', padding: 20, textAlign: 'center' }}>
-          No plans yet
+          {t('empty.plans')}
         </div>
       ) : (
         <div
@@ -243,7 +247,7 @@ export default function Plans() {
                   marginBottom: 12,
                 }}
               >
-                {plan.fileType.toUpperCase()}
+                {enumLabel('fileType', plan.fileType)}
               </div>
               <div
                 style={{
@@ -264,10 +268,10 @@ export default function Plans() {
                   color: '#6b7280',
                 }}
               >
-                <span>Floor: {plan.floor || '—'}</span>
-                <span>Scale: {plan.scale || '—'}</span>
-                <span>Type: {plan.fileType.toUpperCase()}</span>
-                <span>v{plan.version ?? 1}</span>
+                <span>{t('card.floor', { value: plan.floor || '—' })}</span>
+                <span>{t('card.scale', { value: plan.scale || '—' })}</span>
+                <span>{t('card.type', { value: enumLabel('fileType', plan.fileType) })}</span>
+                <span>{t('card.version', { version: plan.version ?? 1 })}</span>
               </div>
 
               {/* Annotations panel */}
@@ -288,19 +292,19 @@ export default function Plans() {
                       marginTop: 0,
                     }}
                   >
-                    Annotations
+                    {t('annotations.title')}
                   </h4>
                   {planDetail.annotations && planDetail.annotations.length > 0 ? (
                     <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13 }}>
                       {planDetail.annotations.map((a) => (
                         <li key={a.id} style={{ color: '#4b5563', marginBottom: 4 }}>
-                          <strong>{a.label || a.type}</strong>: {a.type}
+                          <strong>{a.label || enumLabel('annotationType', a.type)}</strong> : {enumLabel('annotationType', a.type)}
                         </li>
                       ))}
                     </ul>
                   ) : (
                     <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
-                      No annotations
+                      {t('annotations.empty')}
                     </p>
                   )}
                 </div>

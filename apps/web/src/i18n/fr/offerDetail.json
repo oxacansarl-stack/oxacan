@@ -1,0 +1,73 @@
+{
+  "loginRequired": "Connexion requise",
+  "notFound": "Offre introuvable",
+  "back": "Retour aux offres",
+  "header": {
+    "reference": "Réf. : {{reference}}"
+  },
+  "actions": {
+    "recalculate": "Recalculer les totaux",
+    "recalculating": "Calcul…",
+    "duplicate": "Dupliquer l'offre",
+    "duplicating": "Duplication…",
+    "submit": "Soumettre l'offre",
+    "submitBlocked": "Toutes les lignes doivent avoir un prix avant la soumission",
+    "downloadPdf": "Télécharger le PDF",
+    "generatingPdf": "Génération du PDF…"
+  },
+  "summary": {
+    "totalHt": "Total HT",
+    "vat": "TVA",
+    "totalTtc": "Total TTC",
+    "marginFactor": "Coefficient de marge",
+    "vatRate": "Taux de TVA",
+    "stored": "valeur enregistrée : {{value}}",
+    "storedBps": "valeur enregistrée : {{value}} pb"
+  },
+  "lines": {
+    "title": "Lignes ({{count}})",
+    "add": "+ Ajouter une ligne",
+    "newTitle": "Nouvelle ligne",
+    "editTitle": "Modifier la ligne",
+    "submitAdd": "Ajouter la ligne",
+    "submitUpdate": "Mettre à jour la ligne",
+    "cancelEdit": "Annuler la modification",
+    "priceToComplete": "Prix à compléter",
+    "empty": "Aucune ligne pour le moment",
+    "confirmDelete": "Supprimer cette ligne ?",
+    "form": {
+      "description": "Description *",
+      "unit": "Unité (pce, m2, ml…)",
+      "quantity": "Quantité",
+      "unitPrice": "Prix unitaire (CHF)"
+    },
+    "table": {
+      "position": "Pos.",
+      "description": "Description",
+      "unit": "Unité",
+      "quantity": "Qté",
+      "unitPrice": "Prix unitaire (CHF)",
+      "total": "Total (CHF)",
+      "pricing": "Tarification",
+      "variant": "Variante",
+      "actions": "Actions"
+    }
+  },
+  "assumptions": {
+    "title": "Hypothèses ({{count}})",
+    "add": "+ Ajouter une hypothèse",
+    "submit": "Ajouter l'hypothèse",
+    "adding": "Ajout…",
+    "empty": "Aucune hypothèse",
+    "form": {
+      "description": "Description *",
+      "impact": "Impact (CHF)"
+    },
+    "table": {
+      "type": "Type",
+      "description": "Description",
+      "impact": "Impact (CHF)",
+      "status": "Statut"
+    }
+  }
+}

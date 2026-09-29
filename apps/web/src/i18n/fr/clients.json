@@ -1,0 +1,46 @@
+{
+  "title": "Clients",
+  "actions": {
+    "new": "+ Nouveau client",
+    "create": "Créer le client",
+    "creating": "Création…"
+  },
+  "form": {
+    "name": "Nom *",
+    "email": "E-mail",
+    "phone": "Téléphone",
+    "city": "Localité",
+    "canton": "Canton"
+  },
+  "filters": {
+    "search": "Rechercher un client…",
+    "allStages": "Toutes les étapes"
+  },
+  "stage": {
+    "prospect": "Prospect",
+    "qualified": "Qualifié",
+    "active": "Actif",
+    "inactive": "Inactif",
+    "archived": "Archivé"
+  },
+  "table": {
+    "name": "Nom",
+    "type": "Type",
+    "stage": "Étape du pipeline",
+    "city": "Localité",
+    "phone": "Téléphone"
+  },
+  "detail": {
+    "contacts": "Contacts",
+    "interactions": "Interactions"
+  },
+  "empty": {
+    "clients": "Aucun client trouvé",
+    "contacts": "Aucun contact",
+    "interactions": "Aucune interaction"
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les clients.",
+    "createFailed": "Impossible de créer le client."
+  }
+}

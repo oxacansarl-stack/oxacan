@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Company } from '../company/entities/company.entity';
+import { LINES_IN_TOTAL, sellingLineCents } from './offer-pricing';
 import { Offer } from './entities/offer.entity';
 import { OfferLine } from './entities/offer-line.entity';
 import { OfferAssumption } from './entities/offer-assumption.entity';
@@ -40,6 +42,7 @@ export class OffersService {
     private readonly lineRepo: Repository<OfferLine>,
     @InjectRepository(OfferAssumption)
     private readonly assumptionRepo: Repository<OfferAssumption>,
+    private readonly dataSource: DataSource,
   ) {}
 
   /* ───────────── Offer CRUD ───────────── */
@@ -105,22 +108,38 @@ export class OffersService {
     userId: string,
     dto: CreateOfferDto,
   ): Promise<Offer> {
-    const offer = this.offerRepo.create({
-      companyId,
-      clientId: dto.clientId,
-      projectName: dto.projectName,
-      projectTypeId: dto.projectTypeId || null,
-      reference: dto.reference || null,
-      marginFactor: dto.marginFactor ?? 120,
-      vatRate: dto.vatRate ?? 810,
-      validityDays: dto.validityDays ?? 30,
-      notes: dto.notes || null,
-      status: 'draft',
-      version: 1,
-      createdBy: userId,
-      updatedBy: userId,
+    return this.dataSource.transaction(async (m) => {
+      const company = await m.findOne(Company, { where: { id: companyId } });
+      // Serialise per company so the yearly OFF-YYYY-NNNN sequence has no duplicates.
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`offer:${companyId}`]);
+      let reference = dto.reference || null;
+      if (!reference) {
+        const prefix = `OFF-${new Date().getFullYear()}-`;
+        const [{ max }] = await m.query(
+          `SELECT MAX(substring(reference from '[0-9]+$')::int) AS max
+           FROM offer WHERE company_id = $1 AND reference LIKE $2`,
+          [companyId, `${prefix}%`],
+        );
+        reference = `${prefix}${String((max ?? 0) + 1).padStart(4, '0')}`;
+      }
+      return m.save(
+        m.create(Offer, {
+          companyId,
+          clientId: dto.clientId,
+          projectName: dto.projectName,
+          projectTypeId: dto.projectTypeId || null,
+          reference,
+          marginFactor: dto.marginFactor ?? company?.defaultMarginFactor ?? 120,
+          vatRate: dto.vatRate ?? company?.defaultVatRate ?? 810,
+          validityDays: dto.validityDays ?? 30,
+          notes: dto.notes || null,
+          status: 'draft',
+          version: 1,
+          createdBy: userId,
+          updatedBy: userId,
+        }),
+      );
     });
-    return this.offerRepo.save(offer);
   }
 
   async update(
@@ -298,27 +317,20 @@ export class OffersService {
       where: { offerId, companyId },
     });
 
-    let sumLineTotals = 0;
+    // Line totals stay at cost (internal); the offer total is the sum of BASE selling prices,
+    // so the client document adds up line by line. Only the payable TTC is rounded to 5 ct.
+    let totalHt = 0;
     for (const line of lines) {
-      if (line.variantType === 'EXCLU') continue;
-
-      if (line.unitPriceCents != null) {
-        const lineTotal = Math.round(line.quantity * line.unitPriceCents);
-        // Update the individual line total
-        line.totalPriceCents = swissRound(lineTotal);
-        await this.lineRepo.save(line);
-        sumLineTotals += lineTotal;
+      if (line.variantType === 'EXCLU' || line.unitPriceCents == null) continue;
+      line.totalPriceCents = Math.round(Number(line.quantity) * line.unitPriceCents);
+      await this.lineRepo.save(line);
+      if (LINES_IN_TOTAL.includes(line.variantType)) {
+        totalHt += sellingLineCents(line.quantity, line.unitPriceCents, offer.marginFactor);
       }
     }
 
-    // Apply margin: marginFactor is stored as integer (120 = 1.20x)
-    const marginMultiplier = offer.marginFactor / 100;
-    const totalHt = swissRound(Math.round(sumLineTotals * marginMultiplier));
-
-    // Apply VAT: vatRate is stored in basis points (810 = 8.10%)
-    const vatMultiplier = offer.vatRate / 10000;
-    const totalVat = swissRound(Math.round(totalHt * vatMultiplier));
-
+    // vatRate is stored in basis points (810 = 8.10 %)
+    const totalVat = Math.round((totalHt * offer.vatRate) / 10000);
     const totalTtc = swissRound(totalHt + totalVat);
 
     offer.totalHtCents = totalHt;

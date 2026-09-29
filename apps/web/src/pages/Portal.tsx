@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { apiGet, apiList, apiPost, apiDelete } from '../lib/api';
+import { formatDate } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -94,15 +98,15 @@ function maskToken(token: string): string {
   return token.slice(0, 4) + '...' + token.slice(-4);
 }
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, t: TFunction): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
-  if (days > 30) return `${Math.floor(days / 30)} months ago`;
-  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (days > 30) return t('timeAgo.months', { count: Math.floor(days / 30) });
+  if (days > 0) return t('timeAgo.days', { count: days });
   const hours = Math.floor(diff / 3600000);
-  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (hours > 0) return t('timeAgo.hours', { count: hours });
   const mins = Math.floor(diff / 60000);
-  return mins > 0 ? `${mins} min ago` : 'just now';
+  return mins > 0 ? t('timeAgo.minutes', { count: mins }) : t('timeAgo.justNow');
 }
 
 function copyToClipboard(text: string): void {
@@ -122,6 +126,7 @@ function copyToClipboard(text: string): void {
 /* ------------------------------------------------------------------ */
 
 export default function Portal() {
+  const { t } = useTranslation('portal');
   const [tokens, setTokens] = useState<PortalToken[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,13 +153,13 @@ export default function Portal() {
       const { items, meta } = await apiList<PortalToken>(`/portal/tokens?page=${page}`);
       setTokens(items);
       setTotalPages(Math.max(1, meta?.totalPages ?? 1));
-    } catch (e: any) {
-      setError(e.message || 'Failed to load portal tokens');
+    } catch (e: unknown) {
+      setError(errorMessage(e, t('messages.loadFailed')));
       setTokens([]);
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, t]);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -167,7 +172,7 @@ export default function Portal() {
 
   const handleCreate = async () => {
     setCreateError('');
-    if (!createForm.projectId) { setCreateError('Project is required'); return; }
+    if (!createForm.projectId) { setCreateError(t('messages.projectRequired')); return; }
     try {
       const body: { projectId: string; expiresAt?: string } = { projectId: createForm.projectId };
       // expiresAt is a timestamp: the link stays valid until the end of the chosen (local) day.
@@ -177,21 +182,21 @@ export default function Portal() {
       await apiPost('/portal/tokens', body);
       setShowCreate(false);
       setCreateForm({ projectId: '', expiresAt: '' });
-      setSuccess('Portal token created');
+      setSuccess(t('messages.created'));
       fetchTokens();
-    } catch (e: any) {
-      setCreateError(e.message || 'Failed to create token');
+    } catch (e: unknown) {
+      setCreateError(errorMessage(e, t('messages.createFailed')));
     }
   };
 
   const handleRevoke = async (id: string) => {
-    if (!confirm('Are you sure you want to revoke this portal token? The portal link will stop working.')) return;
+    if (!confirm(t('messages.confirmRevoke'))) return;
     try {
       await apiDelete(`/portal/tokens/${id}`);
-      setSuccess('Token revoked');
+      setSuccess(t('messages.revoked'));
       fetchTokens();
-    } catch (e: any) {
-      setError(e.message || 'Failed to revoke token');
+    } catch (e: unknown) {
+      setError(errorMessage(e, t('messages.revokeFailed')));
     }
   };
 
@@ -213,11 +218,11 @@ export default function Portal() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>Portal</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Manage client portal tokens for project sharing</p>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
         </div>
         <button style={btnPrimary} onClick={() => setShowCreate(!showCreate)}>
-          {showCreate ? 'Cancel' : '+ New Token'}
+          {showCreate ? t('common:actions.cancel') : t('newToken')}
         </button>
       </div>
 
@@ -238,7 +243,7 @@ export default function Portal() {
       {/* Create form */}
       {showCreate && (
         <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Create Portal Token</h3>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('form.title')}</h3>
           {createError && (
             <div style={{ background: '#fee2e2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
               {createError}
@@ -246,18 +251,18 @@ export default function Portal() {
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             <div>
-              <label style={labelStyle}>Project *</label>
+              <label style={labelStyle}>{t('form.project')}</label>
               <select
                 style={inputStyle}
                 value={createForm.projectId}
                 onChange={e => setCreateForm(f => ({ ...f, projectId: e.target.value }))}
               >
-                <option value="">Select project</option>
+                <option value="">{t('form.selectProject')}</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={labelStyle}>Expires At (optional)</label>
+              <label style={labelStyle}>{t('form.expiresAt')}</label>
               <input
                 type="date"
                 style={inputStyle}
@@ -267,28 +272,28 @@ export default function Portal() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnPrimary} onClick={handleCreate}>Create Token</button>
-            <button style={btnOutline} onClick={() => setShowCreate(false)}>Cancel</button>
+            <button style={btnPrimary} onClick={handleCreate}>{t('form.submit')}</button>
+            <button style={btnOutline} onClick={() => setShowCreate(false)}>{t('common:actions.cancel')}</button>
           </div>
         </div>
       )}
 
       {/* Tokens table */}
       {loading ? (
-        <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading tokens...</p>
+        <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loading')}</p>
       ) : tokens.length === 0 ? (
-        <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No portal tokens. Create one to share project data with clients.</p>
+        <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('state.empty')}</p>
       ) : (
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: '#f9fafb' }}>
               <tr>
-                <th style={thStyle}>Project</th>
-                <th style={thStyle}>Token</th>
-                <th style={thStyle}>Created</th>
-                <th style={thStyle}>Expires</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Actions</th>
+                <th style={thStyle}>{t('table.project')}</th>
+                <th style={thStyle}>{t('table.token')}</th>
+                <th style={thStyle}>{t('table.created')}</th>
+                <th style={thStyle}>{t('table.expires')}</th>
+                <th style={thStyle}>{t('table.status')}</th>
+                <th style={thStyle}>{t('table.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -312,12 +317,12 @@ export default function Portal() {
                         color: copiedId === tok.id + '-tok' ? '#16a34a' : '#6b7280',
                       }}
                     >
-                      {copiedId === tok.id + '-tok' ? 'Copied!' : 'Copy'}
+                      {copiedId === tok.id + '-tok' ? t('actions.copied') : t('actions.copy')}
                     </button>
                   </td>
-                  <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>{timeAgo(tok.createdAt)}</td>
+                  <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>{timeAgo(tok.createdAt, t)}</td>
                   <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>
-                    {tok.expiresAt ? new Date(tok.expiresAt).toLocaleDateString() : 'Never'}
+                    {tok.expiresAt ? formatDate(tok.expiresAt) : t('state.never')}
                   </td>
                   <td style={tdStyle}>
                     <span style={{
@@ -329,7 +334,7 @@ export default function Portal() {
                       background: tok.isActive ? '#dcfce7' : '#fee2e2',
                       color: tok.isActive ? '#166534' : '#dc2626',
                     }}>
-                      {tok.isActive ? 'Active' : 'Revoked'}
+                      {tok.isActive ? t('state.active') : t('state.revoked')}
                     </span>
                   </td>
                   <td style={tdStyle}>
@@ -344,14 +349,14 @@ export default function Portal() {
                           borderColor: copiedId === tok.id ? '#16a34a' : '#d1d5db',
                         }}
                       >
-                        {copiedId === tok.id ? 'Copied!' : 'Copy URL'}
+                        {copiedId === tok.id ? t('actions.copied') : t('actions.copyUrl')}
                       </button>
                       {tok.isActive && (
                         <button
                           onClick={() => handleRevoke(tok.id)}
                           style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}
                         >
-                          Revoke
+                          {t('actions.revoke')}
                         </button>
                       )}
                     </div>
@@ -371,17 +376,17 @@ export default function Portal() {
             disabled={page <= 1}
             onClick={() => setPage(p => Math.max(1, p - 1))}
           >
-            Previous
+            {t('common:actions.previous')}
           </button>
           <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-            Page {page} of {totalPages}
+            {t('common:state.page', { page, total: totalPages })}
           </span>
           <button
             style={btnOutline}
             disabled={page >= totalPages}
             onClick={() => setPage(p => p + 1)}
           >
-            Next
+            {t('common:actions.next')}
           </button>
         </div>
       )}

@@ -1,0 +1,29 @@
+{
+  "title": "Offres",
+  "loginRequired": "Connexion requise",
+  "actions": {
+    "new": "+ Nouvelle offre",
+    "create": "Créer l'offre",
+    "creating": "Création…"
+  },
+  "form": {
+    "projectName": "Nom du projet *",
+    "selectClient": "Sélectionner un client *",
+    "reference": "Référence",
+    "marginFactor": "Coefficient de marge (p. ex. 120 = 1.20x)",
+    "vatRate": "Taux de TVA en points de base (p. ex. 810 = 8.10 %)"
+  },
+  "filters": {
+    "search": "Rechercher par nom de projet…",
+    "allStatuses": "Tous les statuts"
+  },
+  "table": {
+    "projectName": "Nom du projet",
+    "client": "Client",
+    "status": "Statut",
+    "totalTtc": "Total TTC (CHF)",
+    "version": "Version",
+    "createdAt": "Créée le"
+  },
+  "empty": "Aucune offre trouvée"
+}

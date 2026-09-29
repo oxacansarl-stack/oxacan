@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, ApiError } from '../lib/api';
+import { formatMoney, formatDate, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -60,10 +63,6 @@ const inputStyle: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function managerName(m: Project['manager']): string {
   return m ? `${m.firstName} ${m.lastName}`.trim() : '';
 }
@@ -74,6 +73,7 @@ function managerName(m: Project['manager']): string {
 
 export default function Projects() {
   const navigate = useNavigate();
+  const { t } = useTranslation('projects');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
 
@@ -102,10 +102,10 @@ export default function Projects() {
   });
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
   }
   if (error) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>;
   }
 
   return (
@@ -120,7 +120,7 @@ export default function Projects() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Projects
+          {t('title')}
         </h1>
       </div>
 
@@ -128,7 +128,7 @@ export default function Projects() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <input
           style={{ ...inputStyle, maxWidth: 300 }}
-          placeholder="Search by name, reference, manager..."
+          placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -137,10 +137,10 @@ export default function Projects() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="">All Statuses</option>
+          <option value="">{t('allStatuses')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {statusLabel(s)}
+              {statusLabel('project', s)}
             </option>
           ))}
         </select>
@@ -148,12 +148,12 @@ export default function Projects() {
 
       {/* Table */}
       {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Reference', 'Name', 'Client', 'Status', 'Progress', 'Budget HT (CHF)', 'Manager', 'Start Date'].map(
+              {(['reference', 'name', 'client', 'status', 'progress', 'budget', 'manager', 'startDate'] as const).map(
                 (h) => (
                   <th
                     key={h}
@@ -168,7 +168,7 @@ export default function Projects() {
                       letterSpacing: 0.5,
                     }}
                   >
-                    {h}
+                    {t(`table.${h}`)}
                   </th>
                 ),
               )}
@@ -181,7 +181,7 @@ export default function Projects() {
                   colSpan={8}
                   style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                 >
-                  No projects found
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -224,7 +224,7 @@ export default function Projects() {
                         color: colors.fg,
                       }}
                     >
-                      {statusLabel(project.status)}
+                      {statusLabel('project', project.status)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
@@ -254,13 +254,13 @@ export default function Projects() {
                     </div>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>
-                    {project.budgetHtCents != null ? `CHF ${formatCHF(project.budgetHtCents)}` : '—'}
+                    {project.budgetHtCents != null ? formatMoney(project.budgetHtCents) : '—'}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
                     {managerName(project.manager) || '-'}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
-                    {project.startDate ? new Date(project.startDate).toLocaleDateString('fr-CH') : '-'}
+                    {project.startDate ? formatDate(project.startDate) : '-'}
                   </td>
                 </tr>
               );

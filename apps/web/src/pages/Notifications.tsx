@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { apiList, apiPatch, apiPost } from '../lib/api';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -43,15 +46,15 @@ const btnOutline: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function timeAgo(dateStr: string): string {
+function timeAgo(dateStr: string, t: TFunction): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
-  if (days > 30) return `${Math.floor(days / 30)} month${Math.floor(days / 30) > 1 ? 's' : ''} ago`;
-  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (days > 30) return t('timeAgo.months', { count: Math.floor(days / 30) });
+  if (days > 0) return t('timeAgo.days', { count: days });
   const hours = Math.floor(diff / 3600000);
-  if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (hours > 0) return t('timeAgo.hours', { count: hours });
   const mins = Math.floor(diff / 60000);
-  return mins > 0 ? `${mins} min${mins > 1 ? 's' : ''} ago` : 'just now';
+  return mins > 0 ? t('timeAgo.minutes', { count: mins }) : t('timeAgo.justNow');
 }
 
 /* ------------------------------------------------------------------ */
@@ -59,6 +62,7 @@ function timeAgo(dateStr: string): string {
 /* ------------------------------------------------------------------ */
 
 export default function Notifications() {
+  const { t } = useTranslation('notifications');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -76,12 +80,12 @@ export default function Notifications() {
       setNotifications(items);
       setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e: any) {
-      setError(e.message || 'Failed to load notifications');
+      setError(errorMessage(e, t('messages.loadFailed')));
       setNotifications([]);
     } finally {
       setLoading(false);
     }
-  }, [page, filter]);
+  }, [page, filter, t]);
 
   useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
@@ -90,7 +94,7 @@ export default function Notifications() {
       await apiPatch(`/notifications/${id}/read`);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
     } catch (e: any) {
-      setError(e.message || 'Failed to mark notification as read');
+      setError(errorMessage(e, t('messages.markReadFailed')));
     }
   };
 
@@ -99,7 +103,7 @@ export default function Notifications() {
       await apiPost('/notifications/read-all');
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } catch (e: any) {
-      setError(e.message || 'Failed to mark all as read');
+      setError(errorMessage(e, t('messages.markAllReadFailed')));
     }
   };
 
@@ -110,14 +114,14 @@ export default function Notifications() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>Notifications</h1>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>
-            {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'All caught up'}
+            {unreadCount > 0 ? t('unreadCount', { count: unreadCount }) : t('allCaughtUp')}
           </p>
         </div>
         {unreadCount > 0 && (
           <button style={btnPrimary} onClick={markAllRead}>
-            Mark All Read
+            {t('actions.markAllRead')}
           </button>
         )}
       </div>
@@ -125,7 +129,7 @@ export default function Notifications() {
       {error && (
         <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
           {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }}>x</button>
+          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
         </div>
       )}
 
@@ -145,20 +149,19 @@ export default function Notifications() {
               fontSize: 14,
               cursor: 'pointer',
               marginBottom: -2,
-              textTransform: 'capitalize',
             }}
           >
-            {tab}
+            {t(`tabs.${tab}`)}
           </button>
         ))}
       </div>
 
       {/* Notification list */}
       {loading ? (
-        <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading notifications...</p>
+        <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loading')}</p>
       ) : notifications.length === 0 ? (
         <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>
-          {filter === 'unread' ? 'No unread notifications' : 'No notifications'}
+          {filter === 'unread' ? t('empty.unread') : t('empty.all')}
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -198,7 +201,7 @@ export default function Notifications() {
                   </p>
                 </div>
                 <span style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: 16 }}>
-                  {timeAgo(n.createdAt)}
+                  {timeAgo(n.createdAt, t)}
                 </span>
               </div>
             </div>
@@ -214,17 +217,17 @@ export default function Notifications() {
             disabled={page <= 1}
             onClick={() => setPage(p => Math.max(1, p - 1))}
           >
-            Previous
+            {t('common:actions.previous')}
           </button>
           <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-            Page {page} of {totalPages}
+            {t('common:state.page', { page, total: totalPages })}
           </span>
           <button
             style={btnOutline}
             disabled={page >= totalPages}
             onClick={() => setPage(p => p + 1)}
           >
-            Next
+            {t('common:actions.next')}
           </button>
         </div>
       )}

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { formatDate } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -79,16 +82,6 @@ const btnOutline: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function formatDate(iso: string): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('fr-CH', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function formatDateShort(iso: string): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleDateString('fr-CH');
-}
-
 /** 'YYYY-MM-DD' → local Date without timezone shift */
 function parseDay(date: string): Date {
   const [y, m, d] = date.slice(0, 10).split('-').map(Number);
@@ -100,19 +93,12 @@ function materialLabel(m: Record<string, unknown>): string {
   return typeof label === 'string' ? label : JSON.stringify(m);
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (err.status === 403) return `Not allowed: ${err.message}`;
-    return err.message || fallback;
-  }
-  return err instanceof Error && err.message ? err.message : fallback;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function DailyReports() {
+  const { t } = useTranslation('dailyReports');
   // Form state
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -157,7 +143,7 @@ export default function DailyReports() {
         setReports(list ?? []);
         setError('');
       })
-      .catch((err) => setError(errorMessage(err, 'Failed to load reports')))
+      .catch((err) => setError(errorMessage(err, t('messages.loadFailed'))))
       .finally(() => setLoading(false));
   }, [filterProject, filterDateFrom, filterDateTo]);
 
@@ -184,7 +170,7 @@ export default function DailyReports() {
 
     const temperatureCelsius = formTemperature ? parseFloat(formTemperature) : null;
     if (temperatureCelsius != null && (!Number.isFinite(temperatureCelsius) || Math.abs(temperatureCelsius) > 60)) {
-      setError('Temperature must be between -60 and 60 °C.');
+      setError(t('messages.invalidTemperature'));
       return;
     }
     setFormLoading(true);
@@ -221,7 +207,7 @@ export default function DailyReports() {
       setShowForm(false);
       loadReports();
     } catch (err) {
-      setError(errorMessage(err, 'Failed to save report'));
+      setError(errorMessage(err, t('messages.saveFailed')));
     } finally {
       setFormLoading(false);
     }
@@ -242,12 +228,12 @@ export default function DailyReports() {
 
   // ---- Delete ----
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this daily report?')) return;
+    if (!confirm(t('prompts.confirmDelete'))) return;
     try {
       await apiDelete(`/daily-reports/${id}`);
       loadReports();
     } catch (err) {
-      setError(errorMessage(err, 'Delete failed'));
+      setError(errorMessage(err, t('messages.deleteFailed')));
     }
   };
 
@@ -256,14 +242,14 @@ export default function DailyReports() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>Daily Reports</h1>
-          <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>Document daily work activities, weather, and materials</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
+          <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>{t('subtitle')}</p>
         </div>
         <button
           style={{ ...btnPrimary }}
           onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}
         >
-          {showForm ? 'Cancel' : '+ New Report'}
+          {showForm ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -286,39 +272,39 @@ export default function DailyReports() {
           }}
         >
           <div style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16 }}>
-            {editId ? 'Edit Report' : 'New Daily Report'}
+            {editId ? t('form.editTitle') : t('form.newTitle')}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Project *</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.project')}</label>
               <select style={{ ...inputStyle }} value={formProjectId} onChange={(e) => setFormProjectId(e.target.value)} required disabled={!!editId}>
-                <option value="">Select a project...</option>
+                <option value="">{t('form.selectProject')}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Date *</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.date')}</label>
               <input type="date" style={{ ...inputStyle }} value={formDate} onChange={(e) => setFormDate(e.target.value)} required disabled={!!editId} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Weather</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.weather')}</label>
               <input
                 style={{ ...inputStyle }}
-                placeholder="e.g. Sunny, Cloudy, Rain..."
+                placeholder={t('form.weatherPlaceholder')}
                 value={formWeather}
                 onChange={(e) => setFormWeather(e.target.value)}
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Temperature (C)</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.temperature')}</label>
               <input
                 type="number"
                 step="0.5"
                 style={{ ...inputStyle }}
-                placeholder="e.g. 22"
+                placeholder={t('form.temperaturePlaceholder')}
                 value={formTemperature}
                 onChange={(e) => setFormTemperature(e.target.value)}
               />
@@ -326,39 +312,39 @@ export default function DailyReports() {
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Work Description</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.workDescription')}</label>
             <textarea
               style={{ ...textareaStyle }}
-              placeholder="Describe work performed today..."
+              placeholder={t('form.workDescriptionPlaceholder')}
               value={formWorkDescription}
               onChange={(e) => setFormWorkDescription(e.target.value)}
             />
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Materials Used (one per line)</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.materials')}</label>
             <textarea
               style={{ ...textareaStyle, minHeight: 60 }}
-              placeholder="Concrete 5m3&#10;Rebar 200kg&#10;Formwork panels 20x"
+              placeholder={t('form.materialsPlaceholder')}
               value={formMaterials}
               onChange={(e) => setFormMaterials(e.target.value)}
             />
           </div>
 
           <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Notes</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.notes')}</label>
             <textarea
               style={{ ...textareaStyle, minHeight: 60 }}
-              placeholder="Additional notes, issues, observations..."
+              placeholder={t('form.notesPlaceholder')}
               value={formNotes}
               onChange={(e) => setFormNotes(e.target.value)}
             />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-            <button type="button" style={{ ...btnOutline }} onClick={() => { setShowForm(false); resetForm(); }}>Cancel</button>
+            <button type="button" style={{ ...btnOutline }} onClick={() => { setShowForm(false); resetForm(); }}>{t('common:actions.cancel')}</button>
             <button type="submit" style={{ ...btnPrimary }} disabled={formLoading}>
-              {formLoading ? 'Saving...' : editId ? 'Update Report' : 'Create Report'}
+              {formLoading ? t('common:actions.saving') : editId ? t('actions.update') : t('actions.create')}
             </button>
           </div>
         </form>
@@ -367,30 +353,30 @@ export default function DailyReports() {
       {/* Filters */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div style={{ flex: '0 0 200px' }}>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Project</label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.project')}</label>
           <select style={{ ...inputStyle }} value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
-            <option value="">All Projects</option>
+            <option value="">{t('filters.allProjects')}</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
             ))}
           </select>
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>From</label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.from')}</label>
           <input type="date" style={{ ...inputStyle, width: 150 }} value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>To</label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.to')}</label>
           <input type="date" style={{ ...inputStyle, width: 150 }} value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
         </div>
       </div>
 
       {/* Reports List (Cards) */}
       {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : reports.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
-          No daily reports found
+          {t('empty')}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -449,7 +435,7 @@ export default function DailyReports() {
                     {/* Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
-                        {report.project?.name || 'Unknown Project'}
+                        {report.project?.name || t('card.unknownProject')}
                         {report.project?.reference && (
                           <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: 8, fontSize: 13 }}>
                             ({report.project.reference})
@@ -457,7 +443,7 @@ export default function DailyReports() {
                         )}
                       </div>
                       <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {report.workDescription || 'No description'}
+                        {report.workDescription || t('card.noDescription')}
                       </div>
                     </div>
                   </div>
@@ -483,17 +469,17 @@ export default function DailyReports() {
                       {/* Work Description */}
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          Work Description
+                          {t('card.workDescription')}
                         </div>
                         <div style={{ fontSize: 14, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                          {report.workDescription || 'None provided'}
+                          {report.workDescription || t('card.noneProvided')}
                         </div>
                       </div>
 
                       {/* Materials */}
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          Materials Used
+                          {t('card.materials')}
                         </div>
                         {materials.length > 0 ? (
                           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: '#374151', lineHeight: 1.8 }}>
@@ -502,7 +488,7 @@ export default function DailyReports() {
                             ))}
                           </ul>
                         ) : (
-                          <div style={{ fontSize: 14, color: '#9ca3af' }}>None recorded</div>
+                          <div style={{ fontSize: 14, color: '#9ca3af' }}>{t('card.noneRecorded')}</div>
                         )}
                       </div>
                     </div>
@@ -511,10 +497,10 @@ export default function DailyReports() {
                     {(report.weather || report.temperatureCelsius != null) && (
                       <div style={{ marginTop: 16 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          Weather Conditions
+                          {t('card.weather')}
                         </div>
                         <div style={{ fontSize: 14, color: '#374151' }}>
-                          {report.weather || 'Not recorded'}
+                          {report.weather || t('card.notRecorded')}
                           {report.temperatureCelsius != null && ` — ${report.temperatureCelsius}°C`}
                         </div>
                       </div>
@@ -524,7 +510,7 @@ export default function DailyReports() {
                     {report.notes && (
                       <div style={{ marginTop: 16 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          Notes
+                          {t('card.notes')}
                         </div>
                         <div style={{ fontSize: 14, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                           {report.notes}
@@ -535,17 +521,17 @@ export default function DailyReports() {
                     {/* Actions */}
                     <div style={{ display: 'flex', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
                       <button style={{ ...btnOutline, fontSize: 13 }} onClick={() => handleEdit(report)}>
-                        Edit
+                        {t('common:actions.edit')}
                       </button>
                       <button
                         style={{ ...btnDanger, fontSize: 13, background: 'none', color: '#dc2626', border: '1px solid #fecaca' }}
                         onClick={() => handleDelete(report.id)}
                       >
-                        Delete
+                        {t('common:actions.delete')}
                       </button>
                       <div style={{ flex: 1 }} />
                       <span style={{ fontSize: 12, color: '#9ca3af', alignSelf: 'center' }}>
-                        Created {formatDateShort(report.createdAt)}
+                        {t('card.created', { date: formatDate(report.createdAt) })}
                       </span>
                     </div>
                   </div>

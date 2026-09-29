@@ -1,0 +1,59 @@
+{
+  "title": "Paramètres",
+  "subtitle": "Informations de l'entreprise, valeurs par défaut et abonnement",
+  "state": {
+    "loading": "Chargement des paramètres…"
+  },
+  "company": {
+    "title": "Informations de l'entreprise",
+    "name": "Nom de l'entreprise",
+    "legalName": "Raison sociale",
+    "address": "Adresse",
+    "vatNumber": "N° TVA"
+  },
+  "defaults": {
+    "title": "Valeurs par défaut",
+    "vatRate": "Taux de TVA par défaut (%)",
+    "vatRateHint": "Enregistré en points de base (810 = 8.10 %)",
+    "retentionRate": "Taux de retenue de garantie par défaut (%)",
+    "retentionRateHint": "Enregistré en points de base (500 = 5.00 %)",
+    "marginFactor": "Coefficient de marge par défaut",
+    "marginFactorHint": "Enregistré en nombre entier (120 = 1.20×)",
+    "geolocation": "Activer la géolocalisation",
+    "geolocationHint": "Enregistrer les coordonnées GPS pour le timbrage et les rapports journaliers",
+    "save": "Enregistrer les valeurs par défaut"
+  },
+  "subscription": {
+    "title": "Abonnement",
+    "seatUsage_one": "Utilisation des licences : {{used}} sur {{count}} licence utilisée",
+    "seatUsage_other": "Utilisation des licences : {{used}} sur {{count}} licences utilisées",
+    "periodStart": "Début de la période en cours",
+    "periodEnd": "Fin de la période en cours",
+    "trialEnd": "Fin de l'essai",
+    "cancel": "Résilier l'abonnement",
+    "cancelHint": "Cette action est irréversible",
+    "confirmCancel": "Voulez-vous vraiment résilier votre abonnement ? Cette action est irréversible."
+  },
+  "billing": {
+    "title": "Historique de facturation",
+    "empty": "Aucun événement de facturation",
+    "table": {
+      "date": "Date",
+      "type": "Type",
+      "amount": "Montant",
+      "stripeEventId": "ID d'événement Stripe"
+    },
+    "iban": "IBAN ou QR-IBAN pour les QR-factures",
+    "ibanHint": "Compte suisse ou liechtensteinois imprimé sur la section paiement des factures.",
+    "paymentTerms": "Délai de paiement (jours)",
+    "paymentTermsHint": "Échéance par défaut des factures."
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les paramètres.",
+    "saveFailed": "Impossible d'enregistrer les paramètres.",
+    "saved": "Paramètres enregistrés.",
+    "invalidRates": "Veuillez saisir des nombres valides pour tous les taux.",
+    "subscriptionCancelled": "Abonnement résilié.",
+    "cancelFailed": "Impossible de résilier l'abonnement."
+  }
+}

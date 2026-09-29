@@ -55,10 +55,3 @@ export interface WeeklySummary {
   totalOvertime: number;
   totalTravel: number;
 }
-
-export const ROLE_LABELS: Record<Role, string> = {
-  ADMIN: 'Administrator',
-  PROJECT_MANAGER: 'Project Manager',
-  TEAM_LEADER: 'Team Leader',
-  WORKER: 'Worker',
-};

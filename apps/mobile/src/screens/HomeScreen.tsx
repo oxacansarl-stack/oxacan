@@ -14,6 +14,7 @@ import { useField } from '../state/FieldContext';
 import DailyReportModal from '../components/DailyReportModal';
 import { todayISO } from '../lib/field-actions';
 import { hhmm, hours } from '../lib/format';
+import { t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
@@ -73,55 +74,55 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Header */}
-        <Text style={styles.title}>OXACAN Mobile</Text>
-        <Text style={styles.subtitle}>Hello, {profile.firstName}</Text>
+        <Text style={styles.title}>{t('app.name')}</Text>
+        <Text style={styles.subtitle}>{t('home.greeting', { name: profile.firstName })}</Text>
 
-        {loadError ? <Text style={styles.warning}>Offline — showing last known data. {loadError}</Text> : null}
+        {loadError ? <Text style={styles.warning}>{t('state.offlineStale')} {loadError}</Text> : null}
 
         {/* Clock status */}
         <View style={styles.statusCard}>
-          <Text style={styles.statusLabel}>Clock Status</Text>
+          <Text style={styles.statusLabel}>{t('home.clockStatus')}</Text>
           <Text style={styles.statusValue}>
             {loading && entries.length === 0
-              ? 'Loading...'
+              ? t('state.loading')
               : clock.state === 'in'
-                ? `Clocked in since ${hhmm(clock.since)}`
-                : 'Not clocked in'}
+                ? t('home.clockedInSince', { time: hhmm(clock.since) })
+                : t('home.notClockedIn')}
           </Text>
           {clock.state === 'in' ? <Text style={styles.statusDetail}>{clock.projectName}</Text> : null}
-          {clock.pending ? <Text style={styles.pending}>Waiting to sync</Text> : null}
+          {clock.pending ? <Text style={styles.pending}>{t('state.waitingToSync')}</Text> : null}
         </View>
 
         {/* Quick actions */}
-        <Text style={styles.sectionHeader}>Quick Actions</Text>
+        <Text style={styles.sectionHeader}>{t('home.quickActions')}</Text>
         <View style={styles.actionsRow}>
           <TouchableOpacity
             style={[styles.actionButton, clock.state === 'in' && styles.actionButtonOut, busy && styles.disabled]}
             onPress={onClockPress}
             disabled={busy}
           >
-            <Text style={styles.actionIcon}>{clock.state === 'in' ? 'O' : 'I'}</Text>
-            <Text style={styles.actionText}>{clock.state === 'in' ? 'Clock Out' : 'Clock In'}</Text>
+            <Text style={styles.actionIcon}>{clock.state === 'in' ? 'D' : 'A'}</Text>
+            <Text style={styles.actionText}>{clock.state === 'in' ? t('clock.out') : t('clock.in')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={() => setReportOpen(true)}>
             <Text style={styles.actionIcon}>R</Text>
-            <Text style={styles.actionText}>New Report</Text>
+            <Text style={styles.actionText}>{t('home.newReport')}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Summary */}
-        <Text style={styles.sectionHeader}>Summary</Text>
+        <Text style={styles.sectionHeader}>{t('home.summary')}</Text>
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Hours today</Text>
+            <Text style={styles.summaryLabel}>{t('home.hoursToday')}</Text>
             <Text style={styles.summaryValue}>{hours(todayMinutes)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Hours this week</Text>
-            <Text style={styles.summaryValue}>{weekMinutes === null ? '--' : hours(weekMinutes)}</Text>
+            <Text style={styles.summaryLabel}>{t('home.hoursWeek')}</Text>
+            <Text style={styles.summaryValue}>{weekMinutes === null ? t('state.notAvailable') : hours(weekMinutes)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Waiting to sync</Text>
+            <Text style={styles.summaryLabel}>{t('home.waitingToSync')}</Text>
             <Text style={styles.summaryValue}>{queue.length}</Text>
           </View>
         </View>

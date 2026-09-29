@@ -10,7 +10,8 @@ import {
 import { useAuth, useProfile } from '../auth/AuthContext';
 import { useField } from '../state/FieldContext';
 import { api } from '../lib/api';
-import { ROLE_LABELS, type Company } from '../lib/types';
+import type { Company } from '../lib/types';
+import { roleLabel, t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
@@ -29,8 +30,8 @@ export default function ProfileScreen() {
   const initials = `${profile.firstName?.[0] ?? ''}${profile.lastName?.[0] ?? ''}`.toUpperCase() || '?';
 
   const rows = [
-    { label: 'Email', value: profile.email },
-    { label: 'Company', value: company ?? '--' },
+    { label: t('profile.email'), value: profile.email },
+    { label: t('profile.company'), value: company ?? t('state.notAvailable') },
   ];
 
   function onSignOut() {
@@ -39,11 +40,11 @@ export default function ProfileScreen() {
       return;
     }
     Alert.alert(
-      'Unsynced actions',
-      `${queue.length} action${queue.length > 1 ? 's are' : ' is'} waiting to sync. They stay on this device and will be sent the next time you sign in.`,
+      t('profile.unsyncedTitle'),
+      t('profile.unsyncedMessage', { count: queue.length }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Log Out', style: 'destructive', onPress: () => void signOut() },
+        { text: t('actions.cancel'), style: 'cancel' },
+        { text: t('auth.signOut'), style: 'destructive', onPress: () => void signOut() },
       ],
     );
   }
@@ -51,7 +52,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        <Text style={styles.title}>Profile</Text>
+        <Text style={styles.title}>{t('profile.title')}</Text>
 
         {/* User info */}
         <View style={styles.profileCard}>
@@ -62,12 +63,12 @@ export default function ProfileScreen() {
             <Text style={styles.userName}>
               {profile.firstName} {profile.lastName}
             </Text>
-            <Text style={styles.userRole}>{ROLE_LABELS[profile.role] ?? profile.role}</Text>
+            <Text style={styles.userRole}>{roleLabel(profile.role)}</Text>
           </View>
         </View>
 
         {/* Account */}
-        <Text style={styles.sectionHeader}>Account</Text>
+        <Text style={styles.sectionHeader}>{t('profile.account')}</Text>
         <View style={styles.settingsCard}>
           {rows.map((item, idx) => (
             <View
@@ -84,11 +85,11 @@ export default function ProfileScreen() {
 
         {/* Logout */}
         <TouchableOpacity style={styles.logoutButton} activeOpacity={0.7} onPress={onSignOut}>
-          <Text style={styles.logoutText}>Log Out</Text>
+          <Text style={styles.logoutText}>{t('auth.signOut')}</Text>
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>OXACAN Mobile v0.1.0</Text>
+        <Text style={styles.version}>{t('app.version', { version: '0.1.0' })}</Text>
       </View>
     </SafeAreaView>
   );

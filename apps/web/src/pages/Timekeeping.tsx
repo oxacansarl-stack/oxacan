@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { apiGet, apiPost, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, ApiError } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { enumLabel, formatDate, formatMinutes, formatMoney, statusLabel } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -113,36 +116,10 @@ const btnOutline: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function formatMinutes(mins: number): string {
-  if (mins == null || isNaN(mins)) return '0:00';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${h}:${m.toString().padStart(2, '0')}`;
-}
-
 /** 'HH:MM:SS' → 'HH:MM' */
 function formatTime(time: string | null): string {
   if (!time) return '-';
   return time.slice(0, 5);
-}
-
-/** 'YYYY-MM-DD' → local date without timezone shift */
-function formatDate(date: string): string {
-  if (!date) return '-';
-  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('fr-CH');
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (err.status === 403) return `Not allowed: ${err.message}`;
-    return err.message || fallback;
-  }
-  return err instanceof Error && err.message ? err.message : fallback;
-}
-
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,6 +127,7 @@ function statusLabel(s: string): string {
 /* ------------------------------------------------------------------ */
 
 export default function Timekeeping() {
+  const { t } = useTranslation('timekeeping');
   // Clock in/out state
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
@@ -221,7 +199,7 @@ export default function Timekeeping() {
         if (!me) setActiveEntry((list ?? []).find((e) => !e.endTime && e.status === 'draft') || null);
         setError('');
       })
-      .catch((err) => setError(errorMessage(err, 'Failed to load entries')))
+      .catch((err) => setError(errorMessage(err, t('messages.loadFailed'))))
       .finally(() => setLoading(false));
     loadMyDrafts();
   }, [statusFilter, dateFrom, dateTo, me, loadMyDrafts]);
@@ -272,7 +250,7 @@ export default function Timekeeping() {
       setClockNotes('');
       loadEntries();
     } catch (err) {
-      setError(errorMessage(err, 'Clock in failed'));
+      setError(errorMessage(err, t('messages.clockInFailed')));
     } finally {
       setActionLoading(false);
     }
@@ -286,7 +264,7 @@ export default function Timekeeping() {
       setActiveEntry(null);
       loadEntries();
     } catch (err) {
-      setError(errorMessage(err, 'Clock out failed'));
+      setError(errorMessage(err, t('messages.clockOutFailed')));
     } finally {
       setActionLoading(false);
     }
@@ -296,7 +274,7 @@ export default function Timekeeping() {
     // Only the caller's own, clocked-out drafts can be submitted.
     const entryIds = myDrafts.filter((e) => e.endTime).map((e) => e.id);
     if (me && entryIds.length === 0) {
-      setError('No completed draft entries to submit.');
+      setError(t('messages.noDraftsToSubmit'));
       return;
     }
     setActionLoading(true);
@@ -305,7 +283,7 @@ export default function Timekeeping() {
       await apiPost('/timekeeping/submit', me ? { entryIds } : {});
       loadEntries();
     } catch (err) {
-      setError(errorMessage(err, 'Submit failed'));
+      setError(errorMessage(err, t('messages.submitFailed')));
     } finally {
       setActionLoading(false);
     }
@@ -321,8 +299,8 @@ export default function Timekeeping() {
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 403
-          ? 'You can only approve time entries of your own team members (not your own).'
-          : errorMessage(err, 'Approve failed'),
+          ? t('messages.approveForbidden')
+          : errorMessage(err, t('messages.approveFailed')),
       );
     } finally {
       setActionLoading(false);
@@ -331,7 +309,7 @@ export default function Timekeeping() {
 
   const handleReject = async () => {
     if (selected.size === 0) return;
-    const reason = prompt('Rejection reason:');
+    const reason = prompt(t('prompts.rejectionReason'));
     if (!reason) return;
     setActionLoading(true);
     try {
@@ -341,8 +319,8 @@ export default function Timekeeping() {
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 403
-          ? 'You can only reject time entries of your own team members (not your own).'
-          : errorMessage(err, 'Reject failed'),
+          ? t('messages.rejectForbidden')
+          : errorMessage(err, t('messages.rejectFailed')),
       );
     } finally {
       setActionLoading(false);
@@ -374,8 +352,8 @@ export default function Timekeeping() {
     <div>
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>Timekeeping</h1>
-        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>Clock in/out and manage time entries</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
+        <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>{t('subtitle')}</p>
       </div>
 
       {error && (
@@ -398,63 +376,63 @@ export default function Timekeeping() {
           /* Currently clocked in */
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div>
-              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>Currently clocked in</div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>{t('clock.currentlyClockedIn')}</div>
               <div style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>
-                {activeEntry.project?.name || 'Project'}
+                {activeEntry.project?.name || t('clock.projectFallback')}
                 <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: 8, fontSize: 13 }}>
-                  ({statusLabel(activeEntry.category)})
+                  ({enumLabel('timeCategory', activeEntry.category)})
                 </span>
               </div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                Started at {formatTime(activeEntry.startTime)}
+                {t('clock.startedAt', { time: formatTime(activeEntry.startTime) })}
               </div>
             </div>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 36, fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
                 {String(elapsedH).padStart(2, '0')}:{String(elapsedM).padStart(2, '0')}:{String(elapsedS).padStart(2, '0')}
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>Elapsed time</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>{t('clock.elapsed')}</div>
             </div>
             <button
               style={{ ...btnDanger, padding: '12px 32px', fontSize: 16, fontWeight: 700 }}
               onClick={handleClockOut}
               disabled={actionLoading}
             >
-              Clock Out
+              {t('clock.clockOut')}
             </button>
           </div>
         ) : (
           /* Clock in form */
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Project</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('clock.project')}</label>
               <select
                 style={{ ...inputStyle }}
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
               >
-                <option value="">Select a project...</option>
+                <option value="">{t('clock.selectProject')}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
                 ))}
               </select>
             </div>
             <div style={{ flex: '0 0 150px' }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Category</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('clock.category')}</label>
               <select
                 style={{ ...inputStyle }}
                 value={category}
                 onChange={(e) => setCategory(e.target.value as 'normal' | 'travel')}
               >
-                <option value="normal">Normal</option>
-                <option value="travel">Travel</option>
+                <option value="normal">{enumLabel('timeCategory', 'normal')}</option>
+                <option value="travel">{enumLabel('timeCategory', 'travel')}</option>
               </select>
             </div>
             <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Notes (optional)</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('clock.notes')}</label>
               <input
                 style={{ ...inputStyle }}
-                placeholder="What are you working on?"
+                placeholder={t('clock.notesPlaceholder')}
                 value={clockNotes}
                 onChange={(e) => setClockNotes(e.target.value)}
               />
@@ -464,7 +442,7 @@ export default function Timekeeping() {
               onClick={handleClockIn}
               disabled={!selectedProjectId || actionLoading}
             >
-              Clock In
+              {t('clock.clockIn')}
             </button>
           </div>
         )}
@@ -474,14 +452,14 @@ export default function Timekeeping() {
       {summary && (
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
           {[
-            { label: 'Normal Hours', value: formatMinutes(summary.totalNormal), color: '#2563eb' },
-            { label: 'Overtime', value: formatMinutes(summary.totalOvertime), color: '#f59e0b' },
-            { label: 'Travel', value: formatMinutes(summary.totalTravel), color: '#8b5cf6' },
-            { label: 'Break', value: formatMinutes(totalBreakMinutes), color: '#6b7280' },
-            { label: 'Total Cost', value: `CHF ${formatCHF(summary.totalCost)}`, color: '#16a34a' },
-          ].filter((item) => showCost || item.label !== 'Total Cost').map((item) => (
+            { key: 'normal', label: t('summary.normal'), value: formatMinutes(summary.totalNormal), color: '#2563eb' },
+            { key: 'overtime', label: t('summary.overtime'), value: formatMinutes(summary.totalOvertime), color: '#f59e0b' },
+            { key: 'travel', label: t('summary.travel'), value: formatMinutes(summary.totalTravel), color: '#8b5cf6' },
+            { key: 'break', label: t('summary.break'), value: formatMinutes(totalBreakMinutes), color: '#6b7280' },
+            { key: 'totalCost', label: t('summary.totalCost'), value: formatMoney(summary.totalCost), color: '#16a34a' },
+          ].filter((item) => showCost || item.key !== 'totalCost').map((item) => (
             <div
-              key={item.label}
+              key={item.key}
               style={{
                 flex: '1 1 140px',
                 background: '#fff',
@@ -517,7 +495,7 @@ export default function Timekeeping() {
                 cursor: 'pointer',
               }}
             >
-              {statusLabel(tab)}
+              {tab === 'all' ? t('common:actions.all') : statusLabel('timeEntry', tab)}
             </button>
           ))}
         </div>
@@ -528,15 +506,15 @@ export default function Timekeeping() {
             style={{ ...inputStyle, width: 150 }}
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            placeholder="From"
+            placeholder={t('filters.from')}
           />
-          <span style={{ color: '#9ca3af', fontSize: 13 }}>to</span>
+          <span style={{ color: '#9ca3af', fontSize: 13 }}>{t('filters.to')}</span>
           <input
             type="date"
             style={{ ...inputStyle, width: 150 }}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            placeholder="To"
+            placeholder={t('filters.to')}
           />
         </div>
       </div>
@@ -544,15 +522,15 @@ export default function Timekeeping() {
       {/* Bulk Actions */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <button style={{ ...btnPrimary }} onClick={handleSubmitDrafts} disabled={actionLoading}>
-          Submit All Drafts
+          {t('actions.submitDrafts')}
         </button>
         {canApprove && selected.size > 0 && (
           <>
             <button style={{ ...btnSuccess }} onClick={handleApprove} disabled={actionLoading}>
-              Approve ({selected.size})
+              {t('actions.approve', { count: selected.size })}
             </button>
             <button style={{ ...btnDanger }} onClick={handleReject} disabled={actionLoading}>
-              Reject ({selected.size})
+              {t('actions.reject', { count: selected.size })}
             </button>
           </>
         )}
@@ -560,7 +538,7 @@ export default function Timekeeping() {
 
       {/* Table */}
       {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -572,11 +550,11 @@ export default function Timekeeping() {
                   onChange={toggleSelectAll}
                 />
               </th>
-              {['Date', 'Project', 'Start', 'End', 'Break', 'Normal', 'Overtime', 'Travel', 'Status', ...(showCost ? ['Cost'] : [])].map((h) => (
+              {['date', 'project', 'start', 'end', 'break', 'normal', 'overtime', 'travel', 'status', ...(showCost ? ['cost'] : [])].map((h) => (
                 <th
                   key={h}
                   style={{
-                    textAlign: h === 'Cost' ? 'right' : 'left',
+                    textAlign: h === 'cost' ? 'right' : 'left',
                     padding: '10px 12px',
                     borderBottom: '2px solid #e5e7eb',
                     fontSize: 12,
@@ -586,7 +564,7 @@ export default function Timekeeping() {
                     letterSpacing: 0.5,
                   }}
                 >
-                  {h}
+                  {t(`table.${h}`)}
                 </th>
               ))}
             </tr>
@@ -595,7 +573,7 @@ export default function Timekeeping() {
             {entries.length === 0 && (
               <tr>
                 <td colSpan={11} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>
-                  No time entries found
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -626,7 +604,7 @@ export default function Timekeeping() {
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
                     {entry.endTime ? formatTime(entry.endTime) : (
-                      <span style={{ color: '#16a34a', fontWeight: 500, fontSize: 12 }}>Active</span>
+                      <span style={{ color: '#16a34a', fontWeight: 500, fontSize: 12 }}>{t('table.active')}</span>
                     )}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
@@ -653,17 +631,17 @@ export default function Timekeeping() {
                         color: colors.fg,
                       }}
                     >
-                      {statusLabel(entry.status)}
+                      {statusLabel('timeEntry', entry.status)}
                     </span>
                     {entry.status === 'rejected' && entry.rejectionReason && (
                       <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 4, maxWidth: 260 }}>
-                        Reason: {entry.rejectionReason}
+                        {t('table.reason', { reason: entry.rejectionReason })}
                       </div>
                     )}
                   </td>
                   {showCost && (
                     <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      CHF {formatCHF(entry.costCents ?? 0)}
+                      {formatMoney(entry.costCents ?? 0)}
                     </td>
                   )}
                 </tr>

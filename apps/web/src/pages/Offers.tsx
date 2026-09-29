@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, apiPost, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, ApiError } from '../lib/api';
+import { formatDate, formatMoney, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -80,6 +83,7 @@ const buttonStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export default function Offers() {
+  const { t } = useTranslation('offers');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -150,11 +154,7 @@ export default function Offers() {
   /* --- Render --- */
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
-  }
-
-  function statusLabel(s: string) {
-    return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
   }
 
   return (
@@ -169,10 +169,10 @@ export default function Offers() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Offers
+          {t('title')}
         </h1>
         <button style={buttonStyle} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ New Offer'}
+          {showForm ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -197,7 +197,7 @@ export default function Offers() {
           >
             <input
               style={inputStyle}
-              placeholder="Project Name *"
+              placeholder={t('form.projectName')}
               value={form.projectName}
               onChange={(e) => setForm({ ...form, projectName: e.target.value })}
             />
@@ -206,7 +206,7 @@ export default function Offers() {
               value={form.clientId}
               onChange={(e) => setForm({ ...form, clientId: e.target.value })}
             >
-              <option value="">Select Client *</option>
+              <option value="">{t('form.selectClient')}</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -215,13 +215,13 @@ export default function Offers() {
             </select>
             <input
               style={inputStyle}
-              placeholder="Reference"
+              placeholder={t('form.reference')}
               value={form.reference}
               onChange={(e) => setForm({ ...form, reference: e.target.value })}
             />
             <div>
               <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                Margin Factor (e.g. 120 = 1.20x)
+                {t('form.marginFactor')}
               </label>
               <input
                 style={inputStyle}
@@ -232,7 +232,7 @@ export default function Offers() {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                VAT Rate bps (e.g. 810 = 8.10%)
+                {t('form.vatRate')}
               </label>
               <input
                 style={inputStyle}
@@ -249,11 +249,11 @@ export default function Offers() {
             }
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : 'Create Offer'}
+            {createMutation.isPending ? t('actions.creating') : t('actions.create')}
           </button>
           {createMutation.error && (
             <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-              {createMutation.error.message}
+              {errorMessage(createMutation.error)}
             </span>
           )}
         </div>
@@ -263,7 +263,7 @@ export default function Offers() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <input
           style={{ ...inputStyle, maxWidth: 300 }}
-          placeholder="Search by project name..."
+          placeholder={t('filters.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -272,10 +272,10 @@ export default function Offers() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
-          <option value="">All Statuses</option>
+          <option value="">{t('filters.allStatuses')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {statusLabel(s)}
+              {statusLabel('offer', s)}
             </option>
           ))}
         </select>
@@ -283,14 +283,21 @@ export default function Offers() {
 
       {/* --- Table --- */}
       {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : error ? (
-        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
+        <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Project Name', 'Client', 'Status', 'Total TTC (CHF)', 'Version', 'Created'].map(
+              {[
+                t('table.projectName'),
+                t('table.client'),
+                t('table.status'),
+                t('table.totalTtc'),
+                t('table.version'),
+                t('table.createdAt'),
+              ].map(
                 (h) => (
                   <th
                     key={h}
@@ -318,7 +325,7 @@ export default function Offers() {
                   colSpan={6}
                   style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                 >
-                  No offers found
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -355,17 +362,17 @@ export default function Offers() {
                         color: colors.fg,
                       }}
                     >
-                      {statusLabel(offer.status)}
+                      {statusLabel('offer', offer.status)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontVariantNumeric: 'tabular-nums' }}>
-                    CHF {formatCHF(offer.totalTtcCents ?? 0)}
+                    {formatMoney(offer.totalTtcCents ?? 0)}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
                     v{offer.version ?? 1}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', color: '#6b7280', fontSize: 13 }}>
-                    {offer.createdAt ? new Date(offer.createdAt).toLocaleDateString('fr-CH') : '-'}
+                    {formatDate(offer.createdAt)}
                   </td>
                 </tr>
               );

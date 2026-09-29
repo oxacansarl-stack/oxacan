@@ -1,0 +1,33 @@
+{
+  "title": "Export des données",
+  "intro": "Conformément à la loi fédérale sur la protection des données (LPD/nLPD) et au Règlement général sur la protection des données de l'UE (RGPD), vous avez le droit de demander un export complet de toutes les données personnelles et de l'entreprise enregistrées dans OXACAN.",
+  "included": "Données incluses dans l'export",
+  "sections": {
+    "company": { "label": "Profil de l'entreprise", "description": "Nom de l'entreprise, adresse, informations d'enregistrement" },
+    "users": { "label": "Utilisateurs et rôles", "description": "Tous les comptes utilisateurs et leurs rôles attribués" },
+    "clients": { "label": "Clients (CRM)", "description": "Contacts clients, étapes du pipeline, historique des interactions" },
+    "offers": { "label": "Offres et contrats", "description": "Documents d'offre, contrats acceptés, avenants" },
+    "projects": { "label": "Projets et tâches", "description": "Données des projets actifs et archivés, lots" },
+    "timekeeping": { "label": "Timbrage", "description": "Timbrages d'arrivée et de départ, heures soumises et validées" },
+    "expenses": { "label": "Dépenses", "description": "Notes de frais, justificatifs, statut de validation" },
+    "invoices": { "label": "Factures et paiements", "description": "Historique des factures, paiements, notes de crédit" },
+    "accounting": { "label": "Écritures comptables", "description": "Écritures comptables, plan comptable, exports fiduciaires" },
+    "dailyReports": { "label": "Rapports journaliers", "description": "Rapports de chantier, météo, effectifs, problèmes" },
+    "notifications": { "label": "Notifications", "description": "Toutes les notifications système et leur statut de lecture" }
+  },
+  "actions": {
+    "exportAll": "Exporter toutes mes données",
+    "preparing": "Préparation de l'export…",
+    "downloadJson": "Télécharger en JSON",
+    "dismiss": "Masquer"
+  },
+  "preview": {
+    "title": "Aperçu de l'export",
+    "truncated": "… (tronqué — téléchargez le fichier complet ci-dessus)"
+  },
+  "privacy": "<strong>Protection des données :</strong> vos données exportées sont générées à la demande et ne sont pas conservées sur nos serveurs après le téléchargement. Le fichier JSON contient toutes les données associées au compte de votre entreprise. Pour demander la suppression de vos données, veuillez contacter votre administrateur système ou écrire à <email>{{email}}</email>.",
+  "messages": {
+    "loginRequired": "Vous devez être connecté pour exporter les données.",
+    "failed": "L'export des données a échoué. Veuillez réessayer."
+  }
+}

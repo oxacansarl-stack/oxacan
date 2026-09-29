@@ -1,0 +1,148 @@
+{
+  "title": "Comptabilité",
+  "subtitle": "Plan comptable, écritures, grand livre et export fiduciaire",
+  "tabs": {
+    "accounts": "Plan comptable",
+    "entries": "Écritures comptables",
+    "ledger": "Grand livre",
+    "export": "Export fiduciaire"
+  },
+  "accounts": {
+    "newAccount": "+ Nouveau compte",
+    "seedDefaults": "Charger le plan comptable PME suisse",
+    "createTitle": "Nouveau compte",
+    "accountNumber": "N° de compte *",
+    "name": "Libellé *",
+    "namePlaceholder": "Libellé du compte",
+    "type": "Type",
+    "parentAccount": "Compte parent",
+    "noParent": "Aucun (niveau supérieur)",
+    "create": "Créer le compte",
+    "loading": "Chargement des comptes…",
+    "empty": "Aucun compte. Chargez le plan comptable PME suisse pour commencer.",
+    "systemAccount": "Compte système",
+    "table": {
+      "number": "N°",
+      "name": "Libellé",
+      "type": "Type",
+      "system": "Système",
+      "active": "Actif"
+    }
+  },
+  "entries": {
+    "newEntry": "+ Nouvelle écriture",
+    "from": "Du",
+    "to": "Au",
+    "status": "Statut",
+    "all": "Toutes",
+    "posted": "Comptabilisées",
+    "unposted": "Non comptabilisées",
+    "apply": "Appliquer",
+    "createTitle": "Nouvelle écriture comptable",
+    "date": "Date *",
+    "description": "Libellé *",
+    "descriptionPlaceholder": "Libellé de l'écriture",
+    "referenceType": "Type de pièce",
+    "referenceTypePlaceholder": "p. ex. facture, quittance",
+    "lines": "Lignes",
+    "account": "Compte",
+    "debitChf": "Débit (CHF)",
+    "creditChf": "Crédit (CHF)",
+    "total": "Total",
+    "selectAccount": "Sélectionnez un compte",
+    "addLine": "+ Ajouter une ligne",
+    "enterAmounts": "Saisissez les montants",
+    "balanced": "Équilibrée",
+    "unbalanced": "Non équilibrée : écart de {{amount}}",
+    "create": "Créer l'écriture",
+    "post": "Comptabiliser",
+    "loading": "Chargement des écritures…",
+    "empty": "Aucune écriture comptable trouvée",
+    "table": {
+      "entryNumber": "N° écriture",
+      "date": "Date",
+      "description": "Libellé",
+      "reference": "Pièce",
+      "posted": "Comptabilisée",
+      "total": "Total",
+      "actions": "Actions"
+    }
+  },
+  "ledger": {
+    "account": "Compte *",
+    "selectAccount": "Sélectionnez un compte",
+    "from": "Du",
+    "to": "Au",
+    "load": "Afficher le grand livre",
+    "loading": "Chargement du grand livre…",
+    "selectPrompt": "Sélectionnez un compte pour afficher son grand livre",
+    "empty": "Aucun mouvement sur ce compte",
+    "closingBalance": "Solde final",
+    "table": {
+      "date": "Date",
+      "entryNumber": "N° écriture",
+      "description": "Libellé",
+      "debit": "Débit",
+      "credit": "Crédit",
+      "balance": "Solde"
+    }
+  },
+  "export": {
+    "title": "Export fiduciaire",
+    "help": "Générez les fichiers CSV pour votre fiduciaire. Choisissez une période puis cliquez sur « Générer l'export ».",
+    "from": "Du *",
+    "to": "Au *",
+    "generate": "Générer l'export",
+    "generating": "Génération…",
+    "noData": "Aucune donnée à exporter",
+    "downloadCsv": "Télécharger le CSV",
+    "truncated": "Affichage des 100 premières lignes sur {{count}}. Téléchargez le CSV pour obtenir toutes les données.",
+    "datasets": {
+      "journal": "Journal",
+      "balance": "Balance de vérification",
+      "clients": "Clients"
+    },
+    "columns": {
+      "EntryNumber": "N° écriture",
+      "Date": "Date",
+      "Description": "Libellé",
+      "AccountNumber": "N° de compte",
+      "Debit": "Débit",
+      "Credit": "Crédit",
+      "AccountName": "Libellé du compte",
+      "Type": "Type",
+      "TotalDebit": "Total débit",
+      "TotalCredit": "Total crédit",
+      "Balance": "Solde",
+      "ClientName": "Client",
+      "InvoiceNumber": "N° facture",
+      "AmountHT": "Montant HT",
+      "VAT": "TVA",
+      "AmountTTC": "Montant TTC",
+      "Status": "Statut"
+    }
+  },
+  "confirm": {
+    "seedDefaults": "Charger le plan comptable PME suisse par défaut ? Les comptes standard manquants seront créés.",
+    "postEntry": "Comptabiliser cette écriture ? Cette action est irréversible."
+  },
+  "validation": {
+    "accountRequired": "Le n° de compte et le libellé sont obligatoires.",
+    "entryRequired": "La date et le libellé sont obligatoires.",
+    "unbalanced": "Le total au débit doit égaler le total au crédit et être supérieur à zéro.",
+    "lineAccount": "Chaque ligne doit avoir un compte.",
+    "positiveAmounts": "Les montants doivent être positifs.",
+    "exportDates": "Les deux dates sont obligatoires pour l'export.",
+    "exportRange": "La date de début ne peut pas être postérieure à la date de fin."
+  },
+  "errors": {
+    "loadAccounts": "Impossible de charger les comptes.",
+    "loadEntries": "Impossible de charger les écritures.",
+    "loadLedger": "Impossible de charger le grand livre.",
+    "createAccount": "Impossible de créer le compte.",
+    "seedDefaults": "Impossible de charger le plan comptable par défaut.",
+    "createEntry": "Impossible de créer l'écriture.",
+    "postEntry": "Impossible de comptabiliser l'écriture.",
+    "generateExport": "Impossible de générer l'export."
+  }
+}

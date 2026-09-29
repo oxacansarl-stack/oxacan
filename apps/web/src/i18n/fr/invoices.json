@@ -1,0 +1,126 @@
+{
+  "title": "Factures",
+  "subtitle": "Gérez les factures, les situations et les plus-values",
+  "tabs": {
+    "invoices": "Factures",
+    "plusValues": "Plus-values"
+  },
+  "actions": {
+    "newInvoice": "+ Nouvelle facture",
+    "newPlusValue": "+ Nouvelle plus-value",
+    "backToList": "← Retour aux factures",
+    "createInvoice": "Créer la facture",
+    "addLine": "+ Ajouter une ligne",
+    "recordPayment": "Saisir un paiement",
+    "savePayment": "Enregistrer le paiement",
+    "markSent": "Marquer comme envoyée",
+    "markOverdue": "Marquer en retard",
+    "creditNote": "Note de crédit",
+    "downloadPdf": "Télécharger le PDF"
+  },
+  "filters": {
+    "allStatuses": "Toutes",
+    "allTypes": "Tous les types",
+    "searchPlaceholder": "Rechercher un n° de facture…"
+  },
+  "table": {
+    "invoiceNumber": "N° facture",
+    "type": "Type",
+    "client": "Client",
+    "project": "Projet",
+    "issueDate": "Date d'émission",
+    "totalTtc": "Total TTC",
+    "status": "Statut",
+    "paid": "Payé",
+    "description": "Description",
+    "unit": "Unité",
+    "quantity": "Qté",
+    "unitPrice": "Prix unitaire",
+    "unitPriceChf": "Prix unitaire (CHF)",
+    "total": "Total",
+    "cumulativeQuantity": "Qté cumulée",
+    "previousQuantity": "Qté précédente",
+    "periodQuantity": "Qté de la période",
+    "date": "Date",
+    "method": "Mode de paiement",
+    "reference": "Référence",
+    "amount": "Montant",
+    "actions": "Actions"
+  },
+  "form": {
+    "createTitle": "Nouvelle facture",
+    "project": "Projet *",
+    "selectProject": "Sélectionnez un projet",
+    "client": "Client *",
+    "selectClient": "Sélectionnez un client",
+    "type": "Type",
+    "vatRate": "Taux de TVA (%)",
+    "lines": "Lignes de la facture",
+    "descriptionPlaceholder": "Description",
+    "notes": "Remarques"
+  },
+  "summary": {
+    "subtotalHt": "Sous-total HT",
+    "vat": "TVA ({{rate}} %)",
+    "retention": "Retenue de garantie (-5 %)",
+    "totalTtc": "Total TTC"
+  },
+  "detail": {
+    "fallbackTitle": "Facture",
+    "issueDate": "Date d'émission",
+    "dueDate": "Échéance",
+    "notes": "Remarques",
+    "lines": "Lignes",
+    "noLines": "Aucune ligne",
+    "payments": "Paiements",
+    "paidAmount": "Payé : {{amount}}",
+    "paidPercent": "{{percent}} %"
+  },
+  "payment": {
+    "title": "Saisir un paiement",
+    "amount": "Montant (CHF)",
+    "date": "Date",
+    "method": "Mode de paiement",
+    "reference": "Référence"
+  },
+  "plusValues": {
+    "createTitle": "Nouvelle plus-value",
+    "project": "Projet *",
+    "selectProject": "Sélectionnez un projet",
+    "description": "Description *",
+    "amount": "Montant (CHF) *",
+    "submit": "Soumettre",
+    "approve": "Approuver",
+    "reject": "Refuser"
+  },
+  "state": {
+    "loadingInvoices": "Chargement des factures…",
+    "noInvoices": "Aucune facture trouvée",
+    "loadingPlusValues": "Chargement des plus-values…",
+    "noPlusValues": "Aucune plus-value trouvée"
+  },
+  "confirm": {
+    "creditNote": "Établir une note de crédit pour cette facture ? Cette action est irréversible."
+  },
+  "validation": {
+    "projectRequired": "Le projet est obligatoire.",
+    "clientRequired": "Le client est obligatoire.",
+    "lineRequired": "Ajoutez au moins une ligne.",
+    "linesIncomplete": "Chaque ligne doit avoir une description et un prix.",
+    "negativeQuantity": "Les quantités ne peuvent pas être négatives.",
+    "vatRange": "Le taux de TVA doit être compris entre 0 et 100 %.",
+    "paymentAmount": "Le montant du paiement doit être supérieur à zéro.",
+    "paymentDate": "La date du paiement est obligatoire."
+  },
+  "errors": {
+    "loadInvoices": "Impossible de charger les factures.",
+    "loadPlusValues": "Impossible de charger les plus-values.",
+    "loadInvoice": "Impossible de charger la facture.",
+    "createInvoice": "Impossible de créer la facture.",
+    "updateStatus": "Impossible de modifier le statut.",
+    "createCreditNote": "Impossible d'établir la note de crédit.",
+    "recordPayment": "Impossible d'enregistrer le paiement.",
+    "createPlusValue": "Impossible de créer la plus-value.",
+    "downloadPdf": "Impossible de générer le PDF."
+  }
+}

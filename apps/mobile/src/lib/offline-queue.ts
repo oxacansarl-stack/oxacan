@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api, ApiError } from './api';
+import { api, ApiError, errorMessage } from './api';
+import { t } from '../i18n';
 
 /**
  * Offline queue for field actions (clock-in, clock-out, daily report).
@@ -155,7 +156,7 @@ async function replay(userId: string): Promise<SyncResult> {
     if (!next) {
       // Anything left depends on a clock-in that no longer exists: drop it.
       for (const orphan of mine) {
-        failed.push({ action: orphan, message: 'The clock-in it belonged to could not be synced.' });
+        failed.push({ action: orphan, message: t('offline.orphan') });
         await removeAction(orphan.id);
       }
       break;
@@ -170,7 +171,7 @@ async function replay(userId: string): Promise<SyncResult> {
       synced++;
     } catch (err) {
       if (err instanceof ApiError && err.isClientError && err.status !== 401) {
-        failed.push({ action: next, message: err.message });
+        failed.push({ action: next, message: errorMessage(err) });
         await removeAction(next.id);
         continue;
       }

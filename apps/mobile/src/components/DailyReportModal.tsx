@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useField } from '../state/FieldContext';
 import { todayISO } from '../lib/field-actions';
+import { formatDate } from '../lib/format';
+import { t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
@@ -55,14 +57,14 @@ export default function DailyReportModal({ visible, defaultProjectId, onClose }:
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Daily Report</Text>
+            <Text style={styles.title}>{t('report.title')}</Text>
             <TouchableOpacity onPress={onClose} disabled={busy}>
-              <Text style={styles.cancel}>Cancel</Text>
+              <Text style={styles.cancel}>{t('actions.cancel')}</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.subtitle}>{todayISO()}</Text>
+          <Text style={styles.subtitle}>{formatDate(todayISO())}</Text>
 
-          <Text style={styles.sectionHeader}>Project</Text>
+          <Text style={styles.sectionHeader}>{t('report.project')}</Text>
           <View style={styles.projectRow}>
             {projects.map((p) => (
               <TouchableOpacity
@@ -75,35 +77,35 @@ export default function DailyReportModal({ visible, defaultProjectId, onClose }:
                 </Text>
               </TouchableOpacity>
             ))}
-            {projects.length === 0 ? <Text style={styles.muted}>No projects available.</Text> : null}
+            {projects.length === 0 ? <Text style={styles.muted}>{t('report.noProjects')}</Text> : null}
           </View>
 
-          <Text style={styles.sectionHeader}>Work done</Text>
+          <Text style={styles.sectionHeader}>{t('report.workDone')}</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={workDescription}
             onChangeText={setWorkDescription}
             multiline
-            placeholder="What was done today"
+            placeholder={t('report.workDonePlaceholder')}
             placeholderTextColor="#94a3b8"
           />
 
-          <Text style={styles.sectionHeader}>Weather</Text>
+          <Text style={styles.sectionHeader}>{t('report.weather')}</Text>
           <TextInput
             style={styles.input}
             value={weather}
             onChangeText={setWeather}
-            placeholder="e.g. Sunny"
+            placeholder={t('report.weatherPlaceholder')}
             placeholderTextColor="#94a3b8"
           />
 
-          <Text style={styles.sectionHeader}>Notes</Text>
+          <Text style={styles.sectionHeader}>{t('report.notes')}</Text>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={notes}
             onChangeText={setNotes}
             multiline
-            placeholder="Optional"
+            placeholder={t('report.optional')}
             placeholderTextColor="#94a3b8"
           />
 
@@ -113,7 +115,7 @@ export default function DailyReportModal({ visible, defaultProjectId, onClose }:
             disabled={!canSubmit}
             activeOpacity={0.8}
           >
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Send Report</Text>}
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('report.send')}</Text>}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>

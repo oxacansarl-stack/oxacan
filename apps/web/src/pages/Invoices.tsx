@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiList, apiPost, apiPatch, ApiError } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiList, apiPost, apiPatch, apiDownload } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -84,13 +87,8 @@ const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
   final_invoice: { bg: '#dcfce7', fg: '#166534' },
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  invoice: 'Invoice',
-  situation: 'Situation',
-  acompte: 'Acompte',
-  credit_note: 'Credit Note',
-  final_invoice: 'Final Invoice',
-};
+/** DB CHECK invoice.type */
+const INVOICE_TYPES = ['invoice', 'situation', 'acompte', 'credit_note', 'final_invoice'] as const;
 
 const STATUS_COLORS: Record<string, { bg: string; fg: string; strike?: boolean }> = {
   draft: { bg: '#f3f4f6', fg: '#4b5563' },
@@ -117,12 +115,6 @@ const PAYMENT_METHODS = ['bank_transfer', 'card', 'cash', 'other'] as const;
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-// Exact to the centime: stored totals are already 5-ct rounded by the API; unit prices and HT are not.
-const displayCHF = (cents: number): string => `CHF ${(cents / 100).toFixed(2)}`;
-
-const errorMessage = (e: unknown, fallback: string): string =>
-  e instanceof ApiError || e instanceof Error ? e.message || fallback : fallback;
 
 /** "8.10" (percent) → 810 (basis points), as the API expects. */
 const percentToBps = (value: string): number => Math.round(parseFloat(value) * 100);
@@ -196,6 +188,7 @@ const tdStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export default function Invoices() {
+  const { t } = useTranslation('invoices');
   /* --- State --- */
   const [activeSection, setActiveSection] = useState<'invoices' | 'plus-values'>('invoices');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -260,7 +253,7 @@ export default function Invoices() {
       setInvoices(items);
       setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load invoices'));
+      setError(errorMessage(e, t('errors.loadInvoices')));
       setInvoices([]);
     } finally {
       setLoading(false);
@@ -288,7 +281,7 @@ export default function Invoices() {
       const items = await apiGet<PlusValue[]>('/invoices/plus-values?limit=500');
       setPlusValues(Array.isArray(items) ? items : []);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load plus-values'));
+      setError(errorMessage(e, t('errors.loadPlusValues')));
     }
     finally { setPvLoading(false); }
   }, []);
@@ -304,7 +297,7 @@ export default function Invoices() {
       const detail = await apiGet<Invoice>(`/invoices/${inv.id}`);
       setSelectedInvoice(detail);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to load invoice'));
+      setError(errorMessage(e, t('errors.loadInvoice')));
     } finally {
       setDetailLoading(false);
     }
@@ -313,17 +306,17 @@ export default function Invoices() {
   /* --- Create invoice --- */
   const handleCreate = async () => {
     setCreateError('');
-    if (!createForm.projectId) { setCreateError('Project is required'); return; }
-    if (!createForm.clientId) { setCreateError('Client is required'); return; }
-    if (createLines.length === 0) { setCreateError('At least one line is required'); return; }
+    if (!createForm.projectId) { setCreateError(t('validation.projectRequired')); return; }
+    if (!createForm.clientId) { setCreateError(t('validation.clientRequired')); return; }
+    if (createLines.length === 0) { setCreateError(t('validation.lineRequired')); return; }
     const hasEmpty = createLines.some(l => !l.description.trim() || !Number.isInteger(l.unitPriceCents) || l.unitPriceCents <= 0);
-    if (hasEmpty) { setCreateError('All lines must have description and price'); return; }
+    if (hasEmpty) { setCreateError(t('validation.linesIncomplete')); return; }
     if (createLines.some(l => l.quantity < 0 || (l.cumulativeQuantity ?? 0) < 0 || (l.previousQuantity ?? 0) < 0)) {
-      setCreateError('Quantities cannot be negative'); return;
+      setCreateError(t('validation.negativeQuantity')); return;
     }
     const vatRateBps = percentToBps(createForm.vatRate);
     if (!Number.isFinite(vatRateBps) || vatRateBps < 0 || vatRateBps > 10000) {
-      setCreateError('VAT rate must be between 0 and 100 %'); return;
+      setCreateError(t('validation.vatRange')); return;
     }
 
     try {
@@ -349,7 +342,7 @@ export default function Invoices() {
       setCreateLines([{ description: '', unit: 'u', quantity: 1, unitPriceCents: 0 }]);
       fetchInvoices();
     } catch (e) {
-      setCreateError(errorMessage(e, 'Failed to create invoice'));
+      setCreateError(errorMessage(e, t('errors.createInvoice')));
     }
   };
 
@@ -374,19 +367,28 @@ export default function Invoices() {
         openDetail(selectedInvoice);
       }
     } catch (e) {
-      setError(errorMessage(e, 'Failed to update status'));
+      setError(errorMessage(e, t('errors.updateStatus')));
+    }
+  };
+
+  /* --- PDF --- */
+  const downloadPdf = async (id: string) => {
+    try {
+      await apiDownload(`/invoices/${id}/pdf`);
+    } catch (e) {
+      setError(errorMessage(e, t('errors.downloadPdf')));
     }
   };
 
   /* --- Credit note --- */
   const createCreditNote = async (id: string) => {
-    if (!confirm('Create a credit note for this invoice? This cannot be undone.')) return;
+    if (!confirm(t('confirm.creditNote'))) return;
     try {
       await apiPost(`/invoices/${id}/credit-note`);
       fetchInvoices();
       setSelectedInvoice(null);
     } catch (e) {
-      setError(errorMessage(e, 'Failed to create credit note'));
+      setError(errorMessage(e, t('errors.createCreditNote')));
     }
   };
 
@@ -394,9 +396,9 @@ export default function Invoices() {
   const recordPayment = async () => {
     if (!selectedInvoice) return;
     if (!Number.isInteger(paymentForm.amountCents) || paymentForm.amountCents <= 0) {
-      setError('Payment amount must be greater than zero'); return;
+      setError(t('validation.paymentAmount')); return;
     }
-    if (!paymentForm.paymentDate) { setError('Payment date is required'); return; }
+    if (!paymentForm.paymentDate) { setError(t('validation.paymentDate')); return; }
     try {
       await apiPost(`/invoices/${selectedInvoice.id}/payments`, {
         amountCents: paymentForm.amountCents,
@@ -409,7 +411,7 @@ export default function Invoices() {
       openDetail(selectedInvoice);
       fetchInvoices();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to record payment'));
+      setError(errorMessage(e, t('errors.recordPayment')));
     }
   };
 
@@ -426,7 +428,7 @@ export default function Invoices() {
       setPvForm({ projectId: '', description: '', amountCents: 0 });
       fetchPlusValues();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to create plus-value'));
+      setError(errorMessage(e, t('errors.createPlusValue')));
     }
   };
 
@@ -436,7 +438,7 @@ export default function Invoices() {
       await apiPatch(`/invoices/plus-values/${id}/status`, { status });
       fetchPlusValues();
     } catch (e) {
-      setError(errorMessage(e, 'Failed to update status'));
+      setError(errorMessage(e, t('errors.updateStatus')));
     }
   };
 
@@ -481,64 +483,64 @@ export default function Invoices() {
       <div>
         {/* Back button */}
         <button onClick={() => setSelectedInvoice(null)} style={{ ...btnOutline, marginBottom: 16 }}>
-          &larr; Back to Invoices
+          {t('actions.backToList')}
         </button>
 
-        {detailLoading && <p style={{ color: '#6b7280' }}>Loading...</p>}
+        {detailLoading && <p style={{ color: '#6b7280' }}>{t('common:state.loading')}</p>}
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-              {inv.invoiceNumber || 'Invoice'}
+              {inv.invoiceNumber || t('detail.fallbackTitle')}
             </h1>
             <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
               {inv.client?.name} &middot; {inv.project?.name || inv.projectId}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Badge color={TYPE_COLORS[inv.type]}>{TYPE_LABELS[inv.type] || inv.type}</Badge>
+            <Badge color={TYPE_COLORS[inv.type]}>{enumLabel('invoiceType', inv.type)}</Badge>
             <Badge color={STATUS_COLORS[inv.status]} strike={STATUS_COLORS[inv.status]?.strike}>
-              {inv.status.replace('_', ' ')}
+              {statusLabel('invoice', inv.status)}
             </Badge>
           </div>
         </div>
 
         {/* Summary cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-          <SummaryCard label="Subtotal HT" value={displayCHF(inv.subtotalHtCents)} />
-          <SummaryCard label={`VAT (${(inv.vatRate / 100).toFixed(2)}%)`} value={displayCHF(inv.vatAmountCents)} />
-          <SummaryCard label="Retention (-5%)" value={`- ${displayCHF(inv.retentionAmountCents ?? 0)}`} />
+          <SummaryCard label={t('summary.subtotalHt')} value={formatMoney(inv.subtotalHtCents)} />
+          <SummaryCard label={t('summary.vat', { rate: (inv.vatRate / 100).toFixed(2) })} value={formatMoney(inv.vatAmountCents)} />
+          <SummaryCard label={t('summary.retention')} value={`- ${formatMoney(inv.retentionAmountCents ?? 0)}`} />
           <div style={{
             background: '#f0f9ff', borderRadius: 8, padding: 16, border: '1px solid #bae6fd',
           }}>
-            <div style={{ fontSize: 12, color: '#0369a1', fontWeight: 600, textTransform: 'uppercase' }}>Total TTC</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827', marginTop: 4 }}>{displayCHF(inv.totalTtcCents)}</div>
+            <div style={{ fontSize: 12, color: '#0369a1', fontWeight: 600, textTransform: 'uppercase' }}>{t('summary.totalTtc')}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827', marginTop: 4 }}>{formatMoney(inv.totalTtcCents)}</div>
           </div>
         </div>
 
         {/* Info row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-          <InfoField label="Issue Date" value={inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '-'} />
-          <InfoField label="Due Date" value={inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : '-'} />
-          <InfoField label="Notes" value={inv.notes || '-'} />
+          <InfoField label={t('detail.issueDate')} value={formatDate(inv.issueDate)} />
+          <InfoField label={t('detail.dueDate')} value={formatDate(inv.dueDate)} />
+          <InfoField label={t('detail.notes')} value={inv.notes || '-'} />
         </div>
 
         {/* Lines table */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Lines</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('detail.lines')}</h3>
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 24 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: '#f9fafb' }}>
               <tr>
-                <th style={thStyle}>Description</th>
-                <th style={thStyle}>Unit</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Qty</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Unit Price</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+                <th style={thStyle}>{t('table.description')}</th>
+                <th style={thStyle}>{t('table.unit')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.quantity')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.unitPrice')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.total')}</th>
                 {inv.type === 'situation' && (
                   <>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Cumul. Qty</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Prev. Qty</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.previousQuantity')}</th>
                   </>
                 )}
               </tr>
@@ -549,9 +551,9 @@ export default function Invoices() {
                   <td style={tdStyle}>{line.description}</td>
                   <td style={tdStyle}>{line.unit}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{line.quantity}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{displayCHF(line.unitPriceCents)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMoney(line.unitPriceCents)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                    {displayCHF(line.totalPriceCents ?? line.quantity * line.unitPriceCents)}
+                    {formatMoney(line.totalPriceCents ?? line.quantity * line.unitPriceCents)}
                   </td>
                   {inv.type === 'situation' && (
                     <>
@@ -562,18 +564,18 @@ export default function Invoices() {
                 </tr>
               ))}
               {(!inv.lines || inv.lines.length === 0) && (
-                <tr><td style={{ ...tdStyle, textAlign: 'center', color: '#9ca3af' }} colSpan={5}>No lines</td></tr>
+                <tr><td style={{ ...tdStyle, textAlign: 'center', color: '#9ca3af' }} colSpan={5}>{t('detail.noLines')}</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         {/* Payment progress */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Payments</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('detail.payments')}</h3>
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
-            <span>Paid: {displayCHF(inv.amountPaidCents ?? 0)}</span>
-            <span>{paidPct}%</span>
+            <span>{t('detail.paidAmount', { amount: formatMoney(inv.amountPaidCents ?? 0) })}</span>
+            <span>{t('detail.paidPercent', { percent: paidPct })}</span>
           </div>
           <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
             <div style={{
@@ -592,20 +594,20 @@ export default function Invoices() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ background: '#f9fafb' }}>
                 <tr>
-                  <th style={thStyle}>Date</th>
-                  <th style={thStyle}>Method</th>
-                  <th style={thStyle}>Reference</th>
-                  <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
+                  <th style={thStyle}>{t('table.date')}</th>
+                  <th style={thStyle}>{t('table.method')}</th>
+                  <th style={thStyle}>{t('table.reference')}</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.amount')}</th>
                 </tr>
               </thead>
               <tbody>
                 {inv.payments.map(p => (
                   <tr key={p.id}>
-                    <td style={tdStyle}>{new Date(p.paymentDate).toLocaleDateString()}</td>
-                    <td style={tdStyle}>{p.paymentMethod.replace('_', ' ')}</td>
+                    <td style={tdStyle}>{formatDate(p.paymentDate)}</td>
+                    <td style={tdStyle}>{enumLabel('paymentMethod', p.paymentMethod)}</td>
                     <td style={tdStyle}>{p.reference || '-'}</td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
-                      {displayCHF(p.amountCents)}
+                      {formatMoney(p.amountCents)}
                     </td>
                   </tr>
                 ))}
@@ -617,10 +619,10 @@ export default function Invoices() {
         {/* Record payment form */}
         {showPayment && (
           <div style={{ background: '#f9fafb', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid #e5e7eb' }}>
-            <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Record Payment</h4>
+            <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>{t('payment.title')}</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Amount (CHF)</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.amount')}</label>
                 <input
                   type="number"
                   step="0.05"
@@ -630,7 +632,7 @@ export default function Invoices() {
                 />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Date</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.date')}</label>
                 <input
                   type="date"
                   style={inputStyle}
@@ -639,19 +641,19 @@ export default function Invoices() {
                 />
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Method</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.method')}</label>
                 <select
                   style={inputStyle}
                   value={paymentForm.paymentMethod}
                   onChange={e => setPaymentForm(f => ({ ...f, paymentMethod: e.target.value }))}
                 >
                   {PAYMENT_METHODS.map(m => (
-                    <option key={m} value={m}>{m.replace('_', ' ')}</option>
+                    <option key={m} value={m}>{enumLabel('paymentMethod', m)}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Reference</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.reference')}</label>
                 <input
                   type="text"
                   style={inputStyle}
@@ -661,30 +663,33 @@ export default function Invoices() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button style={btnSuccess} onClick={recordPayment}>Save Payment</button>
-              <button style={btnOutline} onClick={() => setShowPayment(false)}>Cancel</button>
+              <button style={btnSuccess} onClick={recordPayment}>{t('actions.savePayment')}</button>
+              <button style={btnOutline} onClick={() => setShowPayment(false)}>{t('common:actions.cancel')}</button>
             </div>
           </div>
         )}
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          {!showPayment && inv.status !== 'cancelled' && (
-            <button style={btnPrimary} onClick={() => setShowPayment(true)}>Record Payment</button>
+          <button style={btnOutline} onClick={() => downloadPdf(inv.id)}>
+            {t('actions.downloadPdf')}
+          </button>
+          {!showPayment && inv.type !== 'credit_note' && ['sent', 'partially_paid', 'overdue'].includes(inv.status) && (
+            <button style={btnPrimary} onClick={() => setShowPayment(true)}>{t('actions.recordPayment')}</button>
           )}
           {inv.status === 'draft' && (
             <button style={{ ...btnPrimary, background: '#0ea5e9' }} onClick={() => changeStatus(inv.id, 'sent')}>
-              Mark Sent
+              {t('actions.markSent')}
             </button>
           )}
           {(inv.status === 'sent' || inv.status === 'partially_paid') && (
             <button style={{ ...btnPrimary, background: '#f59e0b' }} onClick={() => changeStatus(inv.id, 'overdue')}>
-              Mark Overdue
+              {t('actions.markOverdue')}
             </button>
           )}
-          {(inv.status === 'sent' || inv.status === 'paid') && inv.type !== 'credit_note' && (
+          {!['draft', 'cancelled'].includes(inv.status) && inv.type !== 'credit_note' && (
             <button style={btnDanger} onClick={() => createCreditNote(inv.id)}>
-              Credit Note
+              {t('actions.creditNote')}
             </button>
           )}
         </div>
@@ -701,18 +706,18 @@ export default function Invoices() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>Invoices</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>Manage invoices, situations, and plus-values</p>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {activeSection === 'invoices' && (
             <button style={btnPrimary} onClick={() => setShowCreate(!showCreate)}>
-              {showCreate ? 'Cancel' : '+ New Invoice'}
+              {showCreate ? t('common:actions.cancel') : t('actions.newInvoice')}
             </button>
           )}
           {activeSection === 'plus-values' && (
             <button style={btnPrimary} onClick={() => setShowPvCreate(!showPvCreate)}>
-              {showPvCreate ? 'Cancel' : '+ New Plus-Value'}
+              {showPvCreate ? t('common:actions.cancel') : t('actions.newPlusValue')}
             </button>
           )}
         </div>
@@ -743,7 +748,7 @@ export default function Invoices() {
               marginBottom: -2,
             }}
           >
-            {sec === 'invoices' ? 'Invoices' : 'Plus-Values'}
+            {sec === 'invoices' ? t('tabs.invoices') : t('tabs.plusValues')}
           </button>
         ))}
       </div>
@@ -757,7 +762,7 @@ export default function Invoices() {
           {/* Create form */}
           {showCreate && (
             <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Create Invoice</h3>
+              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('form.createTitle')}</h3>
               {createError && (
                 <div style={{ background: '#fee2e2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
                   {createError}
@@ -766,34 +771,34 @@ export default function Invoices() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Project *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.project')}</label>
                   <select style={inputStyle} value={createForm.projectId} onChange={e => handleProjectChange(e.target.value)}>
-                    <option value="">Select project</option>
+                    <option value="">{t('form.selectProject')}</option>
                     {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Client *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.client')}</label>
                   <select style={inputStyle} value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}>
-                    <option value="">Select client</option>
+                    <option value="">{t('form.selectClient')}</option>
                     {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Type</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.type')}</label>
                   <select
                     style={inputStyle}
                     value={createForm.type}
                     onChange={e => setCreateForm(f => ({ ...f, type: e.target.value as Invoice['type'] }))}
                   >
-                    <option value="invoice">Invoice</option>
-                    <option value="situation">Situation</option>
-                    <option value="acompte">Acompte</option>
-                    <option value="final_invoice">Final Invoice</option>
+                    <option value="invoice">{enumLabel('invoiceType', 'invoice')}</option>
+                    <option value="situation">{enumLabel('invoiceType', 'situation')}</option>
+                    <option value="acompte">{enumLabel('invoiceType', 'acompte')}</option>
+                    <option value="final_invoice">{enumLabel('invoiceType', 'final_invoice')}</option>
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>VAT Rate (%)</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.vatRate')}</label>
                   <input
                     type="number"
                     step="0.01"
@@ -805,21 +810,21 @@ export default function Invoices() {
               </div>
 
               {/* Lines */}
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Invoice Lines</h4>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>{t('form.lines')}</h4>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: '#f3f4f6' }}>
                     <tr>
-                      <th style={thStyle}>Description</th>
-                      <th style={{ ...thStyle, width: 80 }}>Unit</th>
-                      <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>Qty</th>
-                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>Unit Price (CHF)</th>
-                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>Total</th>
+                      <th style={thStyle}>{t('table.description')}</th>
+                      <th style={{ ...thStyle, width: 80 }}>{t('table.unit')}</th>
+                      <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>{t('table.quantity')}</th>
+                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.unitPriceChf')}</th>
+                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.total')}</th>
                       {createForm.type === 'situation' && (
                         <>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>Cumul. Qty</th>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>Prev. Qty</th>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>Period Qty</th>
+                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
+                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.previousQuantity')}</th>
+                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
                         </>
                       )}
                       <th style={{ ...thStyle, width: 40 }}></th>
@@ -833,7 +838,7 @@ export default function Invoices() {
                           <td style={tdStyle}>
                             <input
                               style={{ ...inputStyle, border: 'none', padding: '4px 8px' }}
-                              placeholder="Description"
+                              placeholder={t('form.descriptionPlaceholder')}
                               value={line.description}
                               onChange={e => updateLine(idx, 'description', e.target.value)}
                             />
@@ -863,7 +868,7 @@ export default function Invoices() {
                             />
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
-                            {displayCHF(lineTotal(line))}
+                            {formatMoney(lineTotal(line))}
                           </td>
                           {createForm.type === 'situation' && (
                             <>
@@ -904,7 +909,7 @@ export default function Invoices() {
                   </tbody>
                 </table>
               </div>
-              <button style={btnOutline} onClick={addLine}>+ Add Line</button>
+              <button style={btnOutline} onClick={addLine}>{t('actions.addLine')}</button>
 
               {/* Summary */}
               <div style={{
@@ -917,26 +922,26 @@ export default function Invoices() {
                 marginLeft: 'auto',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>Subtotal HT</span>
-                  <span>{displayCHF(subtotalHt)}</span>
+                  <span style={{ color: '#6b7280' }}>{t('summary.subtotalHt')}</span>
+                  <span>{formatMoney(subtotalHt)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>VAT ({vatRate}%)</span>
-                  <span>{displayCHF(vatAmount)}</span>
+                  <span style={{ color: '#6b7280' }}>{t('summary.vat', { rate: vatRate })}</span>
+                  <span>{formatMoney(vatAmount)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>Retention (-5%)</span>
-                  <span style={{ color: '#dc2626' }}>- {displayCHF(retentionAmount)}</span>
+                  <span style={{ color: '#6b7280' }}>{t('summary.retention')}</span>
+                  <span style={{ color: '#dc2626' }}>- {formatMoney(retentionAmount)}</span>
                 </div>
                 <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>Total TTC</span>
-                  <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{displayCHF(totalTtc)}</span>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{t('summary.totalTtc')}</span>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{formatMoney(totalTtc)}</span>
                 </div>
               </div>
 
               {/* Notes */}
               <div style={{ marginTop: 12 }}>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Notes</label>
+                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.notes')}</label>
                 <textarea
                   style={{ ...inputStyle, minHeight: 60 }}
                   value={createForm.notes}
@@ -945,8 +950,8 @@ export default function Invoices() {
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                <button style={btnPrimary} onClick={handleCreate}>Create Invoice</button>
-                <button style={btnOutline} onClick={() => setShowCreate(false)}>Cancel</button>
+                <button style={btnPrimary} onClick={handleCreate}>{t('actions.createInvoice')}</button>
+                <button style={btnOutline} onClick={() => setShowCreate(false)}>{t('common:actions.cancel')}</button>
               </div>
             </div>
           )}
@@ -970,10 +975,9 @@ export default function Invoices() {
                     cursor: 'pointer',
                     marginRight: 4,
                     marginBottom: 4,
-                    textTransform: 'capitalize',
                   }}
                 >
-                  {s.replace('_', ' ')}
+                  {s === 'all' ? t('filters.allStatuses') : statusLabel('invoice', s)}
                 </button>
               ))}
             </div>
@@ -984,16 +988,16 @@ export default function Invoices() {
               value={typeFilter}
               onChange={e => { setTypeFilter(e.target.value); setPage(1); }}
             >
-              <option value="">All Types</option>
-              {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+              <option value="">{t('filters.allTypes')}</option>
+              {INVOICE_TYPES.map(k => (
+                <option key={k} value={k}>{enumLabel('invoiceType', k)}</option>
               ))}
             </select>
 
             {/* Search */}
             <input
               type="text"
-              placeholder="Search invoice #..."
+              placeholder={t('filters.searchPlaceholder')}
               style={{ ...inputStyle, width: 200 }}
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
@@ -1002,22 +1006,22 @@ export default function Invoices() {
 
           {/* Invoice table */}
           {loading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading invoices...</p>
+            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loadingInvoices')}</p>
           ) : filteredInvoices.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No invoices found</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('state.noInvoices')}</p>
           ) : (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th style={thStyle}>Invoice #</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Client</th>
-                    <th style={thStyle}>Project</th>
-                    <th style={thStyle}>Issue Date</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Total TTC</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Paid</th>
+                    <th style={thStyle}>{t('table.invoiceNumber')}</th>
+                    <th style={thStyle}>{t('table.type')}</th>
+                    <th style={thStyle}>{t('table.client')}</th>
+                    <th style={thStyle}>{t('table.project')}</th>
+                    <th style={thStyle}>{t('table.issueDate')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.totalTtc')}</th>
+                    <th style={thStyle}>{t('table.status')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.paid')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1031,18 +1035,18 @@ export default function Invoices() {
                     >
                       <td style={{ ...tdStyle, fontWeight: 600, color: '#2563eb' }}>{inv.invoiceNumber}</td>
                       <td style={tdStyle}>
-                        <Badge color={TYPE_COLORS[inv.type]}>{TYPE_LABELS[inv.type] || inv.type}</Badge>
+                        <Badge color={TYPE_COLORS[inv.type]}>{enumLabel('invoiceType', inv.type)}</Badge>
                       </td>
                       <td style={tdStyle}>{inv.client?.name || '-'}</td>
                       <td style={tdStyle}>{inv.project?.name || '-'}</td>
-                      <td style={tdStyle}>{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString() : '-'}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{displayCHF(inv.totalTtcCents)}</td>
+                      <td style={tdStyle}>{formatDate(inv.issueDate)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{formatMoney(inv.totalTtcCents)}</td>
                       <td style={tdStyle}>
                         <Badge color={STATUS_COLORS[inv.status]} strike={STATUS_COLORS[inv.status]?.strike}>
-                          {inv.status.replace('_', ' ')}
+                          {statusLabel('invoice', inv.status)}
                         </Badge>
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{displayCHF(inv.amountPaidCents ?? 0)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMoney(inv.amountPaidCents ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1058,17 +1062,17 @@ export default function Invoices() {
                 disabled={page <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
               >
-                Previous
+                {t('common:actions.previous')}
               </button>
               <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                Page {page} of {totalPages}
+                {t('common:state.page', { page, total: totalPages })}
               </span>
               <button
                 style={btnOutline}
                 disabled={page >= totalPages}
                 onClick={() => setPage(p => p + 1)}
               >
-                Next
+                {t('common:actions.next')}
               </button>
             </div>
           )}
@@ -1084,17 +1088,17 @@ export default function Invoices() {
           {/* Create form */}
           {showPvCreate && (
             <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Create Plus-Value</h3>
+              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('plusValues.createTitle')}</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Project *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.project')}</label>
                   <select style={inputStyle} value={pvForm.projectId} onChange={e => setPvForm(f => ({ ...f, projectId: e.target.value }))}>
-                    <option value="">Select project</option>
+                    <option value="">{t('form.selectProject')}</option>
                     {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Description *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('plusValues.description')}</label>
                   <input
                     style={inputStyle}
                     value={pvForm.description}
@@ -1102,7 +1106,7 @@ export default function Invoices() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Amount (CHF) *</label>
+                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('plusValues.amount')}</label>
                   <input
                     type="number"
                     step="0.05"
@@ -1113,26 +1117,26 @@ export default function Invoices() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createPlusValue}>Create</button>
-                <button style={btnOutline} onClick={() => setShowPvCreate(false)}>Cancel</button>
+                <button style={btnPrimary} onClick={createPlusValue}>{t('common:actions.create')}</button>
+                <button style={btnOutline} onClick={() => setShowPvCreate(false)}>{t('common:actions.cancel')}</button>
               </div>
             </div>
           )}
 
           {pvLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>Loading plus-values...</p>
+            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loadingPlusValues')}</p>
           ) : plusValues.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>No plus-values found</p>
+            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('state.noPlusValues')}</p>
           ) : (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ background: '#f9fafb' }}>
                   <tr>
-                    <th style={thStyle}>Project</th>
-                    <th style={thStyle}>Description</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
-                    <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Actions</th>
+                    <th style={thStyle}>{t('table.project')}</th>
+                    <th style={thStyle}>{t('table.description')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.amount')}</th>
+                    <th style={thStyle}>{t('table.status')}</th>
+                    <th style={thStyle}>{t('table.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1140,9 +1144,9 @@ export default function Invoices() {
                     <tr key={pv.id}>
                       <td style={tdStyle}>{pv.project?.name || pv.projectId}</td>
                       <td style={tdStyle}>{pv.description}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{displayCHF(pv.amountCents)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{formatMoney(pv.amountCents)}</td>
                       <td style={tdStyle}>
-                        <Badge color={PV_STATUS_COLORS[pv.status]}>{pv.status}</Badge>
+                        <Badge color={PV_STATUS_COLORS[pv.status]}>{statusLabel('plusValue', pv.status)}</Badge>
                       </td>
                       <td style={tdStyle}>
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -1151,7 +1155,7 @@ export default function Invoices() {
                               style={{ ...btnOutline, padding: '4px 10px', fontSize: 12 }}
                               onClick={() => updatePvStatus(pv.id, 'submitted')}
                             >
-                              Submit
+                              {t('plusValues.submit')}
                             </button>
                           )}
                           {pv.status === 'submitted' && (
@@ -1160,13 +1164,13 @@ export default function Invoices() {
                                 style={{ ...btnSuccess, padding: '4px 10px', fontSize: 12 }}
                                 onClick={() => updatePvStatus(pv.id, 'approved')}
                               >
-                                Approve
+                                {t('plusValues.approve')}
                               </button>
                               <button
                                 style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}
                                 onClick={() => updatePvStatus(pv.id, 'rejected')}
                               >
-                                Reject
+                                {t('plusValues.reject')}
                               </button>
                             </>
                           )}
@@ -1199,7 +1203,6 @@ function Badge({ color, strike, children }: { color: { bg: string; fg: string };
       background: color.bg,
       color: color.fg,
       textDecoration: strike ? 'line-through' : 'none',
-      textTransform: 'capitalize',
     }}>
       {children}
     </span>

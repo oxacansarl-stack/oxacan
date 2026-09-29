@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPatch, apiDelete, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPatch, apiDelete, apiDownload, ApiError } from '../lib/api';
+import { enumLabel, formatAmount, formatMoney, statusLabel } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -141,14 +144,6 @@ const buttonDangerStyle: React.CSSProperties = {
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function variantLabel(v: string): string {
-  return v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 /** CHF text input → integer centimes (null when blank). */
 function chfToCents(chf: string): number | null {
   if (chf.trim() === '') return null;
@@ -174,6 +169,7 @@ interface LinePayload {
 /* ------------------------------------------------------------------ */
 
 export default function OfferDetail() {
+  const { t } = useTranslation('offerDetail');
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -262,6 +258,10 @@ export default function OfferDetail() {
     onSuccess: invalidate,
   });
 
+  const pdfMutation = useMutation({
+    mutationFn: () => apiDownload(`/offers/${id}/pdf`),
+  });
+
   const duplicateMutation = useMutation({
     mutationFn: () => apiPost<Offer>(`/offers/${id}/duplicate`),
     onSuccess: (newOffer) => {
@@ -323,20 +323,20 @@ export default function OfferDetail() {
   const assumptions = offer?.assumptions ?? [];
   // Mirrors the server's submit rule (OffersService.updateStatus): only BASE lines must be priced.
   const hasUnpricedLines = lines.some((l) => l.unitPriceCents == null && l.variantType === 'BASE');
-  const actionError = statusMutation.error || recalcMutation.error || duplicateMutation.error;
+  const actionError = statusMutation.error || recalcMutation.error || duplicateMutation.error || pdfMutation.error;
 
   /* --- Render --- */
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
   }
 
   if (isLoading) {
-    return <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>;
+    return <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>;
   }
 
   if (!offer) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Offer not found</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('notFound')}</div>;
   }
 
   const statusColors = STATUS_COLORS[offer.status] ?? STATUS_COLORS.draft;
@@ -356,7 +356,7 @@ export default function OfferDetail() {
           marginBottom: 16,
         }}
       >
-        &larr; Back to Offers
+        &larr; {t('back')}
       </button>
 
       {/* --- Header --- */}
@@ -375,7 +375,7 @@ export default function OfferDetail() {
           <div style={{ fontSize: 14, color: '#6b7280', display: 'flex', gap: 12, alignItems: 'center' }}>
             <span>{offer.client?.name ?? '-'}</span>
             <span style={{ color: '#d1d5db' }}>|</span>
-            <span>Ref: {offer.reference || '-'}</span>
+            <span>{t('header.reference', { reference: offer.reference || '-' })}</span>
             <span style={{ color: '#d1d5db' }}>|</span>
             <span>v{offer.version ?? 1}</span>
             <span style={{ color: '#d1d5db' }}>|</span>
@@ -390,7 +390,7 @@ export default function OfferDetail() {
                 color: statusColors.fg,
               }}
             >
-              {statusLabel(offer.status)}
+              {statusLabel('offer', offer.status)}
             </span>
           </div>
         </div>
@@ -402,16 +402,23 @@ export default function OfferDetail() {
             onClick={() => recalcMutation.mutate()}
             disabled={recalcMutation.isPending}
           >
-            {recalcMutation.isPending ? 'Calculating...' : 'Recalculate Totals'}
+            {recalcMutation.isPending ? t('actions.recalculating') : t('actions.recalculate')}
           </button>
           <button
             style={buttonSecondaryStyle}
             onClick={() => duplicateMutation.mutate()}
             disabled={duplicateMutation.isPending}
           >
-            {duplicateMutation.isPending ? 'Duplicating...' : 'Duplicate Offer'}
+            {duplicateMutation.isPending ? t('actions.duplicating') : t('actions.duplicate')}
           </button>
-          <div style={{ position: 'relative' }} title={hasUnpricedLines ? 'All lines must be priced before submission' : ''}>
+          <button
+            style={buttonSecondaryStyle}
+            onClick={() => pdfMutation.mutate()}
+            disabled={pdfMutation.isPending}
+          >
+            {pdfMutation.isPending ? t('actions.generatingPdf') : t('actions.downloadPdf')}
+          </button>
+          <div style={{ position: 'relative' }} title={hasUnpricedLines ? t('actions.submitBlocked') : ''}>
             <button
               style={{
                 ...buttonStyle,
@@ -421,7 +428,7 @@ export default function OfferDetail() {
               disabled={hasUnpricedLines}
               onClick={() => statusMutation.mutate('submitted')}
             >
-              Submit Offer
+              {t('actions.submit')}
             </button>
           </div>
           <select
@@ -431,7 +438,7 @@ export default function OfferDetail() {
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
-                {statusLabel(s)}
+                {statusLabel('offer', s)}
               </option>
             ))}
           </select>
@@ -440,7 +447,7 @@ export default function OfferDetail() {
 
       {actionError && (
         <div style={{ color: '#ef4444', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
-          {actionError.message}
+          {errorMessage(actionError)}
         </div>
       )}
 
@@ -453,18 +460,18 @@ export default function OfferDetail() {
           marginBottom: 32,
         }}
       >
-        <SummaryCard label="Total HT" value={`CHF ${formatCHF(offer.totalHtCents ?? 0)}`} />
-        <SummaryCard label="VAT" value={`CHF ${formatCHF(offer.totalVatCents ?? 0)}`} />
-        <SummaryCard label="Total TTC" value={`CHF ${formatCHF(offer.totalTtcCents ?? 0)}`} highlight />
+        <SummaryCard label={t('summary.totalHt')} value={formatMoney(offer.totalHtCents ?? 0)} />
+        <SummaryCard label={t('summary.vat')} value={formatMoney(offer.totalVatCents ?? 0)} />
+        <SummaryCard label={t('summary.totalTtc')} value={formatMoney(offer.totalTtcCents ?? 0)} highlight />
         <SummaryCard
-          label="Margin Factor"
+          label={t('summary.marginFactor')}
           value={`${(offer.marginFactor / 100).toFixed(2)}x`}
-          sub={`stored: ${offer.marginFactor}`}
+          sub={t('summary.stored', { value: offer.marginFactor })}
         />
         <SummaryCard
-          label="VAT Rate"
-          value={`${(offer.vatRate / 100).toFixed(2)}%`}
-          sub={`stored: ${offer.vatRate} bps`}
+          label={t('summary.vatRate')}
+          value={`${(offer.vatRate / 100).toFixed(2)} %`}
+          sub={t('summary.storedBps', { value: offer.vatRate })}
         />
       </div>
 
@@ -479,7 +486,7 @@ export default function OfferDetail() {
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-            Lines ({lines.length})
+            {t('lines.title', { count: lines.length })}
           </h2>
           <button
             style={buttonStyle}
@@ -489,7 +496,7 @@ export default function OfferDetail() {
               if (!showLineForm) resetLineForm();
             }}
           >
-            {showLineForm ? 'Cancel' : '+ Add Line'}
+            {showLineForm ? t('common:actions.cancel') : t('lines.add')}
           </button>
         </div>
 
@@ -505,7 +512,7 @@ export default function OfferDetail() {
             }}
           >
             <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
-              {editingLineId ? 'Edit Line' : 'New Line'}
+              {editingLineId ? t('lines.editTitle') : t('lines.newTitle')}
             </div>
             <div
               style={{
@@ -517,20 +524,20 @@ export default function OfferDetail() {
             >
               <input
                 style={inputStyle}
-                placeholder="Description *"
+                placeholder={t('lines.form.description')}
                 value={lineForm.description}
                 onChange={(e) => setLineForm({ ...lineForm, description: e.target.value })}
               />
               <input
                 style={inputStyle}
-                placeholder="Unit (pce, m2, ml...)"
+                placeholder={t('lines.form.unit')}
                 value={lineForm.unit}
                 onChange={(e) => setLineForm({ ...lineForm, unit: e.target.value })}
               />
               <input
                 style={inputStyle}
                 type="number"
-                placeholder="Quantity"
+                placeholder={t('lines.form.quantity')}
                 value={lineForm.quantity}
                 onChange={(e) => setLineForm({ ...lineForm, quantity: Number(e.target.value) })}
               />
@@ -539,7 +546,7 @@ export default function OfferDetail() {
                 type="number"
                 step="0.05"
                 min="0"
-                placeholder="Unit Price (CHF)"
+                placeholder={t('lines.form.unitPrice')}
                 value={lineForm.unitPriceChf}
                 onChange={(e) => setLineForm({ ...lineForm, unitPriceChf: e.target.value })}
               />
@@ -551,7 +558,7 @@ export default function OfferDetail() {
                 <option value="">-</option>
                 {PRICING_STRATEGIES.map((s) => (
                   <option key={s} value={s}>
-                    {s.replace(/_/g, ' ')}
+                    {enumLabel('pricingStrategy', s)}
                   </option>
                 ))}
               </select>
@@ -562,7 +569,7 @@ export default function OfferDetail() {
               >
                 {VARIANT_TYPES.map((v) => (
                   <option key={v} value={v}>
-                    {variantLabel(v)}
+                    {enumLabel('variantType', v)}
                   </option>
                 ))}
               </select>
@@ -578,10 +585,10 @@ export default function OfferDetail() {
                 }
               >
                 {addLineMutation.isPending || updateLineMutation.isPending
-                  ? 'Saving...'
+                  ? t('common:actions.saving')
                   : editingLineId
-                    ? 'Update Line'
-                    : 'Add Line'}
+                    ? t('lines.submitUpdate')
+                    : t('lines.submitAdd')}
               </button>
               {editingLineId && (
                 <button
@@ -591,13 +598,13 @@ export default function OfferDetail() {
                     resetLineForm();
                   }}
                 >
-                  Cancel Edit
+                  {t('lines.cancelEdit')}
                 </button>
               )}
             </div>
             {(addLineMutation.error || updateLineMutation.error) && (
               <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                {(addLineMutation.error || updateLineMutation.error)?.message}
+                {errorMessage(addLineMutation.error || updateLineMutation.error)}
               </span>
             )}
           </div>
@@ -608,15 +615,15 @@ export default function OfferDetail() {
           <thead>
             <tr>
               {[
-                'Pos',
-                'Description',
-                'Unit',
-                'Qty',
-                'Unit Price (CHF)',
-                'Total (CHF)',
-                'Pricing',
-                'Variant',
-                'Actions',
+                t('lines.table.position'),
+                t('lines.table.description'),
+                t('lines.table.unit'),
+                t('lines.table.quantity'),
+                t('lines.table.unitPrice'),
+                t('lines.table.total'),
+                t('lines.table.pricing'),
+                t('lines.table.variant'),
+                t('lines.table.actions'),
               ].map((h) => (
                 <th
                   key={h}
@@ -643,7 +650,7 @@ export default function OfferDetail() {
                   colSpan={9}
                   style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                 >
-                  No lines yet
+                  {t('lines.empty')}
                 </td>
               </tr>
             )}
@@ -668,7 +675,7 @@ export default function OfferDetail() {
                   </td>
                   <td style={{ ...cellStyle, fontVariantNumeric: 'tabular-nums' }}>
                     {line.unitPriceCents != null ? (
-                      formatCHF(line.unitPriceCents)
+                      formatAmount(line.unitPriceCents)
                     ) : (
                       <span
                         style={{
@@ -680,15 +687,15 @@ export default function OfferDetail() {
                           fontWeight: 500,
                         }}
                       >
-                        Prix a completer
+                        {t('lines.priceToComplete')}
                       </span>
                     )}
                   </td>
                   <td style={{ ...cellStyle, fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>
-                    {formatCHF(line.totalPriceCents ?? 0)}
+                    {formatAmount(line.totalPriceCents ?? 0)}
                   </td>
                   <td style={{ ...cellStyle, fontSize: 12, color: '#6b7280' }}>
-                    {line.pricingStrategy?.replace(/_/g, ' ') ?? '-'}
+                    {line.pricingStrategy ? enumLabel('pricingStrategy', line.pricingStrategy) : '-'}
                   </td>
                   <td style={cellStyle}>
                     <span
@@ -702,7 +709,7 @@ export default function OfferDetail() {
                         color: variantColors.fg,
                       }}
                     >
-                      {line.variantType}
+                      {enumLabel('variantType', line.variantType)}
                     </span>
                   </td>
                   <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
@@ -717,7 +724,7 @@ export default function OfferDetail() {
                       }}
                       onClick={() => startEditLine(line)}
                     >
-                      Edit
+                      {t('common:actions.edit')}
                     </button>
                     <button
                       style={{
@@ -729,10 +736,10 @@ export default function OfferDetail() {
                         padding: '2px 6px',
                       }}
                       onClick={() => {
-                        if (confirm('Delete this line?')) deleteLineMutation.mutate(line.id);
+                        if (confirm(t('lines.confirmDelete'))) deleteLineMutation.mutate(line.id);
                       }}
                     >
-                      Delete
+                      {t('common:actions.delete')}
                     </button>
                   </td>
                 </tr>
@@ -753,13 +760,13 @@ export default function OfferDetail() {
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-            Assumptions ({assumptions.length})
+            {t('assumptions.title', { count: assumptions.length })}
           </h2>
           <button
             style={buttonStyle}
             onClick={() => setShowAssumptionForm(!showAssumptionForm)}
           >
-            {showAssumptionForm ? 'Cancel' : '+ Add Assumption'}
+            {showAssumptionForm ? t('common:actions.cancel') : t('assumptions.add')}
           </button>
         </div>
 
@@ -789,15 +796,15 @@ export default function OfferDetail() {
                   setAssumptionForm({ ...assumptionForm, type: e.target.value })
                 }
               >
-                {ASSUMPTION_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {variantLabel(t)}
+                {ASSUMPTION_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {enumLabel('assumptionType', type)}
                   </option>
                 ))}
               </select>
               <input
                 style={inputStyle}
-                placeholder="Description *"
+                placeholder={t('assumptions.form.description')}
                 value={assumptionForm.description}
                 onChange={(e) =>
                   setAssumptionForm({ ...assumptionForm, description: e.target.value })
@@ -807,7 +814,7 @@ export default function OfferDetail() {
                 style={inputStyle}
                 type="number"
                 step="0.05"
-                placeholder="Impact (CHF)"
+                placeholder={t('assumptions.form.impact')}
                 value={assumptionForm.impactChf}
                 onChange={(e) =>
                   setAssumptionForm({
@@ -824,11 +831,11 @@ export default function OfferDetail() {
               }
               disabled={addAssumptionMutation.isPending}
             >
-              {addAssumptionMutation.isPending ? 'Adding...' : 'Add Assumption'}
+              {addAssumptionMutation.isPending ? t('assumptions.adding') : t('assumptions.submit')}
             </button>
             {addAssumptionMutation.error && (
               <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                {addAssumptionMutation.error.message}
+                {errorMessage(addAssumptionMutation.error)}
               </span>
             )}
           </div>
@@ -836,12 +843,17 @@ export default function OfferDetail() {
 
         {/* Assumptions list */}
         {assumptions.length === 0 ? (
-          <div style={{ color: '#9ca3af', fontSize: 14 }}>No assumptions</div>
+          <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('assumptions.empty')}</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Type', 'Description', 'Impact (CHF)', 'Status'].map((h) => (
+                {[
+                  t('assumptions.table.type'),
+                  t('assumptions.table.description'),
+                  t('assumptions.table.impact'),
+                  t('assumptions.table.status'),
+                ].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -875,7 +887,7 @@ export default function OfferDetail() {
                         color: '#3730a3',
                       }}
                     >
-                      {a.type}
+                      {enumLabel('assumptionType', a.type)}
                     </span>
                   </td>
                   <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
@@ -889,7 +901,7 @@ export default function OfferDetail() {
                       fontSize: 14,
                     }}
                   >
-                    CHF {formatCHF(a.impactAmountCents ?? 0)}
+                    {formatMoney(a.impactAmountCents ?? 0)}
                   </td>
                   <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
                     <span
@@ -903,7 +915,7 @@ export default function OfferDetail() {
                         color: a.status === 'confirmed' ? '#166534' : '#92400e',
                       }}
                     >
-                      {a.status ?? 'pending'}
+                      {statusLabel('assumption', a.status ?? 'open')}
                     </span>
                   </td>
                 </tr>

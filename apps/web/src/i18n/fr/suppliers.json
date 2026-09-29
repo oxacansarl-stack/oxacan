@@ -1,0 +1,54 @@
+{
+  "title": "Fournisseurs",
+  "count_one": "{{count}} fournisseur",
+  "count_other": "{{count}} fournisseurs",
+  "actions": {
+    "new": "+ Nouveau fournisseur",
+    "create": "Créer le fournisseur",
+    "creating": "Création…",
+    "dismiss": "Masquer"
+  },
+  "search": {
+    "placeholder": "Rechercher par nom, contact, e-mail…"
+  },
+  "form": {
+    "title": "Nouveau fournisseur",
+    "name": "Nom",
+    "namePlaceholder": "Raison sociale",
+    "contactPerson": "Personne de contact",
+    "contactPersonPlaceholder": "Nom complet",
+    "email": "E-mail",
+    "emailPlaceholder": "e-mail@exemple.ch",
+    "phone": "Téléphone",
+    "phonePlaceholder": "+41 …",
+    "paymentTermsDays": "Délai de paiement (jours)",
+    "address": "Adresse",
+    "addressPlaceholder": "Rue, NPA, localité"
+  },
+  "table": {
+    "name": "Nom",
+    "contactPerson": "Personne de contact",
+    "email": "E-mail",
+    "phone": "Téléphone",
+    "paymentTerms": "Délai de paiement",
+    "actions": "Actions",
+    "days_one": "{{count}} jour",
+    "days_other": "{{count}} jours"
+  },
+  "delete": {
+    "question": "Supprimer ?"
+  },
+  "state": {
+    "loading": "Chargement des fournisseurs…"
+  },
+  "empty": {
+    "search": "Aucun fournisseur ne correspond à « {{search}} »",
+    "none": "Aucun fournisseur pour l'instant. Cliquez sur « + Nouveau fournisseur » pour en ajouter un."
+  },
+  "messages": {
+    "loadFailed": "Impossible de charger les fournisseurs",
+    "createFailed": "Impossible de créer le fournisseur",
+    "updateFailed": "Impossible de modifier le fournisseur",
+    "deleteFailed": "Impossible de supprimer le fournisseur"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "title": "Ressources humaines",
+  "tabs": {
+    "teams": "Équipes",
+    "employees": "Collaborateurs"
+  },
+  "active": "Actif",
+  "inactive": "Inactif",
+  "teams": {
+    "title": "Équipes",
+    "searchPlaceholder": "Rechercher une équipe…",
+    "new": "+ Nouvelle équipe",
+    "name": "Nom de l'équipe",
+    "nameRequired": "Nom de l'équipe *",
+    "namePlaceholder": "p. ex. Gros œuvre équipe A",
+    "leader": "Chef d'équipe",
+    "noLeader": "Aucun chef d'équipe",
+    "leaderLabel": "Chef d'équipe : {{name}}",
+    "create": "Créer l'équipe",
+    "creating": "Création…",
+    "loading": "Chargement des équipes…",
+    "empty": "Aucune équipe trouvée. Créez votre première équipe ci-dessus.",
+    "memberCount_one": "{{count}} membre",
+    "memberCount_other": "{{count}} membres",
+    "loadingDetail": "Chargement de l'équipe…",
+    "detailFailed": "Impossible de charger le détail de l'équipe.",
+    "delete": "Supprimer l'équipe",
+    "members": "Membres ({{count}})",
+    "noMembers": "Aucun membre pour l'instant. Ajoutez-en un ci-dessous.",
+    "removeMember": "Retirer le membre",
+    "selectEmployee": "Sélectionnez un collaborateur à ajouter…",
+    "adding": "Ajout…",
+    "confirmDelete": "Voulez-vous vraiment supprimer cette équipe ? Cette action est irréversible."
+  },
+  "employees": {
+    "title": "Collaborateurs",
+    "searchPlaceholder": "Rechercher par nom ou e-mail…",
+    "allRoles": "Tous les rôles",
+    "loading": "Chargement des collaborateurs…",
+    "empty": "Aucun collaborateur trouvé",
+    "perHour": "/h",
+    "table": {
+      "name": "Nom",
+      "email": "E-mail",
+      "role": "Rôle",
+      "hourlyRate": "Taux horaire (CHF)",
+      "cctCode": "Code CCT",
+      "status": "Statut",
+      "actions": "Actions"
+    }
+  },
+  "messages": {
+    "loadTeamsFailed": "Impossible de charger les équipes.",
+    "loadEmployeesFailed": "Impossible de charger les collaborateurs.",
+    "createTeamFailed": "Impossible de créer l'équipe.",
+    "updateTeamFailed": "Impossible de modifier l'équipe.",
+    "deleteTeamFailed": "Impossible de supprimer l'équipe.",
+    "addMemberFailed": "Impossible d'ajouter le membre.",
+    "removeMemberFailed": "Impossible de retirer le membre.",
+    "invalidHourlyRate": "Le taux horaire doit être un montant positif en CHF.",
+    "adminOnly": "Seul un administrateur peut modifier les rôles, les taux horaires et le statut des comptes.",
+    "updateEmployeeFailed": "Impossible de modifier le collaborateur."
+  }
+}

@@ -50,6 +50,13 @@ export class Company {
   @Column({ type: 'text', nullable: true })
   logoUrl: string | null;
 
+  /** Creditor account printed on QR-bills (IBAN or QR-IBAN, no spaces). */
+  @Column({ type: 'text', nullable: true })
+  iban: string | null;
+
+  @Column({ type: 'integer', default: 30 })
+  defaultPaymentTermsDays: number;
+
   @Column({ type: 'integer', default: 810 })
   defaultVatRate: number;
 

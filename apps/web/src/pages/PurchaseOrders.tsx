@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { formatAmount, formatDate, formatMoney, statusLabel } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -124,6 +127,7 @@ function parseCents(chfStr: string): number {
 /* ------------------------------------------------------------------ */
 
 export default function PurchaseOrders() {
+  const { t } = useTranslation('purchaseOrders');
   /* ---------- state ---------- */
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -160,11 +164,11 @@ export default function PurchaseOrders() {
       const list = await apiGet<PurchaseOrder[]>(`/purchase-orders?page=1${statusParam}`);
       setPos(list ?? []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load purchase orders');
+      setError(errorMessage(err, t('messages.loadFailed')));
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, [activeTab, t]);
 
   const fetchDropdowns = useCallback(async () => {
     try {
@@ -190,9 +194,9 @@ export default function PurchaseOrders() {
       });
       setDeliveryInputs(inputs);
     } catch (err: any) {
-      setError(err.message || 'Failed to load PO details');
+      setError(errorMessage(err, t('messages.loadDetailFailed')));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchList();
@@ -247,7 +251,7 @@ export default function PurchaseOrders() {
       setDraftLines([emptyDraftLine()]);
       fetchList();
     } catch (err: any) {
-      setError(err.message || 'Failed to create PO');
+      setError(errorMessage(err, t('messages.createFailed')));
     } finally {
       setCreating(false);
     }
@@ -261,7 +265,7 @@ export default function PurchaseOrders() {
       fetchList();
       if (expandedId === id) fetchDetail(id);
     } catch (err: any) {
-      setError(err.message || 'Failed to update status');
+      setError(errorMessage(err, t('messages.statusFailed')));
     }
   };
 
@@ -284,7 +288,7 @@ export default function PurchaseOrders() {
       fetchDetail(poId);
       fetchList();
     } catch (err: any) {
-      setError(err.message || 'Failed to add line');
+      setError(errorMessage(err, t('messages.addLineFailed')));
     }
   };
 
@@ -296,7 +300,7 @@ export default function PurchaseOrders() {
       fetchDetail(poId);
       fetchList();
     } catch (err: any) {
-      setError(err.message || 'Failed to delete line');
+      setError(errorMessage(err, t('messages.deleteLineFailed')));
     }
   };
 
@@ -312,7 +316,7 @@ export default function PurchaseOrders() {
       fetchDetail(poId);
       fetchList();
     } catch (err: any) {
-      setError(err.message || 'Failed to record delivery');
+      setError(errorMessage(err, t('messages.deliveryFailed')));
     }
   };
 
@@ -331,21 +335,18 @@ export default function PurchaseOrders() {
 
   /* ---------- render ---------- */
 
-  const formatDate = (iso?: string) =>
-    iso ? new Date(iso).toLocaleDateString('fr-CH') : '—';
-
   return (
     <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-          Purchase Orders
+          {t('title')}
         </h1>
         <button
           style={btnPrimary}
           onClick={() => setShowCreate((v) => !v)}
         >
-          {showCreate ? 'Cancel' : '+ New PO'}
+          {showCreate ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -386,21 +387,21 @@ export default function PurchaseOrders() {
           }}
         >
           <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            New Purchase Order
+            {t('form.title')}
           </h3>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             {/* Supplier */}
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Supplier *
+                {t('form.supplier')}
               </label>
               <select
                 style={inputStyle}
                 value={newSupplierId}
                 onChange={(e) => setNewSupplierId(e.target.value)}
               >
-                <option value="">Select supplier...</option>
+                <option value="">{t('form.selectSupplier')}</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -410,14 +411,14 @@ export default function PurchaseOrders() {
             {/* Project */}
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Project (optional)
+                {t('form.project')}
               </label>
               <select
                 style={inputStyle}
                 value={newProjectId}
                 onChange={(e) => setNewProjectId(e.target.value)}
               >
-                <option value="">No project</option>
+                <option value="">{t('form.noProject')}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.reference ? `${p.reference} — ${p.name}` : p.name}
@@ -430,12 +431,12 @@ export default function PurchaseOrders() {
           {/* Draft lines */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Lines</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{t('form.lines')}</span>
               <button
                 style={btnOutline}
                 onClick={() => setDraftLines((prev) => [...prev, emptyDraftLine()])}
               >
-                + Add Line
+                {t('actions.addLine')}
               </button>
             </div>
 
@@ -452,11 +453,11 @@ export default function PurchaseOrders() {
                 textTransform: 'uppercase',
               }}
             >
-              <span>Description</span>
-              <span>Qty</span>
-              <span>Unit</span>
-              <span>Unit Price (CHF)</span>
-              <span style={{ textAlign: 'right' }}>Total</span>
+              <span>{t('form.description')}</span>
+              <span>{t('form.quantity')}</span>
+              <span>{t('form.unit')}</span>
+              <span>{t('form.unitPriceChf')}</span>
+              <span style={{ textAlign: 'right' }}>{t('form.total')}</span>
               <span />
             </div>
 
@@ -478,7 +479,7 @@ export default function PurchaseOrders() {
                 >
                   <input
                     style={inputStyle}
-                    placeholder="Description"
+                    placeholder={t('form.description')}
                     value={line.description}
                     onChange={(e) => updateDraftLine(idx, 'description', e.target.value)}
                   />
@@ -510,7 +511,7 @@ export default function PurchaseOrders() {
                     onChange={(e) => updateDraftLine(idx, 'unitPrice', e.target.value)}
                   />
                   <span style={{ textAlign: 'right', fontSize: 14, fontWeight: 500, color: '#111827' }}>
-                    {formatCHF(lineTotalCents)}
+                    {formatAmount(lineTotalCents)}
                   </span>
                   <button
                     style={{
@@ -522,7 +523,7 @@ export default function PurchaseOrders() {
                       padding: 0,
                       lineHeight: 1,
                     }}
-                    title="Remove line"
+                    title={t('actions.removeLine')}
                     onClick={() => removeDraftLine(idx)}
                   >
                     &times;
@@ -533,14 +534,14 @@ export default function PurchaseOrders() {
 
             {/* Running total */}
             <div style={{ textAlign: 'right', fontSize: 15, fontWeight: 600, color: '#111827', marginTop: 8 }}>
-              Total HT: CHF {formatCHF(draftTotal)}
+              {t('form.totalHt', { amount: formatMoney(draftTotal) })}
             </div>
           </div>
 
           {/* Submit */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button style={btnOutline} onClick={() => setShowCreate(false)}>
-              Cancel
+              {t('common:actions.cancel')}
             </button>
             <button
               style={{
@@ -550,7 +551,7 @@ export default function PurchaseOrders() {
               disabled={!newSupplierId || draftLines.every((l) => !l.description.trim()) || creating}
               onClick={handleCreate}
             >
-              {creating ? 'Creating...' : 'Create PO'}
+              {creating ? t('actions.creating') : t('actions.create')}
             </button>
           </div>
         </div>
@@ -573,11 +574,10 @@ export default function PurchaseOrders() {
                 border: 'none',
                 borderBottom: isActive ? '2px solid #2563eb' : '2px solid transparent',
                 cursor: 'pointer',
-                textTransform: 'capitalize',
                 marginBottom: -1,
               }}
             >
-              {tab}
+              {tab === 'all' ? t('tabs.all') : statusLabel('purchaseOrder', tab)}
             </button>
           );
         })}
@@ -586,14 +586,14 @@ export default function PurchaseOrders() {
       {/* Loading */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 14 }}>
-          Loading purchase orders...
+          {t('state.loading')}
         </div>
       )}
 
       {/* Empty state */}
       {!loading && !error && pos.length === 0 && (
         <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 14 }}>
-          No purchase orders found.
+          {t('empty.none')}
         </div>
       )}
 
@@ -603,7 +603,7 @@ export default function PurchaseOrders() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ background: '#f8f9fa' }}>
-                {['Reference', 'Supplier', 'Project', 'Status', 'Total HT', 'Expected Delivery', 'Created'].map(
+                {(['reference', 'supplier', 'project', 'status', 'totalHt', 'expectedDelivery', 'created'] as const).map(
                   (h) => (
                     <th
                       key={h}
@@ -617,7 +617,7 @@ export default function PurchaseOrders() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {h}
+                      {t(`table.${h}`)}
                     </th>
                   ),
                 )}
@@ -663,14 +663,13 @@ export default function PurchaseOrders() {
                             fontWeight: 600,
                             background: sc.bg,
                             color: sc.fg,
-                            textTransform: 'capitalize',
                           }}
                         >
-                          {po.status}
+                          {statusLabel('purchaseOrder', po.status)}
                         </span>
                       </td>
                       <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', fontWeight: 500, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                        CHF {formatCHF(po.totalHtCents)}
+                        {formatMoney(po.totalHtCents)}
                       </td>
                       <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
                         {formatDate(po.expectedDelivery)}
@@ -757,10 +756,11 @@ function ExpandedDetail({
   setDeliveryInputs,
   formatDate,
 }: ExpandedDetailProps) {
+  const { t } = useTranslation('purchaseOrders');
   if (!po) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
-        Loading details...
+        {t('detail.loading')}
       </div>
     );
   }
@@ -785,21 +785,21 @@ function ExpandedDetail({
         }}
       >
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Reference</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.reference')}</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{po.reference}</div>
         </div>
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Supplier</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.supplier')}</div>
           <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>{po.supplier?.name ?? '—'}</div>
         </div>
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Project</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.project')}</div>
           <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>
             {po.project ? (po.project.reference ? `${po.project.reference} — ${po.project.name}` : po.project.name) : '—'}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Status</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.status')}</div>
           <span
             style={{
               display: 'inline-block',
@@ -809,10 +809,9 @@ function ExpandedDetail({
               fontWeight: 600,
               background: sc.bg,
               color: sc.fg,
-              textTransform: 'capitalize',
             }}
           >
-            {po.status}
+            {statusLabel('purchaseOrder', po.status)}
           </span>
         </div>
       </div>
@@ -832,25 +831,25 @@ function ExpandedDetail({
             <thead>
               <tr style={{ background: '#f8f9fa' }}>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Description
+                  {t('lines.description')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Qty Ordered
+                  {t('lines.qtyOrdered')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Qty Delivered
+                  {t('lines.qtyDelivered')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb', minWidth: 140 }}>
-                  Progress
+                  {t('lines.progress')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Unit Price
+                  {t('lines.unitPrice')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Total
+                  {t('lines.total')}
                 </th>
                 <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Actions
+                  {t('lines.actions')}
                 </th>
               </tr>
             </thead>
@@ -897,10 +896,10 @@ function ExpandedDetail({
                       </div>
                     </td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      CHF {formatCHF(line.unitPriceCents)}
+                      {formatMoney(line.unitPriceCents)}
                     </td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 500, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      CHF {formatCHF(line.totalPriceCents)}
+                      {formatMoney(line.totalPriceCents)}
                     </td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
@@ -921,9 +920,9 @@ function ExpandedDetail({
                             <button
                               style={{ ...btnSuccess, padding: '4px 8px', fontSize: 12 }}
                               onClick={(e) => { e.stopPropagation(); onRecordDelivery(line.id); }}
-                              title="Record delivery"
+                              title={t('actions.recordDelivery')}
                             >
-                              Save
+                              {t('common:actions.save')}
                             </button>
                           </>
                         )}
@@ -939,7 +938,7 @@ function ExpandedDetail({
                               padding: '4px',
                               lineHeight: 1,
                             }}
-                            title="Delete line"
+                            title={t('actions.deleteLine')}
                             onClick={(e) => { e.stopPropagation(); onDeleteLine(line.id); }}
                           >
                             &times;
@@ -968,7 +967,7 @@ function ExpandedDetail({
             marginBottom: 16,
           }}
         >
-          No lines on this purchase order.
+          {t('detail.noLines')}
         </div>
       )}
 
@@ -983,20 +982,20 @@ function ExpandedDetail({
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
-          Add Line
+          {t('detail.addLine')}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 90px 110px auto', gap: 8, alignItems: 'end' }}>
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Description</label>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.description')}</label>
             <input
               style={inputStyle}
-              placeholder="Description"
+              placeholder={t('form.description')}
               value={addLineDesc}
               onChange={(e) => setAddLineDesc(e.target.value)}
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Qty</label>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.quantity')}</label>
             <input
               style={inputStyle}
               type="number"
@@ -1008,7 +1007,7 @@ function ExpandedDetail({
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Unit</label>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.unit')}</label>
             <select style={inputStyle} value={addLineUnit} onChange={(e) => setAddLineUnit(e.target.value)}>
               {UNITS.map((u) => (
                 <option key={u} value={u}>{u}</option>
@@ -1016,7 +1015,7 @@ function ExpandedDetail({
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>Price (CHF)</label>
+            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.priceChf')}</label>
             <input
               style={inputStyle}
               type="number"
@@ -1028,7 +1027,7 @@ function ExpandedDetail({
             />
           </div>
           <button style={{ ...btnPrimary, padding: '8px 14px' }} onClick={onAddLine}>
-            Add
+            {t('common:actions.add')}
           </button>
         </div>
       </div>
@@ -1037,22 +1036,22 @@ function ExpandedDetail({
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         {po.status === 'draft' && (
           <button style={btnPrimary} onClick={() => onStatusChange('sent')}>
-            Send
+            {t('actions.send')}
           </button>
         )}
         {po.status === 'sent' && (
           <button style={btnSuccess} onClick={() => onStatusChange('confirmed')}>
-            Confirm
+            {t('actions.confirm')}
           </button>
         )}
         {po.status === 'confirmed' && (
           <button style={btnSuccess} onClick={() => onStatusChange('delivered')}>
-            Mark Delivered
+            {t('actions.markDelivered')}
           </button>
         )}
         {po.status !== 'delivered' && po.status !== 'cancelled' && (
           <button style={btnDanger} onClick={() => onStatusChange('cancelled')}>
-            Cancel
+            {t('actions.cancelOrder')}
           </button>
         )}
       </div>

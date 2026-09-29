@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, ApiError } from '../lib/api';
+import { enumLabel, formatDate } from '../lib/format';
+import { errorMessage } from '../lib/errors';
 
 interface Client {
   id: string;
@@ -33,14 +36,14 @@ interface Interaction {
 }
 
 // Must match the client.type CHECK constraint.
-const CLIENT_TYPES: Array<[string, string]> = [
-  ['entreprise_generale', 'Entreprise générale'],
-  ['maitre_ouvrage', "Maître d'ouvrage"],
-  ['architecte', 'Architecte'],
-  ['sous_traitant', 'Sous-traitant'],
-  ['fournisseur', 'Fournisseur'],
-  ['autre', 'Autre'],
-];
+const CLIENT_TYPES = [
+  'entreprise_generale',
+  'maitre_ouvrage',
+  'architecte',
+  'sous_traitant',
+  'fournisseur',
+  'autre',
+] as const;
 
 type ClientForm = {
   name: string;
@@ -100,6 +103,7 @@ const buttonSecondaryStyle: React.CSSProperties = {
 };
 
 export default function Clients() {
+  const { t } = useTranslation('clients');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('');
@@ -143,7 +147,7 @@ export default function Clients() {
   });
 
   if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>Login required</div>;
+    return <div style={{ color: '#ef4444', padding: 20 }}>{t('common:auth.sessionExpired')}</div>;
   }
 
   return (
@@ -157,10 +161,10 @@ export default function Clients() {
         }}
       >
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          Clients
+          {t('title')}
         </h1>
         <button style={buttonStyle} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ New Client'}
+          {showForm ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -185,7 +189,7 @@ export default function Clients() {
           >
             <input
               style={inputStyle}
-              placeholder="Name *"
+              placeholder={t('form.name')}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -194,33 +198,33 @@ export default function Clients() {
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
-              {CLIENT_TYPES.map(([value, label]) => (
+              {CLIENT_TYPES.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {enumLabel('clientType', value)}
                 </option>
               ))}
             </select>
             <input
               style={inputStyle}
-              placeholder="Email"
+              placeholder={t('form.email')}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
             <input
               style={inputStyle}
-              placeholder="Phone"
+              placeholder={t('form.phone')}
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
             <input
               style={inputStyle}
-              placeholder="City"
+              placeholder={t('form.city')}
               value={form.city}
               onChange={(e) => setForm({ ...form, city: e.target.value })}
             />
             <input
               style={inputStyle}
-              placeholder="Canton"
+              placeholder={t('form.canton')}
               value={form.canton}
               onChange={(e) => setForm({ ...form, canton: e.target.value })}
             />
@@ -230,11 +234,11 @@ export default function Clients() {
             onClick={() => form.name.trim() && createMutation.mutate(form)}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? 'Creating...' : 'Create Client'}
+            {createMutation.isPending ? t('actions.creating') : t('actions.create')}
           </button>
           {createMutation.error && (
             <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-              {createMutation.error.message}
+              {errorMessage(createMutation.error, t('messages.createFailed'))}
             </span>
           )}
         </div>
@@ -244,7 +248,7 @@ export default function Clients() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <input
           style={{ ...inputStyle, maxWidth: 300 }}
-          placeholder="Search clients..."
+          placeholder={t('filters.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -253,10 +257,10 @@ export default function Clients() {
           value={stageFilter}
           onChange={(e) => setStageFilter(e.target.value)}
         >
-          <option value="">All Stages</option>
+          <option value="">{t('filters.allStages')}</option>
           {PIPELINE_STAGES.map((s) => (
             <option key={s} value={s}>
-              {s.charAt(0).toUpperCase() + s.slice(1)}
+              {t(`stage.${s}`)}
             </option>
           ))}
         </select>
@@ -264,14 +268,14 @@ export default function Clients() {
 
       {/* Table */}
       {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : error ? (
-        <div style={{ color: '#ef4444', padding: 20 }}>{error.message}</div>
+        <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error, t('messages.loadFailed'))}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              {['Name', 'Type', 'Pipeline Stage', 'City', 'Phone'].map((h) => (
+              {[t('table.name'), t('table.type'), t('table.stage'), t('table.city'), t('table.phone')].map((h) => (
                 <th
                   key={h}
                   style={{
@@ -297,7 +301,7 @@ export default function Clients() {
                   colSpan={5}
                   style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
                 >
-                  No clients found
+                  {t('empty.clients')}
                 </td>
               </tr>
             )}
@@ -324,7 +328,7 @@ export default function Clients() {
                     {client.name}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
-                    {client.type}
+                    {enumLabel('clientType', client.type)}
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
                     <span
@@ -352,7 +356,7 @@ export default function Clients() {
                                 : '#374151',
                       }}
                     >
-                      {client.pipelineStage}
+                      {client.pipelineStage ? t(`stage.${client.pipelineStage}`, { defaultValue: client.pipelineStage }) : ''}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
@@ -386,7 +390,7 @@ export default function Clients() {
                               marginTop: 0,
                             }}
                           >
-                            Contacts
+                            {t('detail.contacts')}
                           </h3>
                           {clientDetail.contacts && clientDetail.contacts.length > 0 ? (
                             <ul style={{ margin: 0, paddingLeft: 16 }}>
@@ -405,7 +409,7 @@ export default function Clients() {
                             </ul>
                           ) : (
                             <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
-                              No contacts
+                              {t('empty.contacts')}
                             </p>
                           )}
                         </div>
@@ -421,7 +425,7 @@ export default function Clients() {
                               marginTop: 0,
                             }}
                           >
-                            Interactions
+                            {t('detail.interactions')}
                           </h3>
                           {clientDetail.interactions &&
                           clientDetail.interactions.length > 0 ? (
@@ -431,15 +435,15 @@ export default function Clients() {
                                   key={i.id}
                                   style={{ fontSize: 13, color: '#4b5563', marginBottom: 4 }}
                                 >
-                                  <strong>{i.type}</strong> —{' '}
-                                  {new Date(i.interactionDate).toLocaleDateString()}:{' '}
+                                  <strong>{enumLabel('interactionType', i.type)}</strong> —{' '}
+                                  {formatDate(i.interactionDate)} :{' '}
                                   {i.subject || i.body}
                                 </li>
                               ))}
                             </ul>
                           ) : (
                             <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
-                              No interactions
+                              {t('empty.interactions')}
                             </p>
                           )}
                         </div>

@@ -14,6 +14,7 @@ import { useProfile } from '../auth/AuthContext';
 import { useField } from '../state/FieldContext';
 import { apiList, errorMessage, patch } from '../lib/api';
 import type { Task, TaskStatus } from '../lib/types';
+import { statusLabel, t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
@@ -21,12 +22,12 @@ interface TaskRow extends Task {
   projectName: string;
 }
 
-const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string; label: string }> = {
-  todo:        { bg: '#fef3c7', text: '#92400e', label: 'To Do' },
-  in_progress: { bg: '#dbeafe', text: '#1e40af', label: 'In Progress' },
-  done:        { bg: '#dcfce7', text: '#166534', label: 'Done' },
-  validated:   { bg: '#dcfce7', text: '#166534', label: 'Validated' },
-  cancelled:   { bg: '#f1f5f9', text: '#64748b', label: 'Cancelled' },
+const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
+  todo:        { bg: '#fef3c7', text: '#92400e' },
+  in_progress: { bg: '#dbeafe', text: '#1e40af' },
+  done:        { bg: '#dcfce7', text: '#166534' },
+  validated:   { bg: '#dcfce7', text: '#166534' },
+  cancelled:   { bg: '#f1f5f9', text: '#64748b' },
 };
 
 /** Statuses a field user can set from the app (the API limits workers to these). */
@@ -53,16 +54,16 @@ function TaskItem({
       <View style={styles.taskHeader}>
         <Text style={styles.taskTitle}>{task.title}</Text>
         <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-          <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
+          <Text style={[styles.badgeText, { color: badge.text }]}>{statusLabel('task', task.status)}</Text>
         </View>
       </View>
       <Text style={styles.taskProject}>
-        {task.projectName} · {task.progressPercent}%
+        {task.projectName} · {task.progressPercent} %
       </Text>
 
       {expanded && !locked ? (
         <View style={styles.editor}>
-          <Text style={styles.editorLabel}>Status</Text>
+          <Text style={styles.editorLabel}>{t('tasks.status')}</Text>
           <View style={styles.chipRow}>
             {EDITABLE_STATUSES.map((s) => (
               <TouchableOpacity
@@ -72,12 +73,12 @@ function TaskItem({
                 onPress={() => onUpdate({ status: s, ...(s === 'done' ? { progressPercent: 100 } : {}) })}
               >
                 <Text style={[styles.chipText, s === task.status && styles.chipTextActive]}>
-                  {STATUS_COLORS[s].label}
+                  {statusLabel('task', s)}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={styles.editorLabel}>Progress</Text>
+          <Text style={styles.editorLabel}>{t('tasks.progress')}</Text>
           <View style={styles.chipRow}>
             {PROGRESS_STEPS.map((p) => (
               <TouchableOpacity
@@ -86,7 +87,7 @@ function TaskItem({
                 style={[styles.chip, p === task.progressPercent && styles.chipActive]}
                 onPress={() => onUpdate({ progressPercent: p })}
               >
-                <Text style={[styles.chipText, p === task.progressPercent && styles.chipTextActive]}>{p}%</Text>
+                <Text style={[styles.chipText, p === task.progressPercent && styles.chipTextActive]}>{p} %</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -152,7 +153,7 @@ export default function TasksScreen() {
         ),
       );
     } catch (err) {
-      Alert.alert('Task not updated', errorMessage(err));
+      Alert.alert(t('tasks.updateFailed'), errorMessage(err));
     } finally {
       setSavingId(null);
     }
@@ -161,11 +162,11 @@ export default function TasksScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        <Text style={styles.title}>Tasks</Text>
+        <Text style={styles.title}>{t('tasks.title')}</Text>
         <Text style={styles.subtitle}>
           {loading
-            ? 'Loading...'
-            : `${tasks.length}${isWorker ? ' assigned' : ''} task${tasks.length === 1 ? '' : 's'}`}
+            ? t('state.loading')
+            : t(isWorker ? 'tasks.assignedCount' : 'tasks.count', { count: tasks.length })}
         </Text>
         {error ? <Text style={styles.warning}>{error}</Text> : null}
 
@@ -181,7 +182,7 @@ export default function TasksScreen() {
               onUpdate={(changes) => update(item, changes)}
             />
           )}
-          ListEmptyComponent={!loading ? <Text style={styles.taskProject}>No tasks.</Text> : null}
+          ListEmptyComponent={!loading ? <Text style={styles.taskProject}>{t('tasks.empty')}</Text> : null}
           refreshControl={<RefreshControl refreshing={false} onRefresh={load} />}
           contentContainerStyle={{ paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}

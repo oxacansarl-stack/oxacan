@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiList, apiPost, apiPut, apiDelete } from '../lib/api';
+import { errorMessage } from '../lib/errors';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -77,6 +79,7 @@ const emptyForm: SupplierForm = {
 /* ------------------------------------------------------------------ */
 
 export default function Suppliers() {
+  const { t } = useTranslation('suppliers');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -113,10 +116,10 @@ export default function Suppliers() {
         setTotal(meta?.total ?? items.length);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to load suppliers');
+        setError(errorMessage(err, t('messages.loadFailed')));
       })
       .finally(() => setLoading(false));
-  }, [search]);
+  }, [search, t]);
 
   useEffect(() => {
     fetchSuppliers();
@@ -141,7 +144,7 @@ export default function Suppliers() {
         fetchSuppliers();
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to create supplier');
+        setError(errorMessage(err, t('messages.createFailed')));
       })
       .finally(() => setCreating(false));
   };
@@ -182,7 +185,7 @@ export default function Suppliers() {
         fetchSuppliers();
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to update supplier');
+        setError(errorMessage(err, t('messages.updateFailed')));
       })
       .finally(() => setSaving(false));
   };
@@ -196,7 +199,7 @@ export default function Suppliers() {
         fetchSuppliers();
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to delete supplier');
+        setError(errorMessage(err, t('messages.deleteFailed')));
         setDeletingId(null);
       });
   };
@@ -209,11 +212,11 @@ export default function Suppliers() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-            Suppliers
+            {t('title')}
           </h1>
           {!loading && (
             <span style={{ fontSize: 14, color: '#6b7280' }}>
-              {total} supplier{total !== 1 ? 's' : ''}
+              {t('count', { count: total })}
             </span>
           )}
         </div>
@@ -221,7 +224,7 @@ export default function Suppliers() {
           style={btnPrimary}
           onClick={() => setShowCreate((v) => !v)}
         >
-          {showCreate ? 'Cancel' : '+ New Supplier'}
+          {showCreate ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -246,7 +249,7 @@ export default function Suppliers() {
             onClick={() => setError(null)}
             style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}
           >
-            Dismiss
+            {t('actions.dismiss')}
           </button>
         </div>
       )}
@@ -255,7 +258,7 @@ export default function Suppliers() {
       <div style={{ marginBottom: 20 }}>
         <input
           type="text"
-          placeholder="Search suppliers by name, contact, email..."
+          placeholder={t('search.placeholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle, maxWidth: 400 }}
@@ -274,58 +277,58 @@ export default function Suppliers() {
           }}
         >
           <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            New Supplier
+            {t('form.title')}
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Name <span style={{ color: '#dc2626' }}>*</span>
+                {t('form.name')} <span style={{ color: '#dc2626' }}>*</span>
               </label>
               <input
                 style={inputStyle}
                 value={createForm.name}
                 onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Company name"
+                placeholder={t('form.namePlaceholder')}
               />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Contact Person
+                {t('form.contactPerson')}
               </label>
               <input
                 style={inputStyle}
                 value={createForm.contactPerson}
                 onChange={(e) => setCreateForm((f) => ({ ...f, contactPerson: e.target.value }))}
-                placeholder="Full name"
+                placeholder={t('form.contactPersonPlaceholder')}
               />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Email
+                {t('form.email')}
               </label>
               <input
                 type="email"
                 style={inputStyle}
                 value={createForm.email}
                 onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder="email@example.com"
+                placeholder={t('form.emailPlaceholder')}
               />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Phone
+                {t('form.phone')}
               </label>
               <input
                 type="tel"
                 style={inputStyle}
                 value={createForm.phone}
                 onChange={(e) => setCreateForm((f) => ({ ...f, phone: e.target.value }))}
-                placeholder="+41 ..."
+                placeholder={t('form.phonePlaceholder')}
               />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Payment Terms (days)
+                {t('form.paymentTermsDays')}
               </label>
               <input
                 type="number"
@@ -339,13 +342,13 @@ export default function Suppliers() {
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                Address
+                {t('form.address')}
               </label>
               <textarea
                 style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }}
                 value={createForm.address}
                 onChange={(e) => setCreateForm((f) => ({ ...f, address: e.target.value }))}
-                placeholder="Street, city, postal code"
+                placeholder={t('form.addressPlaceholder')}
               />
             </div>
           </div>
@@ -355,7 +358,7 @@ export default function Suppliers() {
               disabled={creating || !createForm.name.trim()}
               onClick={handleCreate}
             >
-              {creating ? 'Creating...' : 'Create Supplier'}
+              {creating ? t('actions.creating') : t('actions.create')}
             </button>
             <button
               style={btnOutline}
@@ -364,7 +367,7 @@ export default function Suppliers() {
                 setCreateForm({ ...emptyForm });
               }}
             >
-              Cancel
+              {t('common:actions.cancel')}
             </button>
           </div>
         </div>
@@ -373,7 +376,7 @@ export default function Suppliers() {
       {/* Loading */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 15 }}>
-          Loading suppliers...
+          {t('state.loading')}
         </div>
       )}
 
@@ -381,8 +384,8 @@ export default function Suppliers() {
       {!loading && !error && suppliers.length === 0 && (
         <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 15 }}>
           {search
-            ? `No suppliers matching "${search}"`
-            : 'No suppliers yet. Click "+ New Supplier" to add one.'}
+            ? t('empty.search', { search })
+            : t('empty.none')}
         </div>
       )}
 
@@ -403,22 +406,22 @@ export default function Suppliers() {
             <thead>
               <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Name
+                  {t('table.name')}
                 </th>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Contact Person
+                  {t('table.contactPerson')}
                 </th>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Email
+                  {t('table.email')}
                 </th>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Phone
+                  {t('table.phone')}
                 </th>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  Payment Terms
+                  {t('table.paymentTerms')}
                 </th>
                 <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb', width: 180 }}>
-                  Actions
+                  {t('table.actions')}
                 </th>
               </tr>
             </thead>
@@ -488,13 +491,13 @@ export default function Suppliers() {
                               disabled={saving || !editForm.name.trim()}
                               onClick={handleSave}
                             >
-                              {saving ? 'Saving...' : 'Save'}
+                              {saving ? t('common:actions.saving') : t('common:actions.save')}
                             </button>
                             <button
                               style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
                               onClick={cancelEdit}
                             >
-                              Cancel
+                              {t('common:actions.cancel')}
                             </button>
                           </div>
                         </td>
@@ -520,23 +523,23 @@ export default function Suppliers() {
                           {supplier.phone || <span style={{ color: '#9ca3af' }}>--</span>}
                         </td>
                         <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {supplier.paymentTermsDays} days
+                          {t('table.days', { count: supplier.paymentTermsDays })}
                         </td>
                         <td style={{ padding: '10px 14px' }}>
                           {isDeleting ? (
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 13, color: '#991b1b' }}>Delete?</span>
+                              <span style={{ fontSize: 13, color: '#991b1b' }}>{t('delete.question')}</span>
                               <button
                                 style={{ ...btnDanger, padding: '6px 12px', fontSize: 13 }}
                                 onClick={() => handleDelete(supplier.id)}
                               >
-                                Confirm
+                                {t('common:actions.confirm')}
                               </button>
                               <button
                                 style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
                                 onClick={() => setDeletingId(null)}
                               >
-                                No
+                                {t('common:actions.no')}
                               </button>
                             </div>
                           ) : (
@@ -545,13 +548,13 @@ export default function Suppliers() {
                                 style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
                                 onClick={() => startEdit(supplier)}
                               >
-                                Edit
+                                {t('common:actions.edit')}
                               </button>
                               <button
                                 style={{ ...btnDanger, padding: '6px 12px', fontSize: 13 }}
                                 onClick={() => setDeletingId(supplier.id)}
                               >
-                                Delete
+                                {t('common:actions.delete')}
                               </button>
                             </div>
                           )}

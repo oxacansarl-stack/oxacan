@@ -11,6 +11,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { useAuth } from '../auth/AuthContext';
+import { t } from '../i18n';
 
 const PRIMARY = '#2563eb';
 
@@ -43,11 +44,11 @@ export default function LoginScreen() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.title}>OXACAN Mobile</Text>
-        <Text style={styles.subtitle}>Swiss Construction ERP</Text>
+        <Text style={styles.title}>{t('app.name')}</Text>
+        <Text style={styles.subtitle}>{t('app.tagline')}</Text>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>{t('auth.email')}</Text>
           <TextInput
             style={styles.input}
             value={email}
@@ -57,13 +58,13 @@ export default function LoginScreen() {
             autoComplete="email"
             keyboardType="email-address"
             textContentType="username"
-            placeholder="name@company.ch"
+            placeholder={t('auth.emailPlaceholder')}
             placeholderTextColor="#94a3b8"
             editable={!busy}
             returnKeyType="next"
           />
 
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>{t('auth.password')}</Text>
           <TextInput
             style={styles.input}
             value={password}
@@ -71,7 +72,7 @@ export default function LoginScreen() {
             secureTextEntry
             autoComplete="password"
             textContentType="password"
-            placeholder="Password"
+            placeholder={t('auth.password')}
             placeholderTextColor="#94a3b8"
             editable={!busy}
             returnKeyType="go"
@@ -93,7 +94,7 @@ export default function LoginScreen() {
             {busy ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Sign In</Text>
+              <Text style={styles.buttonText}>{t('auth.signIn')}</Text>
             )}
           </TouchableOpacity>
         </View>

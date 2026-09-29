@@ -40,6 +40,8 @@ export class SettingsController {
       defaultRetentionRate: company.defaultRetentionRate,
       defaultMarginFactor: company.defaultMarginFactor,
       geolocationEnabled: company.geolocationEnabled,
+      iban: company.iban,
+      defaultPaymentTermsDays: company.defaultPaymentTermsDays,
     };
   }
 
@@ -60,6 +62,9 @@ export class SettingsController {
       data.defaultRetentionRate = body.defaultRetentionRate;
     if (body.defaultMarginFactor !== undefined)
       data.defaultMarginFactor = body.defaultMarginFactor;
+    if (body.iban !== undefined) data.iban = body.iban || null;
+    if (body.defaultPaymentTermsDays !== undefined)
+      data.defaultPaymentTermsDays = body.defaultPaymentTermsDays;
 
     return this.companyService.update(companyId, data);
   }

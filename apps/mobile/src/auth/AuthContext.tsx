@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { api, ApiError, errorMessage, setUnauthorizedHandler } from '../lib/api';
 import { isAuthConfigured } from '../lib/config';
 import type { Profile } from '../lib/types';
+import { t } from '../i18n';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn' | 'profileError';
 
@@ -21,9 +22,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export const NOT_SET_UP_MESSAGE =
-  'Your account is not set up in OXACAN yet. Please contact your administrator.';
-const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please sign in again.';
+export const NOT_SET_UP_MESSAGE = t('auth.accountNotSetUp');
+const SESSION_EXPIRED_MESSAGE = t('auth.sessionExpired');
 
 /**
  * Non-sensitive profile cache (name, role, ids) so a worker who opens the app
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [notice, setNotice] = useState<string | null>(
-    isAuthConfigured ? null : 'The app is not configured: set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.',
+    isAuthConfigured ? null : t('auth.notConfigured'),
   );
   const [profileError, setProfileError] = useState<string | null>(null);
 
@@ -140,17 +140,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadProfile, signOut]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!isAuthConfigured) return 'The app is not configured for sign-in.';
+    if (!isAuthConfigured) return t('auth.notConfigured');
     setNotice(null);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (!error) return null;
       if (error.status === 400 || /invalid login/i.test(error.message)) {
-        return 'Incorrect email or password.';
+        return t('auth.invalidCredentials');
       }
-      return error.message || 'Sign-in failed.';
+      // Supabase messages are English; network-level failures surface as status 0 / no status.
+      if (!error.status) return t('errors.network');
+      return t('auth.signInFailed');
     } catch {
-      return 'Cannot reach the sign-in server. Check your connection.';
+      return t('errors.network');
     }
   }, []);
 

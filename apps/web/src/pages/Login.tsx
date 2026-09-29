@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { signInWithDevToken, signInWithPassword, supabase } from '../lib/auth';
 
 interface Props {
@@ -16,6 +17,7 @@ const input: React.CSSProperties = {
 };
 
 export default function Login({ notice, onSignedIn }: Props) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [devToken, setDevToken] = useState('');
@@ -30,7 +32,9 @@ export default function Login({ notice, onSignedIn }: Props) {
       await signInWithPassword(email, password);
       onSignedIn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
+      // Supabase answers 'Invalid login credentials' in English; show our French text instead.
+      const message = err instanceof Error ? err.message : '';
+      setError(/invalid login credentials/i.test(message) ? t('auth.invalidCredentials') : t('auth.signInFailed'));
     } finally {
       setBusy(false);
     }
@@ -65,7 +69,7 @@ export default function Login({ notice, onSignedIn }: Props) {
         }}
       >
         <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: -0.5 }}>OXACAN</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>Swiss Construction ERP</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>{t('app.tagline')}</div>
 
         {notice && (
           <div style={{ background: '#fef3c7', color: '#92400e', padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
@@ -76,7 +80,7 @@ export default function Login({ notice, onSignedIn }: Props) {
         {supabase ? (
           <form onSubmit={submit}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-              Email
+              {t('auth.email')}
             </label>
             <input
               type="email"
@@ -87,7 +91,7 @@ export default function Login({ notice, onSignedIn }: Props) {
               style={{ ...input, marginBottom: 14 }}
             />
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-              Password
+              {t('auth.password')}
             </label>
             <input
               type="password"
@@ -113,20 +117,20 @@ export default function Login({ notice, onSignedIn }: Props) {
                 cursor: busy ? 'default' : 'pointer',
               }}
             >
-              {busy ? 'Signing in…' : 'Sign in'}
+              {busy ? t('auth.signingIn') : t('auth.signIn')}
             </button>
           </form>
         ) : (
           <div style={{ fontSize: 13, color: '#6b7280' }}>
-            Sign-in is not configured: set SUPABASE_URL and SUPABASE_ANON_KEY in the root .env.
+            {t('auth.notConfigured')}
           </div>
         )}
 
         {import.meta.env.DEV && (
           <details style={{ marginTop: 20, fontSize: 13, color: '#6b7280' }}>
-            <summary style={{ cursor: 'pointer' }}>Developer sign-in</summary>
+            <summary style={{ cursor: 'pointer' }}>{t('auth.devSignIn')}</summary>
             <p style={{ margin: '8px 0' }}>
-              Paste a token printed by <code>npm run db:seed -w apps/api</code>.
+              <Trans i18nKey="auth.devSignInHelp" values={{ command: 'npm run db:seed -w apps/api' }} components={{ code: <code /> }} />
             </p>
             <textarea
               value={devToken}
@@ -146,7 +150,7 @@ export default function Login({ notice, onSignedIn }: Props) {
                 cursor: 'pointer',
               }}
             >
-              Use token
+              {t('auth.useToken')}
             </button>
           </details>
         )}

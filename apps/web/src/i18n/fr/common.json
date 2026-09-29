@@ -1,0 +1,395 @@
+{
+  "app": {
+    "tagline": "ERP construction suisse",
+    "version": "v{{version}}"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "clients": "Clients",
+    "offers": "Offres",
+    "contracts": "Contrats",
+    "projects": "Projets",
+    "timekeeping": "Timbrage",
+    "expenses": "Dépenses",
+    "dailyReports": "Rapports journaliers",
+    "hr": "RH & équipes",
+    "suppliers": "Fournisseurs",
+    "purchaseOrders": "Commandes",
+    "stock": "Stock",
+    "vehicles": "Véhicules",
+    "meetings": "Réunions de chantier",
+    "invoices": "Factures",
+    "accounting": "Comptabilité",
+    "catalogue": "Catalogue",
+    "plans": "Plans",
+    "settings": "Paramètres",
+    "portal": "Portail client",
+    "notifications": "Notifications",
+    "dataExport": "Export des données"
+  },
+  "auth": {
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "signIn": "Se connecter",
+    "signingIn": "Connexion…",
+    "signOut": "Se déconnecter",
+    "notConfigured": "La connexion n'est pas configurée : renseignez SUPABASE_URL et SUPABASE_ANON_KEY dans le fichier .env.",
+    "devSignIn": "Connexion développeur",
+    "devSignInHelp": "Collez un jeton généré par <code>{{command}}</code>.",
+    "useToken": "Utiliser le jeton",
+    "signInFailed": "Échec de la connexion",
+    "invalidCredentials": "E-mail ou mot de passe incorrect.",
+    "accountNotSetUp": "Votre compte n'est pas encore configuré dans OXACAN, ou votre session a expiré. Contactez votre administrateur si le problème persiste.",
+    "serverUnreachable": "Impossible de joindre le serveur. Réessayez.",
+    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
+    "noAccess": "Vous n'avez pas accès à cette page."
+  },
+  "actions": {
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "create": "Créer",
+    "add": "Ajouter",
+    "close": "Fermer",
+    "confirm": "Confirmer",
+    "search": "Rechercher",
+    "filter": "Filtrer",
+    "reset": "Réinitialiser",
+    "back": "Retour",
+    "next": "Suivant",
+    "previous": "Précédent",
+    "submit": "Soumettre",
+    "approve": "Valider",
+    "reject": "Refuser",
+    "download": "Télécharger",
+    "export": "Exporter",
+    "import": "Importer",
+    "view": "Voir",
+    "details": "Détails",
+    "retry": "Réessayer",
+    "refresh": "Actualiser",
+    "all": "Tous",
+    "none": "Aucun",
+    "yes": "Oui",
+    "no": "Non"
+  },
+  "state": {
+    "loading": "Chargement…",
+    "empty": "Aucune donnée",
+    "noResults": "Aucun résultat",
+    "error": "Une erreur est survenue",
+    "page": "Page {{page}} sur {{total}}",
+    "total": "{{count}} au total",
+    "optional": "facultatif",
+    "required": "obligatoire",
+    "notAvailable": "—"
+  },
+  "confirm": {
+    "delete": "Voulez-vous vraiment supprimer cet élément ?",
+    "irreversible": "Cette action est irréversible."
+  },
+  "role": {
+    "ADMIN": "Administrateur",
+    "PROJECT_MANAGER": "Chef de projet",
+    "TEAM_LEADER": "Chef d'équipe",
+    "WORKER": "Ouvrier"
+  },
+  "licence": {
+    "saas": "SaaS",
+    "application": "Application"
+  },
+  "status": {
+    "offer": {
+      "draft": "Brouillon",
+      "in_progress": "En cours",
+      "submitted": "Soumise",
+      "accepted": "Acceptée",
+      "rejected": "Refusée",
+      "archived": "Archivée"
+    },
+    "contract": {
+      "draft": "Brouillon",
+      "sent": "Envoyé",
+      "signed": "Signé",
+      "active": "En cours",
+      "completed": "Terminé",
+      "terminated": "Résilié"
+    },
+    "esignature": {
+      "none": "Aucune",
+      "pending": "En attente",
+      "signed": "Signée",
+      "declined": "Refusée",
+      "expired": "Expirée"
+    },
+    "amendment": {
+      "draft": "Brouillon",
+      "sent": "Envoyé",
+      "signed": "Signé"
+    },
+    "project": {
+      "planning": "Planification",
+      "active": "En cours",
+      "on_hold": "Suspendu",
+      "completed": "Terminé",
+      "cancelled": "Annulé"
+    },
+    "milestone": {
+      "pending": "En attente",
+      "completed": "Atteint",
+      "overdue": "En retard"
+    },
+    "task": {
+      "todo": "À faire",
+      "in_progress": "En cours",
+      "done": "Terminée",
+      "validated": "Validée",
+      "cancelled": "Annulée"
+    },
+    "timeEntry": {
+      "draft": "Brouillon",
+      "submitted": "Soumis",
+      "approved": "Validé",
+      "rejected": "Refusé"
+    },
+    "expense": {
+      "draft": "Brouillon",
+      "submitted": "Soumise",
+      "approved": "Approuvée",
+      "rejected": "Refusée"
+    },
+    "invoice": {
+      "draft": "Brouillon",
+      "sent": "Envoyée",
+      "paid": "Payée",
+      "partially_paid": "Partiellement payée",
+      "overdue": "En retard",
+      "cancelled": "Annulée"
+    },
+    "plusValue": {
+      "detected": "Détectée",
+      "submitted": "Soumise",
+      "approved": "Approuvée",
+      "rejected": "Refusée",
+      "invoiced": "Facturée"
+    },
+    "purchaseOrder": {
+      "draft": "Brouillon",
+      "sent": "Envoyée",
+      "confirmed": "Confirmée",
+      "partially_delivered": "Partiellement livrée",
+      "delivered": "Livrée",
+      "cancelled": "Annulée"
+    },
+    "meeting": {
+      "scheduled": "Planifiée",
+      "in_progress": "En cours",
+      "completed": "Terminée"
+    },
+    "meetingAction": {
+      "open": "Ouverte",
+      "in_progress": "En cours",
+      "done": "Terminée",
+      "cancelled": "Annulée"
+    },
+    "assumption": {
+      "open": "Ouverte",
+      "confirmed": "Confirmée",
+      "rejected": "Rejetée"
+    },
+    "subscription": {
+      "trialing": "Période d'essai",
+      "active": "Actif",
+      "past_due": "Paiement en retard",
+      "cancelled": "Résilié",
+      "paused": "Suspendu"
+    }
+  },
+  "enum": {
+    "clientType": {
+      "entreprise_generale": "Entreprise générale",
+      "maitre_ouvrage": "Maître d'ouvrage",
+      "architecte": "Architecte",
+      "sous_traitant": "Sous-traitant",
+      "fournisseur": "Fournisseur",
+      "autre": "Autre"
+    },
+    "interactionType": {
+      "call": "Appel",
+      "email": "E-mail",
+      "meeting": "Réunion",
+      "note": "Note",
+      "site_visit": "Visite de chantier"
+    },
+    "accountType": {
+      "asset": "Actif",
+      "liability": "Passif",
+      "equity": "Fonds propres",
+      "revenue": "Produits",
+      "expense": "Charges"
+    },
+    "expenseCategory": {
+      "material": "Matériel",
+      "travel": "Déplacement",
+      "per_diem": "Indemnités de repas",
+      "subcontractor": "Sous-traitance",
+      "equipment_rental": "Location de matériel",
+      "other": "Autre"
+    },
+    "invoiceType": {
+      "invoice": "Facture",
+      "situation": "Situation",
+      "acompte": "Acompte",
+      "credit_note": "Note de crédit",
+      "final_invoice": "Facture finale"
+    },
+    "attendance": {
+      "present": "Présent",
+      "absent": "Absent",
+      "excused": "Excusé"
+    },
+    "assumptionType": {
+      "VARIANTE": "Variante",
+      "OPTION": "Option",
+      "HYPOTHESE_A_VALIDER": "Hypothèse à valider",
+      "INFORMATION_MANQUANTE": "Information manquante",
+      "EXCLU": "Exclu"
+    },
+    "variantType": {
+      "BASE": "Base",
+      "VARIANTE": "Variante",
+      "OPTION": "Option",
+      "HYPOTHESE_A_VALIDER": "Hypothèse à valider",
+      "INFORMATION_MANQUANTE": "Information manquante",
+      "EXCLU": "Exclu"
+    },
+    "pricingStrategy": {
+      "LATEST": "Dernier prix",
+      "MEDIAN_N": "Médiane des derniers prix",
+      "INDEXED": "Prix indexé",
+      "COMPOSED": "Article composé",
+      "MANUAL": "Prix manuel"
+    },
+    "paymentMethod": {
+      "bank_transfer": "Virement bancaire",
+      "card": "Carte",
+      "cash": "Espèces",
+      "other": "Autre"
+    },
+    "annotationType": {
+      "pin": "Repère",
+      "rectangle": "Rectangle",
+      "polygon": "Polygone",
+      "text": "Texte",
+      "measurement": "Mesure"
+    },
+    "fileType": {
+      "pdf": "PDF",
+      "dwg": "DWG",
+      "dxf": "DXF",
+      "png": "PNG",
+      "jpg": "JPG"
+    },
+    "stockLocationType": {
+      "warehouse": "Dépôt",
+      "vehicle": "Véhicule",
+      "site": "Chantier"
+    },
+    "stockMovementType": {
+      "in": "Entrée",
+      "out": "Sortie",
+      "transfer": "Transfert",
+      "adjustment": "Ajustement"
+    },
+    "subscriptionTier": {
+      "solo": "Solo",
+      "equipe": "Équipe",
+      "entreprise": "Entreprise"
+    },
+    "dependencyType": {
+      "finish_to_start": "Fin → début",
+      "start_to_start": "Début → début",
+      "finish_to_finish": "Fin → fin",
+      "start_to_finish": "Début → fin"
+    },
+    "taskPriority": {
+      "low": "Basse",
+      "normal": "Normale",
+      "high": "Haute",
+      "urgent": "Urgente"
+    },
+    "timeCategory": {
+      "normal": "Normal",
+      "overtime": "Heures supplémentaires",
+      "travel": "Déplacement",
+      "absence": "Absence"
+    },
+    "billingEvent": {
+      "payment_succeeded": "Paiement réussi",
+      "payment_failed": "Paiement échoué",
+      "tier_changed": "Changement de formule",
+      "seat_added": "Utilisateur ajouté",
+      "seat_removed": "Utilisateur retiré",
+      "trial_ended": "Fin de la période d'essai",
+      "subscription_cancelled": "Abonnement résilié"
+    }
+  },
+  "errors": {
+    "generic": "Une erreur est survenue. Réessayez.",
+    "network": "Impossible de joindre le serveur. Vérifiez votre connexion.",
+    "code": {
+      "VALIDATION_ERROR": "Certaines valeurs saisies sont invalides.",
+      "UNAUTHORIZED": "Votre session a expiré. Veuillez vous reconnecter.",
+      "FORBIDDEN": "Vous n'avez pas l'autorisation d'effectuer cette action.",
+      "NOT_FOUND": "Élément introuvable.",
+      "CONFLICT": "Un élément avec ces valeurs existe déjà.",
+      "RATE_LIMITED": "Trop de requêtes. Réessayez dans un instant.",
+      "INTERNAL_ERROR": "Erreur inattendue du serveur. Réessayez plus tard."
+    },
+    "rule": {
+      "ALREADY_CLOCKED_OUT": "Ce timbrage est déjà terminé.",
+      "ALREADY_COMPLETED": "Cet élément est déjà terminé.",
+      "ALREADY_POSTED": "Cette écriture est déjà comptabilisée.",
+      "CANCEL_NON_DRAFT": "Seules les factures en brouillon peuvent être annulées. Une facture émise se corrige par une note de crédit.",
+      "CANNOT_CREDIT_CREDIT_NOTE": "Impossible d'établir une note de crédit sur une note de crédit.",
+      "CIRCULAR_DEPENDENCY": "Cette dépendance créerait une boucle entre les tâches.",
+      "CONTRACT_EXISTS": "Un contrat existe déjà pour cette offre.",
+      "CREDIT_NOTE_EXISTS": "Cette facture a déjà fait l'objet d'une note de crédit.",
+      "CREDIT_NOTE_NOT_ISSUED": "Seules les factures émises peuvent être créditées. Annulez plutôt la facture en brouillon.",
+      "CREDIT_NOTE_STATUS": "Le statut d'une note de crédit ne peut pas être modifié.",
+      "DUPLICATE_ACCOUNT_NUMBER": "Ce numéro de compte existe déjà.",
+      "DUPLICATE_DEPENDENCY": "Cette dépendance existe déjà.",
+      "DUPLICATE_IMPORT": "Ce fichier a déjà été importé.",
+      "DUPLICATE_REPORT": "Un rapport journalier existe déjà pour ce chantier à cette date.",
+      "ENTRY_APPROVED": "Un timbrage validé ne peut plus être modifié.",
+      "ENTRY_SUBMITTED": "Ce timbrage est en attente de validation et ne peut plus être modifié.",
+      "INSUFFICIENT_STOCK": "Stock insuffisant.",
+      "INVALID_STATUS": "Cette action n'est pas possible dans le statut actuel.",
+      "INVALID_STATUS_TRANSITION": "Ce changement de statut n'est pas autorisé.",
+      "INVALID_TOKEN": "Ce lien est invalide ou a expiré.",
+      "INVOICE_NOT_PAYABLE": "Un paiement ne peut être saisi que sur une facture envoyée.",
+      "LOCATION_REQUIRED": "Cet article est stocké à plusieurs endroits. Choisissez l'emplacement de livraison.",
+      "MEETING_COMPLETED": "Une réunion terminée ne peut plus être modifiée.",
+      "MEMBER_ALREADY_EXISTS": "Cette personne fait déjà partie de l'équipe.",
+      "NOT_DRAFT": "Seuls les brouillons peuvent être modifiés.",
+      "NO_DRAFT_ENTRIES": "Aucun timbrage à soumettre.",
+      "NO_LINES": "Ajoutez au moins une ligne.",
+      "OFFER_NOT_ACCEPTED": "L'offre doit être acceptée avant de créer le contrat.",
+      "OPEN_ENTRIES_EXIST": "Des timbrages sont encore ouverts.",
+      "OPEN_ENTRY_EXISTS": "Vous êtes déjà timbré aujourd'hui. Terminez d'abord le timbrage en cours.",
+      "OVERPAYMENT": "Le montant dépasse le solde restant de la facture.",
+      "PO_NOT_DELIVERABLE": "Une livraison ne peut être saisie que sur une commande envoyée ou confirmée.",
+      "PRIX_A_COMPLETER": "Certaines lignes de base n'ont pas encore de prix.",
+      "STATUS_CHANGED": "Le statut a été modifié entre-temps. Actualisez la page et réessayez.",
+      "STOCK_ITEM_EXISTS": "Cet article existe déjà à cet emplacement.",
+      "SUBSCRIPTION_EXISTS": "Un abonnement existe déjà.",
+      "SUPPLIER_HAS_ORDERS": "Ce fournisseur a des commandes et ne peut pas être supprimé.",
+      "SYSTEM_ACCOUNT": "Un compte système ne peut pas être modifié.",
+      "TEAM_HAS_MEMBERS": "Retirez d'abord les membres de l'équipe.",
+      "TRANSFER_REQUIRES_LOCATIONS": "Un transfert nécessite un emplacement de départ et d'arrivée.",
+      "UNBALANCED_ENTRY": "L'écriture n'est pas équilibrée : le total au débit doit égaler le total au crédit."
+    }
+  }
+}

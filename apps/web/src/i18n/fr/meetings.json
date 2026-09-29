@@ -1,0 +1,87 @@
+{
+  "title": "Réunions de chantier",
+  "newMeeting": "+ Nouvelle réunion",
+  "filters": {
+    "allProjects": "Tous les projets",
+    "allStatuses": "Toutes"
+  },
+  "form": {
+    "title": "Nouvelle réunion",
+    "project": "Projet *",
+    "selectProject": "Sélectionner un projet…",
+    "date": "Date *",
+    "location": "Lieu",
+    "locationPlaceholder": "p. ex. bureau de chantier, salle A",
+    "agenda": "Ordre du jour",
+    "agendaPlaceholder": "Ordre du jour de la réunion…",
+    "creating": "Création…",
+    "submit": "Créer la réunion"
+  },
+  "table": {
+    "number": "N°",
+    "date": "Date",
+    "project": "Projet",
+    "location": "Lieu",
+    "status": "Statut",
+    "actions": "Actions",
+    "created": "Créée le"
+  },
+  "empty": "Aucune réunion trouvée",
+  "detail": {
+    "loading": "Chargement des détails de la réunion…",
+    "project": "Projet : ",
+    "date": "Date : ",
+    "location": "Lieu : ",
+    "agenda": "Ordre du jour",
+    "attendees": {
+      "title": "Participants ({{count}})",
+      "name": "Nom",
+      "role": "Fonction",
+      "organization": "Entreprise",
+      "remove": "Retirer",
+      "empty": "Aucun participant pour le moment",
+      "nameLabel": "Nom *",
+      "roleLabel": "Fonction",
+      "organizationLabel": "Entreprise",
+      "adding": "Ajout…",
+      "add": "Ajouter le participant"
+    },
+    "actions": {
+      "title": "Actions à suivre ({{count}})",
+      "description": "Description",
+      "responsible": "Responsable",
+      "dueDate": "Échéance",
+      "status": "Statut",
+      "overdue": "(en retard)",
+      "empty": "Aucune action pour le moment",
+      "descriptionLabel": "Description *",
+      "descriptionPlaceholder": "Description de l'action",
+      "responsibleLabel": "Responsable *",
+      "responsiblePlaceholder": "Responsable",
+      "dueDateLabel": "Échéance",
+      "adding": "Ajout…",
+      "add": "Ajouter l'action"
+    },
+    "minutes": {
+      "title": "PV de chantier",
+      "placeholder": "Procès-verbal de la réunion…",
+      "save": "Enregistrer le PV"
+    },
+    "completing": "Clôture…",
+    "complete": "Clôturer la réunion",
+    "downloadPdf": "Télécharger le PV (PDF)"
+  },
+  "messages": {
+    "confirmComplete": "Voulez-vous vraiment clôturer cette réunion ?",
+    "loadFailed": "Impossible de charger les réunions",
+    "detailFailed": "Impossible de charger la réunion",
+    "createFailed": "Impossible de créer la réunion",
+    "addAttendeeFailed": "Impossible d'ajouter le participant",
+    "removeAttendeeFailed": "Impossible de retirer le participant",
+    "addActionFailed": "Impossible d'ajouter l'action",
+    "updateActionFailed": "Impossible de mettre à jour l'action",
+    "saveMinutesFailed": "Impossible d'enregistrer le PV",
+    "completeFailed": "Impossible de clôturer la réunion",
+    "pdfFailed": "Impossible de générer le PV."
+  }
+}

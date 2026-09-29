@@ -1,0 +1,30 @@
+{
+  "brand": "Portail de projet OXACAN",
+  "loading": "Chargement du portail de votre projet…",
+  "unavailable": {
+    "title": "Portail indisponible",
+    "invalidLink": "Ce lien vers le portail est invalide ou a expiré. Veuillez contacter votre chef de projet.",
+    "loadFailed": "Impossible de charger les données du portail. Veuillez réessayer plus tard."
+  },
+  "progress": "Avancement global",
+  "tasks": {
+    "title": "Aperçu des tâches",
+    "todo": "À faire",
+    "inProgress": "En cours",
+    "done": "Terminées"
+  },
+  "lots": {
+    "title": "Lots",
+    "taskCount_one": "{{count}} tâche",
+    "taskCount_other": "{{count}} tâches"
+  },
+  "milestones": {
+    "title": "Jalons"
+  },
+  "reports": {
+    "title": "Dernières nouvelles du chantier"
+  },
+  "footer": {
+    "poweredBy": "Propulsé par "
+  }
+}

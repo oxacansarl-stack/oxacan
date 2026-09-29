@@ -1,0 +1,36 @@
+{
+  "title": "Catalogue",
+  "actions": {
+    "importCsv": "Importer un CSV",
+    "importing": "Importation…",
+    "dismiss": "Masquer"
+  },
+  "import": {
+    "complete": "Importation terminée :",
+    "summary": "{{matched}} correspondance(s), {{unmatched}} sans correspondance",
+    "failed": "Échec de l'importation : {{message}}"
+  },
+  "filters": {
+    "search": "Rechercher un article…",
+    "allCategories": "Toutes les catégories"
+  },
+  "state": {
+    "loading": "Chargement des articles du catalogue…"
+  },
+  "table": {
+    "npkNumber": "N° CAN/NPK",
+    "description": "Description",
+    "unit": "Unité",
+    "category": "Catégorie",
+    "medianPrice": "Prix médian (CHF)",
+    "observations": "Observations"
+  },
+  "empty": {
+    "articles": "Aucun article trouvé",
+    "hint": "Importez un fichier CSV contenant votre catalogue d'articles CAN/NPK pour commencer."
+  },
+  "messages": {
+    "noValidRows": "Aucune ligne valide trouvée dans le fichier CSV.",
+    "loadFailed": "Impossible de charger les articles du catalogue."
+  }
+}

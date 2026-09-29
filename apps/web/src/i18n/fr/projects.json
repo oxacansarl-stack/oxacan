@@ -1,0 +1,17 @@
+{
+  "title": "Projets",
+  "searchPlaceholder": "Rechercher par nom, référence, chef de projet…",
+  "allStatuses": "Tous les statuts",
+  "loginRequired": "Connexion requise",
+  "table": {
+    "reference": "Référence",
+    "name": "Nom",
+    "client": "Client",
+    "status": "Statut",
+    "progress": "Avancement",
+    "budget": "Budget HT (CHF)",
+    "manager": "Chef de projet",
+    "startDate": "Date de début"
+  },
+  "empty": "Aucun projet trouvé"
+}

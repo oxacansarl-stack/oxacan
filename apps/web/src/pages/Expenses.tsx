@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { apiGet, apiPost, apiDelete, ApiError, formatCHF } from '../lib/api';
+import { useTranslation } from 'react-i18next';
+import { apiGet, apiPost, apiDelete, ApiError } from '../lib/api';
+import { errorMessage } from '../lib/errors';
+import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -32,12 +35,12 @@ interface Expense {
 /* ------------------------------------------------------------------ */
 
 const CATEGORIES = [
-  { value: 'material', label: 'Material', color: '#2563eb' },
-  { value: 'travel', label: 'Travel', color: '#8b5cf6' },
-  { value: 'per_diem', label: 'Per Diem', color: '#f59e0b' },
-  { value: 'subcontractor', label: 'Subcontractor', color: '#ec4899' },
-  { value: 'equipment_rental', label: 'Equipment Rental', color: '#14b8a6' },
-  { value: 'other', label: 'Other', color: '#6b7280' },
+  { value: 'material', color: '#2563eb' },
+  { value: 'travel', color: '#8b5cf6' },
+  { value: 'per_diem', color: '#f59e0b' },
+  { value: 'subcontractor', color: '#ec4899' },
+  { value: 'equipment_rental', color: '#14b8a6' },
+  { value: 'other', color: '#6b7280' },
 ] as const;
 
 const CATEGORY_COLORS: Record<string, { bg: string; fg: string }> = {
@@ -112,33 +115,11 @@ const btnOutline: React.CSSProperties = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-function statusLabel(s: string): string {
-  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** 'YYYY-MM-DD' → local date without timezone shift */
-function formatDate(date: string): string {
-  if (!date) return '-';
-  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('fr-CH');
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (err.status === 403) return `Not allowed: ${err.message}`;
-    return err.message || fallback;
-  }
-  return err instanceof Error && err.message ? err.message : fallback;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function Expenses() {
+  const { t } = useTranslation('expenses');
   // Form state
   const [showForm, setShowForm] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -185,7 +166,7 @@ export default function Expenses() {
         setExpenses(list ?? []);
         setError('');
       })
-      .catch((err) => setError(errorMessage(err, 'Failed to load expenses')))
+      .catch((err) => setError(errorMessage(err, t('messages.loadFailed'))))
       .finally(() => setLoading(false));
   }, [statusFilter, categoryFilter]);
 
@@ -200,7 +181,7 @@ export default function Expenses() {
     // CHF → integer centimes (API rejects negatives and non-integers)
     const amountCents = Math.round(parseFloat(formAmount) * 100);
     if (!Number.isFinite(amountCents) || amountCents < 0) {
-      setError('Amount must be a positive CHF value.');
+      setError(t('messages.invalidAmount'));
       return;
     }
     setFormLoading(true);
@@ -223,7 +204,7 @@ export default function Expenses() {
       setShowForm(false);
       loadExpenses();
     } catch (err) {
-      setError(errorMessage(err, 'Failed to create expense'));
+      setError(errorMessage(err, t('messages.createFailed')));
     } finally {
       setFormLoading(false);
     }
@@ -237,7 +218,7 @@ export default function Expenses() {
       ? expenses.filter((e) => selected.has(e.id) && e.userId === me.id && (e.status === 'draft' || e.status === 'rejected')).map((e) => e.id)
       : Array.from(selected);
     if (expenseIds.length === 0) {
-      setError('Select at least one of your own draft or rejected expenses to submit.');
+      setError(t('messages.selectOwnDrafts'));
       return;
     }
     setActionLoading(true);
@@ -246,7 +227,7 @@ export default function Expenses() {
       setSelected(new Set());
       loadExpenses();
     } catch (err) {
-      setError(errorMessage(err, 'Submit failed'));
+      setError(errorMessage(err, t('messages.submitFailed')));
     } finally {
       setActionLoading(false);
     }
@@ -262,8 +243,8 @@ export default function Expenses() {
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 403
-          ? 'You can only approve expenses of your own team members (not your own).'
-          : errorMessage(err, 'Approve failed'),
+          ? t('messages.approveForbidden')
+          : errorMessage(err, t('messages.approveFailed')),
       );
     } finally {
       setActionLoading(false);
@@ -272,7 +253,7 @@ export default function Expenses() {
 
   const handleReject = async () => {
     if (selected.size === 0) return;
-    const reason = prompt('Rejection reason:');
+    const reason = prompt(t('prompts.rejectionReason'));
     if (!reason) return;
     setActionLoading(true);
     try {
@@ -282,8 +263,8 @@ export default function Expenses() {
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 403
-          ? 'You can only reject expenses of your own team members (not your own).'
-          : errorMessage(err, 'Reject failed'),
+          ? t('messages.rejectForbidden')
+          : errorMessage(err, t('messages.rejectFailed')),
       );
     } finally {
       setActionLoading(false);
@@ -291,12 +272,12 @@ export default function Expenses() {
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (!confirm('Delete this expense?')) return;
+    if (!confirm(t('prompts.confirmDelete'))) return;
     try {
       await apiDelete(`/expenses/${id}`);
       loadExpenses();
     } catch (err) {
-      setError(errorMessage(err, 'Delete failed'));
+      setError(errorMessage(err, t('messages.deleteFailed')));
     }
   };
 
@@ -330,14 +311,14 @@ export default function Expenses() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>Expenses</h1>
-          <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>Track and manage project expenses</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
+          <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>{t('subtitle')}</p>
         </div>
         <button
           style={{ ...btnPrimary }}
           onClick={() => setShowForm(!showForm)}
         >
-          {showForm ? 'Cancel' : '+ New Expense'}
+          {showForm ? t('common:actions.cancel') : t('actions.new')}
         </button>
       </div>
 
@@ -359,31 +340,31 @@ export default function Expenses() {
             marginBottom: 24,
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16 }}>New Expense</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16 }}>{t('form.title')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Project (optional)</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.project')}</label>
               <select style={{ ...inputStyle }} value={formProjectId} onChange={(e) => setFormProjectId(e.target.value)}>
-                <option value="">No project</option>
+                <option value="">{t('form.noProject')}</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Date</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.date')}</label>
               <input type="date" style={{ ...inputStyle }} value={formDate} onChange={(e) => setFormDate(e.target.value)} required />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Category</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.category')}</label>
               <select style={{ ...inputStyle }} value={formCategory} onChange={(e) => setFormCategory(e.target.value)}>
                 {CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
+                  <option key={c.value} value={c.value}>{enumLabel('expenseCategory', c.value)}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Amount (CHF)</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.amount')}</label>
               <input
                 type="number"
                 step="0.05"
@@ -396,10 +377,10 @@ export default function Expenses() {
               />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Description</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.description')}</label>
               <input
                 style={{ ...inputStyle }}
-                placeholder="Describe the expense..."
+                placeholder={t('form.descriptionPlaceholder')}
                 value={formDescription}
                 onChange={(e) => setFormDescription(e.target.value)}
                 required
@@ -409,12 +390,12 @@ export default function Expenses() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
               <input type="checkbox" checked={formBillable} onChange={(e) => setFormBillable(e.target.checked)} />
-              Billable to client
+              {t('form.billable')}
             </label>
             <div style={{ flex: 1 }} />
-            <button type="button" style={{ ...btnOutline }} onClick={() => setShowForm(false)}>Cancel</button>
+            <button type="button" style={{ ...btnOutline }} onClick={() => setShowForm(false)}>{t('common:actions.cancel')}</button>
             <button type="submit" style={{ ...btnPrimary }} disabled={formLoading}>
-              {formLoading ? 'Creating...' : 'Create Expense'}
+              {formLoading ? t('actions.creating') : t('actions.create')}
             </button>
           </div>
         </form>
@@ -435,9 +416,9 @@ export default function Expenses() {
                 borderLeft: `3px solid ${cat.color}`,
               }}
             >
-              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{cat.label}</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{enumLabel('expenseCategory', cat.value)}</div>
               <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                CHF {formatCHF(cat.total)}
+                {formatMoney(cat.total)}
               </div>
             </div>
           ))}
@@ -462,7 +443,7 @@ export default function Expenses() {
                 cursor: 'pointer',
               }}
             >
-              {statusLabel(tab)}
+              {tab === 'all' ? t('tabs.all') : statusLabel('expense', tab)}
             </button>
           ))}
         </div>
@@ -471,9 +452,9 @@ export default function Expenses() {
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
         >
-          <option value="">All Categories</option>
+          <option value="">{t('filters.allCategories')}</option>
           {CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value}>{c.label}</option>
+            <option key={c.value} value={c.value}>{enumLabel('expenseCategory', c.value)}</option>
           ))}
         </select>
       </div>
@@ -482,15 +463,15 @@ export default function Expenses() {
       {selected.size > 0 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           <button style={{ ...btnPrimary }} onClick={handleSubmit} disabled={actionLoading}>
-            Submit ({selected.size})
+            {t('actions.submit', { count: selected.size })}
           </button>
           {canApprove && (
             <>
               <button style={{ ...btnSuccess }} onClick={handleApprove} disabled={actionLoading}>
-                Approve ({selected.size})
+                {t('actions.approve', { count: selected.size })}
               </button>
               <button style={{ ...btnDanger }} onClick={handleReject} disabled={actionLoading}>
-                Reject ({selected.size})
+                {t('actions.reject', { count: selected.size })}
               </button>
             </>
           )}
@@ -499,7 +480,7 @@ export default function Expenses() {
 
       {/* Table */}
       {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>Loading...</div>
+        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -511,11 +492,11 @@ export default function Expenses() {
                   onChange={toggleSelectAll}
                 />
               </th>
-              {['Date', 'Category', 'Description', 'Project', 'Amount', 'Billable', 'Status', ''].map((h) => (
+              {['date', 'category', 'description', 'project', 'amount', 'billable', 'status', ''].map((h) => (
                 <th
                   key={h || 'actions'}
                   style={{
-                    textAlign: h === 'Amount' ? 'right' : 'left',
+                    textAlign: h === 'amount' ? 'right' : 'left',
                     padding: '10px 12px',
                     borderBottom: '2px solid #e5e7eb',
                     fontSize: 12,
@@ -525,7 +506,7 @@ export default function Expenses() {
                     letterSpacing: 0.5,
                   }}
                 >
-                  {h}
+                  {h ? t(`table.${h}`) : ''}
                 </th>
               ))}
             </tr>
@@ -534,7 +515,7 @@ export default function Expenses() {
             {expenses.length === 0 && (
               <tr>
                 <td colSpan={9} style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}>
-                  No expenses found
+                  {t('empty')}
                 </td>
               </tr>
             )}
@@ -570,7 +551,7 @@ export default function Expenses() {
                         color: cCols.fg,
                       }}
                     >
-                      {statusLabel(expense.category)}
+                      {enumLabel('expenseCategory', expense.category)}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -580,13 +561,13 @@ export default function Expenses() {
                     {expense.project?.name || '-'}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 14, textAlign: 'right', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-                    CHF {formatCHF(expense.amountCents)}
+                    {formatMoney(expense.amountCents)}
                   </td>
                   <td style={{ padding: '10px 12px', fontSize: 13 }}>
                     {expense.isBillable ? (
-                      <span style={{ color: '#16a34a', fontWeight: 500 }}>Yes</span>
+                      <span style={{ color: '#16a34a', fontWeight: 500 }}>{t('common:actions.yes')}</span>
                     ) : (
-                      <span style={{ color: '#9ca3af' }}>No</span>
+                      <span style={{ color: '#9ca3af' }}>{t('common:actions.no')}</span>
                     )}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
@@ -601,11 +582,11 @@ export default function Expenses() {
                         color: sCols.fg,
                       }}
                     >
-                      {statusLabel(expense.status)}
+                      {statusLabel('expense', expense.status)}
                     </span>
                     {expense.status === 'rejected' && expense.rejectionReason && (
                       <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 4, maxWidth: 260 }}>
-                        Reason: {expense.rejectionReason}
+                        {t('table.reason', { reason: expense.rejectionReason })}
                       </div>
                     )}
                   </td>
@@ -621,9 +602,9 @@ export default function Expenses() {
                           cursor: 'pointer',
                           padding: '4px 8px',
                         }}
-                        title="Delete"
+                        title={t('common:actions.delete')}
                       >
-                        Delete
+                        {t('common:actions.delete')}
                       </button>
                     )}
                   </td>

@@ -1,0 +1,36 @@
+{
+  "title": "Tableau de bord",
+  "stats": {
+    "activeProjects": "Projets en cours",
+    "openOffers": "Offres ouvertes",
+    "pendingInvoices": "Factures en attente",
+    "monthRevenue": "Chiffre d'affaires du mois",
+    "loginRequired": "Connexion requise",
+    "unavailable": "Indisponible"
+  },
+  "quickActions": {
+    "title": "Actions rapides",
+    "newOffer": "+ Nouvelle offre",
+    "newInvoice": "+ Nouvelle facture",
+    "clockIn": "Timbrer l'arrivée",
+    "newReport": "+ Nouveau rapport journalier"
+  },
+  "financial": {
+    "title": "Aperçu financier",
+    "totalInvoiced": "Total facturé",
+    "totalPaid": "Total encaissé",
+    "outstanding": "Solde ouvert"
+  },
+  "recent": {
+    "title": "Activité récente",
+    "offers": "Offres récentes",
+    "invoices": "Factures récentes",
+    "timeEntries": "Timbrages récents",
+    "noOffers": "Aucune offre pour le moment",
+    "noInvoices": "Aucune facture pour le moment",
+    "noTimeEntries": "Aucun timbrage pour le moment",
+    "draftInvoice": "Brouillon",
+    "project": "Projet",
+    "openEntry": "En cours"
+  }
+}

@@ -1,5 +1,6 @@
 import { API_URL } from './config';
 import { getAccessToken } from './supabase';
+import { exists, t } from '../i18n';
 
 /* ── Envelope + error types ──────────────────────────────── */
 
@@ -49,11 +50,20 @@ export function isNetworkError(err: unknown): boolean {
   return err instanceof ApiError && err.isNetwork;
 }
 
+/**
+ * French message for any failure, same rules as the web app: details.rule →
+ * errors.rule.*, else code → errors.code.*, else generic. Raw (English) server
+ * text is never shown.
+ */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    return err.isNetwork ? 'No connection to the server.' : err.message;
+    if (err.isNetwork) return t('errors.network');
+    if (err.rule && exists(`errors.rule.${err.rule}`)) return t(`errors.rule.${err.rule}`);
+    if (err.code && exists(`errors.code.${err.code}`)) return t(`errors.code.${err.code}`);
+    return t('errors.generic');
   }
-  return err instanceof Error ? err.message : 'Something went wrong.';
+  if (err instanceof TypeError) return t('errors.network');
+  return t('errors.generic');
 }
 
 /* ── 401 handling ────────────────────────────────────────── */
