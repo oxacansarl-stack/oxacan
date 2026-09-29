@@ -85,12 +85,12 @@ describe('Tenant isolation in the database (RLS as the app role)', () => {
     expect(rows[0]).toEqual({ rolsuper: false, rolbypassrls: false });
   });
 
-  it('every table with company_id has RLS enabled and forced', async () => {
+  it('every table with company_id (and task_dependency) has RLS enabled and forced', async () => {
     const { rows } = await db.query(
       `SELECT relname FROM pg_class
        WHERE relnamespace = 'public'::regnamespace AND relname = ANY($1)
          AND NOT (relrowsecurity AND relforcerowsecurity)`,
-      [tenantTables],
+      [[...tenantTables, 'task_dependency']],
     );
     expect(tenantTables.length).toBeGreaterThan(40);
     expect(rows.map((r) => r.relname)).toEqual([]);

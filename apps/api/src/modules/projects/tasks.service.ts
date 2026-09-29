@@ -199,25 +199,38 @@ export class TasksService {
     });
     if (!successor) throw new NotFoundError('Task', successorId);
 
-    // Check if dependency already exists
-    const existing = await this.dependencyRepo.findOne({
-      where: { predecessorId, successorId },
-    });
-    if (existing) {
-      throw new BusinessRuleError(
-        'DUPLICATE_DEPENDENCY',
-        'This dependency already exists.',
+    return this.dependencyRepo.manager.transaction(async (m) => {
+      // Serialise per project so two concurrent additions can't close a loop together.
+      await m.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`task_dependency:${projectId}`]);
+
+      const existing = await m.findOne(TaskDependency, { where: { predecessorId, successorId } });
+      if (existing) {
+        throw new BusinessRuleError('DUPLICATE_DEPENDENCY', 'This dependency already exists.');
+      }
+
+      // Adding predecessor → successor creates a cycle if successor already leads to predecessor.
+      const [cycle] = await m.query(
+        `WITH RECURSIVE reachable(id) AS (
+           SELECT successor_id FROM task_dependency WHERE predecessor_id = $1
+           UNION
+           SELECT d.successor_id FROM task_dependency d JOIN reachable r ON d.predecessor_id = r.id
+         )
+         SELECT 1 FROM reachable WHERE id = $2 LIMIT 1`,
+        [successorId, predecessorId],
       );
-    }
+      if (cycle) {
+        throw new BusinessRuleError('CIRCULAR_DEPENDENCY', 'This dependency would create a loop between tasks.');
+      }
 
-    const dependency = this.dependencyRepo.create({
-      predecessorId,
-      successorId,
-      type: type ?? 'finish_to_start',
-      lagDays: lagDays ?? 0,
+      return m.save(
+        m.create(TaskDependency, {
+          predecessorId,
+          successorId,
+          type: type ?? 'finish_to_start',
+          lagDays: lagDays ?? 0,
+        }),
+      );
     });
-
-    return this.dependencyRepo.save(dependency);
   }
 
   async removeDependency(

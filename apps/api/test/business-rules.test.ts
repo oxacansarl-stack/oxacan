@@ -350,3 +350,25 @@ describe('Company banking settings', () => {
     expect(settings.defaultPaymentTermsDays).toBe(20);
   });
 });
+
+describe('Task dependencies under RLS', () => {
+  it('creates, reads and isolates dependencies between tasks', async () => {
+    const projectId = await createProject(admin, 'Dependency project');
+    const a = await ok(admin.post(`/projects/${projectId}/tasks`, { title: 'Démolition' }));
+    const b = await ok(admin.post(`/projects/${projectId}/tasks`, { title: 'Chape' }));
+    await ok(admin.post(`/projects/${projectId}/tasks/${a.id}/dependencies`, { successorId: b.id, type: 'finish_to_start' }));
+    const c = await ok(admin.post(`/projects/${projectId}/tasks`, { title: 'Revêtement' }));
+    await ok(admin.post(`/projects/${projectId}/tasks/${b.id}/dependencies`, { successorId: c.id }));
+    // A → B → C: both a direct (B → A) and an indirect (C → A) loop are refused.
+    for (const [from, to] of [[b.id, a.id], [c.id, a.id]]) {
+      const res = await admin.post(`/projects/${projectId}/tasks/${from}/dependencies`, { successorId: to });
+      expect(res.status).toBe(422);
+      expect(res.error?.details?.rule).toBe('CIRCULAR_DEPENDENCY');
+    }
+
+    const gantt = await ok(admin.get(`/projects/${projectId}/gantt`));
+    expect(JSON.stringify(gantt)).toContain(b.id);
+    const { rows } = await db.query('SELECT count(*)::int AS n FROM task_dependency WHERE predecessor_id = $1', [a.id]);
+    expect(rows[0].n).toBe(1);
+  });
+});
