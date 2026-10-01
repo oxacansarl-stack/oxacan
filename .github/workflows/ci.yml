@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx turbo run typecheck
+      - run: npx turbo run build
+
+  api-tests:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # Test-only values; nothing here is a real credential. DB_HOST must be "localhost":
+    # the API and migrations only disable SSL for that exact host.
+    env:
+      NODE_ENV: test
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_NAME: postgres
+      # Non-superuser role the API connects as (created by scripts/db/app-role.sql in global setup)
+      DB_USERNAME: oxacan_app
+      DB_PASSWORD: ci-app-role-password
+      # Schema owner, used for migrations and app-role setup
+      DB_MIGRATION_USERNAME: postgres
+      DB_MIGRATION_PASSWORD: ci-postgres-password
+      JWT_SECRET: ci-only-jwt-secret-not-a-real-secret-0000
+      RLS_CONTEXT_SECRET: ci-only-rls-context-secret-not-a-real-secret-0000
+      JWT_EXPIRATION: '3600'
+      WEB_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Ensure psql is available
+        run: |
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
+      - run: npm ci
+      - name: Build API and its workspace dependencies
+        run: npx turbo run build --filter=@oxacan/api...
+      # global-setup.ts creates the oxacan_test database, runs migrations, applies
+      # scripts/db/app-role.sql, seeds fixtures and boots the API with a mock Supabase JWKS.
+      # The git-ignored corpus suite skips itself when test/.corpus is absent.
+      - name: Run API integration tests
+        run: npm run test -w @oxacan/api
