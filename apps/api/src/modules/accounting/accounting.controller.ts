@@ -22,6 +22,7 @@ import {
 } from '../../common/decorators/roles.decorator';
 import { SkipEnvelope } from '../../common/decorators/skip-envelope.decorator';
 import { AccountingService, FiduciaryFilters } from './accounting.service';
+import { FinancialStatementsService, swissToday } from './financial-statements.service';
 import {
   FIDUCIARY_CATEGORIES,
   FIDUCIARY_FILES,
@@ -38,7 +39,7 @@ const MAX_PAGE_SIZE = 500;
 const ISO_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /** Parses ?page / ?limit; invalid or missing values fall back to the service defaults. */
-function parsePaging(page?: string, limit?: string) {
+export function parsePaging(page?: string, limit?: string) {
   const p = page ? parseInt(page, 10) : NaN;
   const l = limit ? parseInt(limit, 10) : NaN;
   return {
@@ -48,7 +49,7 @@ function parsePaging(page?: string, limit?: string) {
 }
 
 /** Optional YYYY-MM-DD query filter; malformed values are a 400 instead of a DB error. */
-function optionalDate(name: string, value?: string): string | undefined {
+export function optionalDate(name: string, value?: string): string | undefined {
   if (value === undefined || value === '') return undefined;
   // The regex alone accepts impossible days such as 2026-02-30; round-trip through UTC to reject them.
   if (!ISO_DATE.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
@@ -63,7 +64,10 @@ function optionalDate(name: string, value?: string): string | undefined {
  */
 @Controller('accounting')
 export class AccountingController {
-  constructor(private readonly service: AccountingService) {}
+  constructor(
+    private readonly service: AccountingService,
+    private readonly statements: FinancialStatementsService,
+  ) {}
 
   /* ═══════════════════════════════════════════════
      Chart of Accounts
@@ -197,6 +201,43 @@ export class AccountingController {
     @Query('asOfDate') asOfDate?: string,
   ) {
     return this.service.getTrialBalance(companyId, optionalDate('asOfDate', asOfDate));
+  }
+
+  /* ═══════════════════════════════════════════════
+     Financial statements (PRD §16.2 Bilan / Compte de résultat)
+     ═══════════════════════════════════════════════ */
+
+  /**
+   * Balance sheet at ?dateTo= (alias ?asOfDate=, default today in Switzerland), from posted entries.
+   * Optional ?dateFrom= splits the unclosed result into "before dateFrom" and "of the period".
+   */
+  @Get('reports/balance-sheet')
+  @Roles(...ADMIN_ONLY)
+  async getBalanceSheet(
+    @CompanyId() companyId: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('asOfDate') asOfDate?: string,
+    @Query('dateFrom') dateFrom?: string,
+  ) {
+    const end = optionalDate('dateTo', dateTo ?? asOfDate) ?? swissToday();
+    const start = optionalDate('dateFrom', dateFrom) ?? null;
+    if (start && start > end) throw new BadRequestException('dateFrom must not be after dateTo');
+    return this.statements.balanceSheet(companyId, end, start);
+  }
+
+  /** Income statement of [?dateFrom, ?dateTo] (both required), from posted entries. */
+  @Get('reports/income-statement')
+  @Roles(...ADMIN_ONLY)
+  async getIncomeStatement(
+    @CompanyId() companyId: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    const start = optionalDate('dateFrom', dateFrom);
+    const end = optionalDate('dateTo', dateTo);
+    if (!start || !end) throw new BadRequestException('dateFrom and dateTo are required (YYYY-MM-DD)');
+    if (start > end) throw new BadRequestException('dateFrom must not be after dateTo');
+    return this.statements.incomeStatement(companyId, start, end);
   }
 
   /* ═══════════════════════════════════════════════

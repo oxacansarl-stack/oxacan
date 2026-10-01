@@ -181,9 +181,15 @@ export class AccountingService {
       { accountNumber: '1000', name: 'Cash', type: 'asset' },
       { accountNumber: '1020', name: 'Bank', type: 'asset' },
       { accountNumber: '1100', name: 'Accounts Receivable', type: 'asset' },
+      { accountNumber: '1170', name: 'Input VAT', type: 'asset' },
       { accountNumber: '2000', name: 'Accounts Payable', type: 'liability' },
       { accountNumber: '2030', name: 'Customer Advances', type: 'liability' },
       { accountNumber: '2200', name: 'VAT Payable', type: 'liability' },
+      // Swiss KMU/PME class 28 (equity). 2979 receives the annual result when the year is closed;
+      // until then the balance sheet shows the unclosed result of revenue and expense accounts.
+      { accountNumber: '2800', name: 'Share Capital', type: 'equity' },
+      { accountNumber: '2970', name: 'Retained Earnings', type: 'equity' },
+      { accountNumber: '2979', name: 'Annual Profit or Loss', type: 'equity' },
       { accountNumber: '3000', name: 'Revenue', type: 'revenue' },
       { accountNumber: '3200', name: 'Work in Progress', type: 'revenue' },
       { accountNumber: '4000', name: 'Materials', type: 'expense' },
@@ -290,9 +296,12 @@ export class AccountingService {
     await queryRunner.startTransaction();
 
     try {
-      /* Gapless entry number */
-      const lockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0);
-      await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [lockKey + 1]);
+      /* Gapless entry number. Same 64-bit key as the invoicing journal postings ('journal:' ||
+         company id, seed 0), so manual and automatic entries serialise on one lock per company. */
+      await queryRunner.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('journal:' || $1, 0))`,
+        [companyId],
+      );
 
       const maxResult = await queryRunner.query(
         `SELECT MAX(entry_number) as max_num FROM journal_entry WHERE company_id = $1`,
@@ -538,7 +547,7 @@ export class AccountingService {
       `SELECT to_char(e.date, 'YYYY-MM-DD') AS date,
               u.id AS user_id, u.first_name, u.last_name,
               p.id AS project_id, p.reference AS project_ref, p.name AS project_name,
-              e.category, e.description, e.amount_cents, e.receipt_url
+              e.category, e.description, e.amount_cents, e.vat_rate_bps, e.vat_amount_cents, e.receipt_url
          FROM expense e
          JOIN app_user u ON u.id = e.user_id AND u.company_id = e.company_id
          LEFT JOIN project p ON p.id = e.project_id AND p.company_id = e.company_id
@@ -573,14 +582,14 @@ export class AccountingService {
       ] };
     });
 
-    // Expenses carry one amount (the receipt total) and no VAT breakdown in the data model,
-    // so HT = TTC and the VAT columns are 0.00 until a VAT rate is recorded per expense.
+    // amount_cents is the TTC receipt total. When the expense records its VAT (vat_rate_bps,
+    // vat_amount_cents), HT = TTC − VAT; when both are NULL (older rows) HT = TTC and VAT is 0.00.
     const frais = expenseRows.map((r) => {
-      const amount = Number(r.amount_cents) || 0;
-      const vatRate = 0; // hundredths of a percent: 810 = 8.10 %
-      const vat = Math.round((amount * vatRate) / 10000);
+      const ttc = Number(r.amount_cents) || 0;
+      const { vatRate, vat } = expenseVat(ttc, r.vat_rate_bps, r.vat_amount_cents);
+      const ht = ttc - vat;
       const cat = toFiduciaryCategory(r.category);
-      return { r, cat, ht: amount, cells: [
+      return { r, cat, ht, cells: [
         r.date,
         escapeCsvField(fullName(r)),
         r.user_id,
@@ -588,10 +597,10 @@ export class AccountingService {
         escapeCsvField(r.project_name),
         cat,
         escapeCsvField(r.description),
-        formatAmount(amount),
+        formatAmount(ht),
         formatAmount(vatRate),
         formatAmount(vat),
-        formatAmount(amount + vat),
+        formatAmount(ttc),
         escapeCsvField(r.receipt_url),
       ] };
     });
@@ -716,7 +725,26 @@ interface ExpenseRow {
   category: string;
   description: string;
   amount_cents: string | number;
+  vat_rate_bps: string | number | null;
+  vat_amount_cents: string | number | null;
   receipt_url: string | null;
+}
+
+/**
+ * VAT of one expense for frais_debours. vatRate is in basis points (810 = 8.10 %, printed "8.10").
+ * A recorded vat_amount_cents wins; with only a rate, the VAT contained in the TTC amount is
+ * derived (TTC × rate / (10000 + rate), rounded to the centime); with neither, VAT is 0.
+ */
+export function expenseVat(
+  ttcCents: number,
+  rateBps: string | number | null | undefined,
+  vatCents: string | number | null | undefined,
+): { vatRate: number; vat: number } {
+  const vatRate = rateBps != null ? Number(rateBps) || 0 : 0;
+  let vat = 0;
+  if (vatCents != null) vat = Number(vatCents) || 0;
+  else if (vatRate) vat = Math.round((ttcCents * vatRate) / (10000 + vatRate));
+  return { vatRate, vat };
 }
 
 interface ProjectSummary {

@@ -119,3 +119,41 @@ export class CreateJournalEntryDto {
   @Type(() => JournalEntryLineDto)
   lines!: JournalEntryLineDto[];
 }
+
+/* ─── Bank reconciliation ─── */
+
+export const BANK_STATEMENT_FORMATS = ['csv', 'camt053'] as const;
+
+/** 2 MB of statement text; the API's JSON body limit is the tighter bound in practice. */
+export const MAX_STATEMENT_CHARS = 2_000_000;
+
+export class ImportBankStatementDto {
+  /** The file's text: camt.053 XML or a CSV export. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(MAX_STATEMENT_CHARS)
+  content!: string;
+
+  /** Detected from the content when omitted (XML → camt053, otherwise csv). */
+  @IsOptional()
+  @IsIn(BANK_STATEMENT_FORMATS)
+  format?: (typeof BANK_STATEMENT_FORMATS)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  filename?: string;
+}
+
+/** Exactly one of paymentId / invoiceId (checked by BankReconciliationService). */
+export class MatchBankLineDto {
+  /** Link the line to a payment already recorded on an invoice. */
+  @IsOptional()
+  @IsUUID()
+  paymentId?: string;
+
+  /** Record the line as a payment of this open invoice (InvoicingService.recordPayment). */
+  @IsOptional()
+  @IsUUID()
+  invoiceId?: string;
+}

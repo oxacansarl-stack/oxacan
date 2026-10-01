@@ -3,8 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ChartOfAccounts } from './entities/chart-of-accounts.entity';
 import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalEntryLine } from './entities/journal-entry-line.entity';
+import { InvoicingModule } from '../invoicing/invoicing.module';
 import { AccountingService } from './accounting.service';
 import { AccountingController } from './accounting.controller';
+import { FinancialStatementsService } from './financial-statements.service';
+import { BankReconciliationService } from './bank-reconciliation.service';
+import { BankReconciliationController } from './bank-reconciliation.controller';
 
 @Module({
   imports: [
@@ -13,8 +17,10 @@ import { AccountingController } from './accounting.controller';
       JournalEntry,
       JournalEntryLine,
     ]),
+    // Bank reconciliation records matched receipts through InvoicingService.recordPayment.
+    InvoicingModule,
   ],
-  providers: [AccountingService],
-  controllers: [AccountingController],
+  providers: [AccountingService, FinancialStatementsService, BankReconciliationService],
+  controllers: [AccountingController, BankReconciliationController],
 })
 export class AccountingModule {}
