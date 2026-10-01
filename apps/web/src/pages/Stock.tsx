@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { apiGet, apiList, apiPost } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { enumLabel, formatDate } from '../lib/format';
+import type { PageProps } from '../lib/page-props';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -639,7 +640,7 @@ function MovementsTab() {
 
 const tabs: Tab[] = ['Locations', 'Items', 'Movements'];
 
-export default function Stock() {
+export default function Stock({ embedded = false }: PageProps) {
   const { t } = useTranslation('stock');
   const [activeTab, setActiveTab] = useState<Tab>('Locations');
 

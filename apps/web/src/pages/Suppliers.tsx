@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { apiList, apiPost, apiPut, apiDelete } from '../lib/api';
 import { errorMessage } from '../lib/errors';
+import type { PageProps } from '../lib/page-props';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -78,7 +79,7 @@ const emptyForm: SupplierForm = {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function Suppliers() {
+export default function Suppliers({ embedded = false }: PageProps) {
   const { t } = useTranslation('suppliers');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [total, setTotal] = useState(0);

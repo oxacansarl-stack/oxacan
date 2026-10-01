@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { formatAmount, formatDate, formatMoney, statusLabel } from '../lib/format';
+import type { PageProps } from '../lib/page-props';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -126,7 +127,7 @@ function parseCents(chfStr: string): number {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function PurchaseOrders() {
+export default function PurchaseOrders({ embedded = false }: PageProps) {
   const { t } = useTranslation('purchaseOrders');
   /* ---------- state ---------- */
   const [pos, setPos] = useState<PurchaseOrder[]>([]);

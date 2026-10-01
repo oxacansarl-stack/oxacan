@@ -4,6 +4,7 @@ import { apiGet, apiPut, apiPost, apiList } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
 import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import type { PageProps } from '../lib/page-props';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -146,7 +147,7 @@ function formatIban(value: string): string {
   return value.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim();
 }
 
-export default function Settings() {
+export default function Settings({ embedded = false }: PageProps) {
   const { t } = useTranslation('settings');
   // Project managers may view the defaults; changing them and the subscription is admin-only.
   const isAdmin = useCurrentUser().role === 'ADMIN';

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { apiGet, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
+import type { PageProps } from '../lib/page-props';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -45,7 +46,7 @@ const cardStyle: React.CSSProperties = {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function DataExport() {
+export default function DataExport({ embedded = false }: PageProps) {
   const { t } = useTranslation('dataExport');
   const [exportData, setExportData] = useState<ExportData | null>(null);
   const [loading, setLoading] = useState(false);

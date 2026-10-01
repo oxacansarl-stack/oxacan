@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 import { apiGet, apiList, apiPost, apiDelete } from '../lib/api';
 import { formatDate } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import type { PageProps } from '../lib/page-props';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -125,7 +126,7 @@ function copyToClipboard(text: string): void {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function Portal() {
+export default function Portal({ embedded = false }: PageProps) {
   const { t } = useTranslation('portal');
   const [tokens, setTokens] = useState<PortalToken[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
