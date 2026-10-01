@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Contract } from './entities/contract.entity';
 import { ContractAmendment } from './entities/contract-amendment.entity';
+import { AcompteScheduleItem } from './entities/acompte-schedule-item.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { Company } from '../company/entities/company.entity';
 import { ContractsService } from './contracts.service';
@@ -13,6 +14,7 @@ import { ProjectsModule } from '../projects/projects.module';
     TypeOrmModule.forFeature([
       Contract,
       ContractAmendment,
+      AcompteScheduleItem,
       Offer,
       Company,
     ]),

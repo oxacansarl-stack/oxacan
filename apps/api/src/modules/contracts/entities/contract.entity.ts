@@ -51,8 +51,19 @@ export class Contract {
   @Column({ type: 'bigint' })
   totalTtcCents: number;
 
+  /** Basis points held back on situations (PRD §15.4, "configurable par contrat"); default for its invoices. */
   @Column({ type: 'integer', default: 500 })
   retentionRate: number;
+
+  /** Réception finale (PRD §15.4): from then on the final invoice can release the retention. */
+  @Column({ type: 'date', nullable: true })
+  finalAcceptanceDate: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  finalAcceptanceNotes: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  finalAcceptanceRecordedBy: string | null;
 
   @Column({ type: 'text', default: 'swisscom' })
   esignatureProvider: string;

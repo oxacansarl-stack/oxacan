@@ -47,6 +47,10 @@ export class Invoice {
   @Column({ type: 'integer', nullable: true })
   situationNumber: number | null;
 
+  /** Acomptes only: the planned acompte of the contract's schedule this invoice bills (PRD §15.6). */
+  @Column({ type: 'uuid', nullable: true })
+  acompteScheduleItemId: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   referenceInvoiceId: string | null;
 

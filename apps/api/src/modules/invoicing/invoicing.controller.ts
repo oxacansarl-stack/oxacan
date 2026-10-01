@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Body,
   Param,
   Query,
@@ -12,12 +13,13 @@ import {
   CompanyId,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
-import { OFFICE_ROLES, Roles } from '../../common/decorators/roles.decorator';
+import { ADMIN_ONLY, OFFICE_ROLES, Roles } from '../../common/decorators/roles.decorator';
 import { InvoicingService } from './invoicing.service';
 import {
   CreateInvoiceDto,
   CreatePlusValueDto,
   RecordPaymentDto,
+  UpdateInvoiceNumberFormatDto,
   UpdateInvoiceStatusDto,
   UpdatePlusValueStatusDto,
 } from './dto/invoice.dto';
@@ -58,6 +60,33 @@ export class InvoicingController {
     @Param('projectId', ParseUUIDPipe) projectId: string,
   ) {
     return this.service.getSituationPreview(companyId, projectId);
+  }
+
+  /** What the project's final invoice (décompte final) settles and releases, and what blocks it. */
+  @Get('project/:projectId/final-preview')
+  @Roles(...OFFICE_ROLES)
+  async getFinalInvoicePreview(
+    @CompanyId() companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return this.service.getFinalInvoicePreview(companyId, projectId);
+  }
+
+  /* ───────────── Invoice number format (before :id) ───────────── */
+
+  @Get('settings/number-format')
+  @Roles(...OFFICE_ROLES)
+  async getInvoiceNumberFormat(@CompanyId() companyId: string) {
+    return this.service.getInvoiceNumberFormat(companyId);
+  }
+
+  @Put('settings/number-format')
+  @Roles(...ADMIN_ONLY)
+  async setInvoiceNumberFormat(
+    @CompanyId() companyId: string,
+    @Body() body: UpdateInvoiceNumberFormatDto,
+  ) {
+    return this.service.setInvoiceNumberFormat(companyId, body.format);
   }
 
   /* ───────────── Plus-values (before :id) ───────────── */

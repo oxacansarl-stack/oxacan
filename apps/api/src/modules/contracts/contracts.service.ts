@@ -3,13 +3,26 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Not, Repository } from 'typeorm';
 import { Contract } from './entities/contract.entity';
 import { ContractAmendment } from './entities/contract-amendment.entity';
+import { AcompteScheduleItem } from './entities/acompte-schedule-item.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { Company } from '../company/entities/company.entity';
-import { NotFoundError, BusinessRuleError, DEFAULT_VAT_RATE } from '@oxacan/shared-types';
+import { NotFoundError, BusinessRuleError, ValidationError, DEFAULT_VAT_RATE } from '@oxacan/shared-types';
 import { ttcFromHt } from '../../common/util/money';
+import { isCalendarDate } from '../../common/validation/decorators';
 import { ProjectsService } from '../projects/projects.service';
+import { liveFinalInvoice } from '../invoicing/final-invoice';
+import { acompteSchedule, AcompteScheduleRow, DueAcompte, findDueAcomptes } from './acompte-schedule';
 import type { UpdateContractDto } from './dto/contract.dto';
 import type { AddContractAmendmentDto as AddAmendmentDto } from './dto/contract-amendment.dto';
+import type {
+  CreateAcompteScheduleItemDto,
+  RecordFinalAcceptanceDto,
+  UpdateAcompteScheduleItemDto,
+} from './dto/acompte-schedule.dto';
+
+/** Contracts whose works can be accepted: signed ones (project created) that were not terminated. */
+const ACCEPTABLE_CONTRACT_STATUSES = ['signed', 'active', 'completed'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface ContractFilters {
   page?: number;
@@ -45,6 +58,8 @@ export class ContractsService {
     private readonly offerRepo: Repository<Offer>,
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
+    @InjectRepository(AcompteScheduleItem)
+    private readonly scheduleRepo: Repository<AcompteScheduleItem>,
     private readonly dataSource: DataSource,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
@@ -296,5 +311,155 @@ export class ContractsService {
     const contract = await this.findById(companyId, id);
     Object.assign(contract, dto);
     return this.contractRepo.save(contract);
+  }
+
+  /* ───────────── Final acceptance (réception finale, PRD §15.4) ───────────── */
+
+  /**
+   * Records the final acceptance of the contract's works. It can be re-recorded (to correct the
+   * date or notes) as long as the project has no final invoice; the final invoice requires it and
+   * releases the retention held on the situations.
+   */
+  async recordFinalAcceptance(
+    companyId: string,
+    contractId: string,
+    userId: string,
+    dto: RecordFinalAcceptanceDto,
+  ): Promise<Contract & { projectId: string | null }> {
+    await this.dataSource.transaction(async (m) => {
+      // Row lock: a final invoice being created holds it (FOR SHARE) until it commits.
+      const [contract] = await m.query(
+        `SELECT c.status, p.id AS project_id, $3::date > CURRENT_DATE AS in_future
+           FROM contract c LEFT JOIN project p ON p.company_id = c.company_id AND p.contract_id = c.id
+          WHERE c.id = $1 AND c.company_id = $2 FOR UPDATE OF c`,
+        [contractId, companyId, dto.acceptedOn],
+      );
+      if (!contract) throw new NotFoundError('Contract', contractId);
+      if (contract.in_future) throw new ValidationError('The final acceptance date cannot be in the future.');
+      if (!ACCEPTABLE_CONTRACT_STATUSES.includes(contract.status) || !contract.project_id) {
+        throw new BusinessRuleError(
+          'CONTRACT_NOT_SIGNED',
+          `Only the works of a signed contract can be accepted (this one is '${contract.status}').`,
+        );
+      }
+      const final = await liveFinalInvoice(m, companyId, contract.project_id);
+      if (final) {
+        throw new BusinessRuleError(
+          'FINAL_INVOICE_EXISTS',
+          `The project already has final invoice ${final.invoiceNumber}; cancel or credit it to change the acceptance.`,
+        );
+      }
+      await m.query(
+        `UPDATE contract SET final_acceptance_date = $3, final_acceptance_notes = $4,
+                final_acceptance_recorded_by = $5, updated_at = now()
+          WHERE id = $1 AND company_id = $2`,
+        [contractId, companyId, dto.acceptedOn, dto.notes ?? null, userId],
+      );
+    });
+    return this.findById(companyId, contractId);
+  }
+
+  /* ───────────── Acompte schedule (PRD §15.6) ───────────── */
+
+  async listAcompteSchedule(companyId: string, contractId: string): Promise<AcompteScheduleRow[]> {
+    await this.findById(companyId, contractId);
+    return acompteSchedule(this.dataSource, companyId, contractId);
+  }
+
+  async addAcompteScheduleItem(
+    companyId: string,
+    contractId: string,
+    userId: string,
+    dto: CreateAcompteScheduleItemDto,
+  ): Promise<AcompteScheduleRow> {
+    if ((dto.amountHtCents == null) === (dto.percentBps == null)) {
+      throw new ValidationError('Give either amountHtCents or percentBps for a planned acompte.');
+    }
+    const contract = await this.findById(companyId, contractId);
+    if (contract.status === 'terminated') {
+      throw new BusinessRuleError('CONTRACT_TERMINATED', 'A terminated contract has no acomptes to plan.');
+    }
+    const saved = await this.scheduleRepo.save(
+      this.scheduleRepo.create({
+        companyId,
+        contractId,
+        dueDate: dto.dueDate,
+        label: dto.label ?? null,
+        amountHtCents: dto.amountHtCents ?? null,
+        percentBps: dto.percentBps ?? null,
+        createdBy: userId,
+      }),
+    );
+    return (await acompteSchedule(this.dataSource, companyId, contractId, saved.id))[0];
+  }
+
+  async updateAcompteScheduleItem(
+    companyId: string,
+    contractId: string,
+    itemId: string,
+    dto: UpdateAcompteScheduleItemDto,
+  ): Promise<AcompteScheduleRow> {
+    if (dto.amountHtCents != null && dto.percentBps != null) {
+      throw new ValidationError('Give either amountHtCents or percentBps for a planned acompte, not both.');
+    }
+    await this.dataSource.transaction(async (m) => {
+      const item = await this.lockUnbilledItem(m, companyId, contractId, itemId);
+      if (dto.dueDate !== undefined) item.dueDate = dto.dueDate;
+      if (dto.label !== undefined) item.label = dto.label || null;
+      if (dto.amountHtCents != null) Object.assign(item, { amountHtCents: dto.amountHtCents, percentBps: null });
+      if (dto.percentBps != null) Object.assign(item, { percentBps: dto.percentBps, amountHtCents: null });
+      await m.save(item);
+    });
+    return (await acompteSchedule(this.dataSource, companyId, contractId, itemId))[0];
+  }
+
+  async removeAcompteScheduleItem(companyId: string, contractId: string, itemId: string): Promise<{ id: string; deleted: true }> {
+    await this.dataSource.transaction(async (m) => {
+      await this.lockUnbilledItem(m, companyId, contractId, itemId);
+      await m.delete(AcompteScheduleItem, { id: itemId, companyId });
+    });
+    return { id: itemId, deleted: true };
+  }
+
+  /**
+   * Planned acomptes due to be issued (on or before asOf + withinDays, not billed by a sent acompte).
+   * See findDueAcomptes in ./acompte-schedule, which the alerts job can call directly.
+   */
+  async dueAcomptes(
+    companyId: string,
+    opts: { asOf?: string; withinDays?: string; projectId?: string },
+  ): Promise<DueAcompte[]> {
+    if (opts.asOf !== undefined && !isCalendarDate(opts.asOf)) {
+      throw new ValidationError('asOf must be a date in YYYY-MM-DD format.');
+    }
+    if (opts.projectId !== undefined && !UUID_RE.test(opts.projectId)) {
+      throw new ValidationError('projectId must be a UUID.');
+    }
+    const withinDays = opts.withinDays === undefined ? 0 : Number(opts.withinDays);
+    if (!Number.isInteger(withinDays) || withinDays < 0 || withinDays > 366) {
+      throw new ValidationError('withinDays must be a whole number of days between 0 and 366.');
+    }
+    return findDueAcomptes(this.dataSource, companyId, { asOf: opts.asOf, withinDays, projectId: opts.projectId });
+  }
+
+  /**
+   * Locks a schedule item of the contract that no live acompte invoice bills: once an acompte
+   * (even a draft) bills it, it is changed by cancelling or crediting that invoice first. The
+   * invoice side reads the item FOR SHARE, so the two cannot interleave.
+   */
+  private async lockUnbilledItem(m: EntityManager, companyId: string, contractId: string, itemId: string) {
+    const item = await m.findOne(AcompteScheduleItem, {
+      where: { id: itemId, contractId, companyId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!item) throw new NotFoundError('AcompteScheduleItem', itemId);
+    const [row] = await acompteSchedule(m, companyId, contractId, itemId);
+    if (row.invoiceId) {
+      throw new BusinessRuleError(
+        'ACOMPTE_SCHEDULE_ITEM_INVOICED',
+        `This planned acompte is billed by invoice ${row.invoiceNumber}; cancel or credit it first.`,
+      );
+    }
+    return item;
   }
 }

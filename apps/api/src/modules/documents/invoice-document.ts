@@ -15,6 +15,8 @@ export interface InvoiceDocumentData {
   invoice: {
     type: string;
     invoiceNumber: string;
+    /** Situations: their per-project number (Situation 1, 2, …), next to the gapless invoice number. */
+    situationNumber?: number | null;
     status: string;
     issueDate: string | Date;
     dueDate: string | Date | null;
@@ -51,7 +53,10 @@ const TITLES: Record<string, string> = {
 
 export async function renderInvoice(d: InvoiceDocumentData): Promise<Buffer> {
   const { invoice, lines } = d;
-  const title = `${TITLES[invoice.type] ?? 'Facture'} n° ${invoice.invoiceNumber}`;
+  // A situation is titled by its per-project number (PRD §15.2); the gapless invoice number stays on it.
+  const title = invoice.type === 'situation' && invoice.situationNumber
+    ? `Situation ${invoice.situationNumber} – facture n° ${invoice.invoiceNumber}`
+    : `${TITLES[invoice.type] ?? 'Facture'} n° ${invoice.invoiceNumber}`;
   const doc = newDocument(title, d.sender.name);
   const isCredit = invoice.type === 'credit_note';
   const due = invoice.dueDate ?? addDays(invoice.issueDate, d.paymentTermsDays);
@@ -110,7 +115,12 @@ export async function renderInvoice(d: InvoiceDocumentData): Promise<Buffer> {
     { label: 'Total HT', value: chf(invoice.subtotalHtCents) },
     { label: `TVA ${pct(invoice.vatRate)}`, value: chf(invoice.vatAmountCents) },
     { label: 'Total TTC', value: chf(invoice.subtotalHtCents + invoice.vatAmountCents) },
-    ...(invoice.retentionAmountCents ? [{ label: 'Retenue de garantie', value: `– ${chf(invoice.retentionAmountCents)}` }] : []),
+    // A final invoice stores the retention it releases as a negative retention.
+    ...(invoice.retentionAmountCents && invoice.retentionAmountCents > 0
+      ? [{ label: 'Retenue de garantie', value: `– ${chf(invoice.retentionAmountCents)}` }]
+      : invoice.retentionAmountCents && invoice.retentionAmountCents < 0
+        ? [{ label: 'Libération de la retenue de garantie', value: `+ ${chf(-invoice.retentionAmountCents)}` }]
+        : []),
     ...(invoice.priorAcomptesCents ? [{ label: 'Acomptes déjà facturés', value: `– ${chf(invoice.priorAcomptesCents)}` }] : []),
     ...(rounding ? [{ label: 'Arrondi', value: chf(rounding) }] : []),
     { label: isCredit ? 'Montant crédité CHF' : 'Montant à payer CHF', value: chf(invoice.totalTtcCents), strong: true },

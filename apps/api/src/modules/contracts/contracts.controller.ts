@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -20,6 +21,11 @@ import {
   UpdateContractStatusDto,
 } from './dto/contract.dto';
 import { AddContractAmendmentDto, UpdateContractAmendmentStatusDto } from './dto/contract-amendment.dto';
+import {
+  CreateAcompteScheduleItemDto,
+  RecordFinalAcceptanceDto,
+  UpdateAcompteScheduleItemDto,
+} from './dto/acompte-schedule.dto';
 
 /** Parses a positive integer query param; falls back on missing/invalid values and clamps to max. */
 function positiveInt(value: string | undefined, max?: number): number | undefined {
@@ -50,6 +56,18 @@ export class ContractsController {
       clientId,
       offerId,
     });
+  }
+
+  /** Planned acomptes due to be issued, over all contracts (PRD §15.6 "acomptes à émettre"). */
+  @Get('acompte-schedule/due')
+  @Roles(...OFFICE_ROLES)
+  async dueAcomptes(
+    @CompanyId() companyId: string,
+    @Query('asOf') asOf?: string,
+    @Query('withinDays') withinDays?: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.contractsService.dueAcomptes(companyId, { asOf, withinDays, projectId });
   }
 
   @Get(':id')
@@ -111,5 +129,61 @@ export class ContractsController {
     @Body() body: UpdateContractAmendmentStatusDto,
   ) {
     return this.contractsService.updateAmendmentStatus(companyId, id, amendmentId, body.status);
+  }
+
+  /* ───────────── Final acceptance (PRD §15.4) ───────────── */
+
+  @Post(':id/final-acceptance')
+  @Roles(...OFFICE_ROLES)
+  async recordFinalAcceptance(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: RecordFinalAcceptanceDto,
+  ) {
+    return this.contractsService.recordFinalAcceptance(companyId, id, user.id, body);
+  }
+
+  /* ───────────── Acompte schedule (PRD §15.6) ───────────── */
+
+  @Get(':id/acompte-schedule')
+  @Roles(...OFFICE_ROLES)
+  async listAcompteSchedule(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.contractsService.listAcompteSchedule(companyId, id);
+  }
+
+  @Post(':id/acompte-schedule')
+  @Roles(...OFFICE_ROLES)
+  async addAcompteScheduleItem(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: CreateAcompteScheduleItemDto,
+  ) {
+    return this.contractsService.addAcompteScheduleItem(companyId, id, user.id, body);
+  }
+
+  @Patch(':id/acompte-schedule/:itemId')
+  @Roles(...OFFICE_ROLES)
+  async updateAcompteScheduleItem(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() body: UpdateAcompteScheduleItemDto,
+  ) {
+    return this.contractsService.updateAcompteScheduleItem(companyId, id, itemId, body);
+  }
+
+  @Delete(':id/acompte-schedule/:itemId')
+  @Roles(...OFFICE_ROLES)
+  async removeAcompteScheduleItem(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+  ) {
+    return this.contractsService.removeAcompteScheduleItem(companyId, id, itemId);
   }
 }

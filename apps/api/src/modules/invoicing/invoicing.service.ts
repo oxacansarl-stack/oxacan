@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager, In, QueryRunner } from 'typeorm';
+import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import { Invoice } from './entities/invoice.entity';
 import { InvoiceLine } from './entities/invoice-line.entity';
 import { PlusValue } from './entities/plus-value.entity';
@@ -15,6 +15,22 @@ import { assertProjectExists } from '../../common/util/assert-project';
 import { swissRound } from '../../common/util/money';
 import { sellingUnitCents } from '../offers/offer-pricing';
 import { CreateInvoiceDto, CreatePlusValueDto, RecordPaymentDto } from './dto/invoice.dto';
+import {
+  invoiceNumberFormat,
+  lockInvoiceNumbering,
+  lockJournal,
+  nextInvoiceNumber,
+  parseInvoiceNumberFormat,
+} from './invoice-number';
+import {
+  billedSoFar,
+  heldRetentionCents,
+  liveFinalInvoice,
+  pendingDraftNumbers,
+  UNCREDITED_INVOICES_SQL,
+} from './final-invoice';
+import { acompteScheduleItem } from '../contracts/acompte-schedule';
+import { situationLineCumulativeQuantity } from '../projects/executed-quantities';
 
 /** One side of a journal entry: positive amounts are debits, negative amounts credits. */
 interface PostingLine { account: string; amountCents: number; label: string }
@@ -40,9 +56,8 @@ async function postJournalEntry(
   if (accounts.length !== numbers.length) return null;
   const idOf = new Map(accounts.map((a) => [a.accountNumber, a.id]));
 
-  /* gapless entry number — same lock as manual journal entries */
-  const journalLockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0) + 1;
-  await manager.query('SELECT pg_advisory_xact_lock($1)', [journalLockKey]);
+  /* gapless entry number — same lock as manual journal entries (AccountingService.createEntry) */
+  await lockJournal(manager, companyId);
   const [{ max_num }] = await manager.query(
     'SELECT MAX(entry_number) AS max_num FROM journal_entry WHERE company_id = $1',
     [companyId],
@@ -79,8 +94,15 @@ async function postJournalEntry(
  * debit the client for what is due now plus the retention held back, release the acomptes they
  * deduct, owe the VAT, and book the remainder (HT net of 5-centime rounding) as revenue.
  * A credit note carries negated amounts, so the same lines reverse the original.
+ *
+ * The final invoice (décompte final) releases the retention held on the project: its
+ * retentionAmountCents is the negated retention released, so its total includes it. It debits
+ * the client for its total and credits 1100 for the released retention (the receivable the
+ * situations debited is now billed to the client), so the net 1100 movement is the same formula
+ * as above, shown as two lines. The credit note of a final invoice (pass releasesRetention) puts
+ * the retention receivable back.
  */
-function issuanceLines(inv: Invoice): PostingLine[] {
+function issuanceLines(inv: Invoice, releasesRetention = inv.type === 'final_invoice'): PostingLine[] {
   const label = `Invoice ${inv.invoiceNumber}`;
   const ttc = Number(inv.totalTtcCents);
   if (inv.type === 'acompte') {
@@ -92,6 +114,19 @@ function issuanceLines(inv: Invoice): PostingLine[] {
   const retention = Number(inv.retentionAmountCents || 0);
   const prior = Number(inv.priorAcomptesCents || 0);
   const vat = Number(inv.vatAmountCents);
+  if (releasesRetention) {
+    return [
+      { account: '1100', amountCents: ttc, label },
+      {
+        account: '1100',
+        amountCents: retention,
+        label: `${label} — ${inv.type === 'credit_note' ? 'retention release reversed' : 'retention released'}`,
+      },
+      { account: '2030', amountCents: prior, label: `${label} — acomptes deducted` },
+      { account: '2200', amountCents: -vat, label: `${label} — VAT` },
+      { account: '3000', amountCents: -(ttc + retention + prior - vat), label },
+    ];
+  }
   return [
     { account: '1100', amountCents: ttc + retention, label },
     { account: '2030', amountCents: prior, label: `${label} — acomptes deducted` },
@@ -136,19 +171,21 @@ export interface SituationPosition {
  * Positions of the project's contracted offer (project → contract → offer), each with the
  * quantity earlier situations already billed for it. Draft situations count, like their acompte
  * deduction: cancelling a draft (or crediting an issued situation) gives its quantities back.
- * Executed quantities are not recorded per position anywhere in OXACAN yet (tasks carry a
- * progress % only and aren't linked to offer lines), so the cumulative quantity comes from the
- * situation request.
+ * `executedQuantity` is the position's validated cumulative from the executed-quantity ledger
+ * (ExecutedQuantitiesService: recorded on site, validated by the project manager); null while
+ * nothing is validated for it. A situation line without a cumulative quantity defaults to it
+ * (situationLineCumulativeQuantity in projects/executed-quantities.ts).
  */
 async function situationPositions(
   db: { query: DataSource['query'] },
   companyId: string,
   projectId: string,
   offerLineIds?: string[],
-): Promise<SituationPosition[]> {
+): Promise<(SituationPosition & { executedQuantity: number | null })[]> {
   const rows: {
     id: string; position_number: number; description: string; unit: string; variant_type: string;
     quantity: string; unit_price_cents: number | null; margin_factor: number | null; previous: string;
+    executed: string | null;
   }[] = await db.query(
     `SELECT ol.id, ol.position_number, ol.description, ol.unit, ol.variant_type,
             ol.quantity::numeric AS quantity, ol.unit_price_cents, o.margin_factor,
@@ -157,11 +194,15 @@ async function situationPositions(
                 FROM invoice_line il
                 JOIN invoice i ON i.company_id = il.company_id AND i.id = il.invoice_id
                WHERE il.company_id = p.company_id AND il.offer_line_id = ol.id
-                 AND i.project_id = p.id AND i.type = 'situation' AND i.status <> 'cancelled'
+                 AND i.project_id = p.id AND i.type IN ('situation', 'final_invoice') AND i.status <> 'cancelled'
                  AND NOT EXISTS (SELECT 1 FROM invoice cn
                                   WHERE cn.company_id = i.company_id AND cn.reference_invoice_id = i.id
                                     AND cn.type = 'credit_note' AND cn.status <> 'cancelled')
-            ), 0) AS previous
+            ), 0) AS previous,
+            (SELECT SUM(eq.quantity_delta)
+               FROM executed_quantity eq
+              WHERE eq.company_id = p.company_id AND eq.project_id = p.id AND eq.offer_line_id = ol.id
+                AND eq.validated_at IS NOT NULL) AS executed
        FROM project p
        JOIN contract c ON c.company_id = p.company_id AND c.id = p.contract_id
        JOIN offer o ON o.company_id = c.company_id AND o.id = c.offer_id
@@ -180,6 +221,7 @@ async function situationPositions(
     offerQuantity: Number(r.quantity),
     unitPriceCents: r.unit_price_cents == null ? null : sellingUnitCents(Number(r.unit_price_cents), Number(r.margin_factor ?? 100)),
     previousQuantity: roundQuantity(Number(r.previous)),
+    executedQuantity: r.executed == null ? null : roundQuantity(Number(r.executed)),
   }));
 }
 
@@ -194,22 +236,17 @@ async function nextSituationNumber(db: { query: DataSource['query'] }, companyId
 }
 
 /**
- * Acomptes a new situation of the project deducts. Each acompte is deducted once: issued acomptes
- * that were not credited, minus what earlier situations of the project already deducted. A draft
- * situation reserves its deduction (cancelling it releases it), so two situations drafted in a
- * row can't both take it.
+ * Acomptes a new situation (or the final invoice) of the project deducts. Each acompte is deducted
+ * once: issued acomptes that were not credited, minus what earlier situations and the final
+ * invoice of the project already deducted. A draft situation reserves its deduction (cancelling
+ * it releases it), so two situations drafted in a row can't both take it.
  */
 async function remainingAcomptesCents(db: { query: DataSource['query'] }, companyId: string, projectId: string): Promise<number> {
   const [{ remaining }] = await db.query(
-    `WITH uncredited AS (
-       SELECT i.* FROM invoice i
-        WHERE i.company_id = $1 AND i.project_id = $2 AND i.status <> 'cancelled'
-          AND NOT EXISTS (SELECT 1 FROM invoice cn
-                           WHERE cn.company_id = i.company_id AND cn.reference_invoice_id = i.id
-                             AND cn.type = 'credit_note' AND cn.status <> 'cancelled'))
+    `WITH uncredited AS (${UNCREDITED_INVOICES_SQL})
      SELECT GREATEST(
        COALESCE((SELECT SUM(total_ttc_cents) FROM uncredited WHERE type = 'acompte' AND status <> 'draft'), 0)
-       - COALESCE((SELECT SUM(prior_acomptes_cents) FROM uncredited WHERE type = 'situation'), 0),
+       - COALESCE((SELECT SUM(prior_acomptes_cents) FROM uncredited WHERE type IN ('situation', 'final_invoice')), 0),
        0)::bigint AS remaining`,
     [companyId, projectId],
   );
@@ -252,16 +289,7 @@ const PLUS_VALUE_TRANSITIONS: Record<string, string[]> = {
   invoiced: [],
 };
 
-/** Next gapless number YYYY-NNN for the current year; caller must hold the company's invoice lock. */
-async function nextInvoiceNumber(queryRunner: QueryRunner, companyId: string): Promise<string> {
-  const year = new Date().getFullYear();
-  const [{ max }] = await queryRunner.query(
-    `SELECT MAX(substring(invoice_number from '[0-9]+$')::int) AS max
-     FROM invoice WHERE company_id = $1 AND invoice_number LIKE $2`,
-    [companyId, `${year}-%`],
-  );
-  return `${year}-${String((max ?? 0) + 1).padStart(3, '0')}`;
-}
+/* Gapless invoice numbers in the company's format: see nextInvoiceNumber in ./invoice-number. */
 
 @Injectable()
 export class InvoicingService {
@@ -351,13 +379,90 @@ export class InvoicingService {
       /* ── Resolve company defaults ── */
       const company = await this.companyRepo.findOne({ where: { id: companyId } });
       const vatRate = dto.vatRate ?? company?.defaultVatRate ?? DEFAULT_VAT_RATE;
-      const retentionRate = dto.retentionRate ?? company?.defaultRetentionRate ?? DEFAULT_RETENTION_RATE;
+      const isFinal = dto.type === 'final_invoice';
 
       /* ── Gapless invoice number with advisory lock ── */
-      const lockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0);
-      await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+      await lockInvoiceNumbering(queryRunner, companyId);
 
       const invoiceNumber = await nextInvoiceNumber(queryRunner, companyId);
+
+      /* ── The project's contract: retention rate (PRD §15.4 "configurable par contrat"), réception finale ── */
+      // FOR SHARE on the final invoice: the acceptance can't be changed until it commits.
+      const [contract]: { retention_rate: number; final_acceptance_date: string | null }[] = await queryRunner.query(
+        `SELECT c.retention_rate, to_char(c.final_acceptance_date, 'YYYY-MM-DD') AS final_acceptance_date
+           FROM project p JOIN contract c ON c.company_id = p.company_id AND c.id = p.contract_id
+          WHERE p.company_id = $1 AND p.id = $2 ${isFinal ? 'FOR SHARE OF c' : ''}`,
+        [companyId, dto.projectId],
+      );
+      const retentionRate =
+        dto.retentionRate ?? contract?.retention_rate ?? company?.defaultRetentionRate ?? DEFAULT_RETENTION_RATE;
+
+      /* ── Final invoice (décompte final, PRD §15.1 / §15.4) ── */
+      // Read under the invoice lock, like everything below, so two can't be created concurrently.
+      const finalInvoice = await liveFinalInvoice(queryRunner, companyId, dto.projectId);
+      if (finalInvoice && (isFinal || dto.type === 'situation' || dto.type === 'acompte')) {
+        throw new BusinessRuleError(
+          isFinal ? 'FINAL_INVOICE_EXISTS' : 'FINAL_INVOICE_ISSUED',
+          `The project's final invoice is ${finalInvoice.invoiceNumber}` +
+            (isFinal ? '.' : `; no ${dto.type === 'situation' ? 'situation' : 'acompte'} can follow it (credit it first).`),
+        );
+      }
+      let retentionReleasedCents = 0;
+      if (isFinal) {
+        if (!contract?.final_acceptance_date) {
+          throw new BusinessRuleError(
+            'FINAL_ACCEPTANCE_REQUIRED',
+            'Record the final acceptance of the works (réception finale) on the contract before its final invoice.',
+          );
+        }
+        const drafts = await pendingDraftNumbers(queryRunner, companyId, dto.projectId);
+        if (drafts.length) {
+          throw new BusinessRuleError(
+            'FINAL_INVOICE_DRAFTS_PENDING',
+            `Issue or cancel the project's draft invoices first: ${drafts.join(', ')}.`,
+          );
+        }
+        retentionReleasedCents = await heldRetentionCents(queryRunner, companyId, dto.projectId);
+      }
+
+      /* ── Planned acompte (PRD §15.6): the schedule item this acompte bills ── */
+      if (dto.acompteScheduleItemId) {
+        if (dto.type !== 'acompte') {
+          throw new ValidationError('Only an acompte can bill a planned acompte (acompteScheduleItemId).');
+        }
+        // FOR SHARE: the item can't be changed or removed until this invoice commits.
+        const [locked] = await queryRunner.query(
+          `SELECT s.id FROM acompte_schedule_item s
+             JOIN project p ON p.company_id = s.company_id AND p.contract_id = s.contract_id
+            WHERE s.company_id = $1 AND s.id = $2 AND p.id = $3 FOR SHARE OF s`,
+          [companyId, dto.acompteScheduleItemId, dto.projectId],
+        );
+        const item = locked ? await acompteScheduleItem(queryRunner, companyId, dto.acompteScheduleItemId) : null;
+        if (!item) {
+          throw new BusinessRuleError(
+            'ACOMPTE_SCHEDULE_ITEM_NOT_IN_PROJECT',
+            "The planned acompte isn't on the contract of this project.",
+          );
+        }
+        if (item.invoiceId) {
+          throw new BusinessRuleError(
+            'ACOMPTE_SCHEDULE_ITEM_INVOICED',
+            `This planned acompte is already billed by invoice ${item.invoiceNumber}.`,
+          );
+        }
+        // Without lines of its own, the acompte bills the planned amount.
+        if (!dto.lines.length && !(dto.plusValueIds ?? []).length) {
+          dto = {
+            ...dto,
+            lines: [{
+              description: item.label ? `Acompte : ${item.label}` : `Acompte selon échéancier du ${item.dueDate}`,
+              unit: 'forfait',
+              quantity: 1,
+              unitPriceCents: item.amountHtCents,
+            }],
+          };
+        }
+      }
 
       /* ── Plus-values billed on this invoice: approved, this project, not yet invoiced ── */
       const plusValueIds = [...new Set(dto.plusValueIds ?? [])];
@@ -376,15 +481,18 @@ export class InvoicingService {
           'Only approved plus-values of this project that are not invoiced yet can be billed.',
         );
       }
-      if (dto.lines.length + plusValues.length === 0) {
+      // The final invoice may have no line: it can just release the retention and settle.
+      if (dto.lines.length + plusValues.length === 0 && !isFinal) {
         throw new ValidationError('An invoice needs at least one line.');
       }
 
       /* ── Situation positions: what earlier situations billed, computed here (PRD §15.2) ── */
       const isSituation = dto.type === 'situation';
+      // The final invoice bills the rest of the executed quantities per position, like a situation.
+      const billsPositions = isSituation || isFinal;
       const offerLineIds = dto.lines.map((l) => l.offerLineId).filter((id): id is string => !!id);
-      if (!isSituation && offerLineIds.length) {
-        throw new ValidationError('Only situation lines bill offer positions (offerLineId).');
+      if (!billsPositions && offerLineIds.length) {
+        throw new ValidationError('Only situation and final invoice lines bill offer positions (offerLineId).');
       }
       if (new Set(offerLineIds).size !== offerLineIds.length) {
         throw new ValidationError('A situation bills each offer position on one line only.');
@@ -417,7 +525,8 @@ export class InvoicingService {
         if (position) {
           // Billed for the period: executed to date minus what earlier situations already billed.
           const previousQuantity = position.previousQuantity;
-          const cumulativeQuantity = l.cumulativeQuantity;
+          // The request's cumulative, else what the project manager validated on site.
+          const cumulativeQuantity = situationLineCumulativeQuantity(l.cumulativeQuantity, position);
           if (cumulativeQuantity == null) {
             throw new ValidationError(
               `Line ${i + 1}: no executed quantity is recorded for position ${position.positionNumber}; give its cumulative quantity.`,
@@ -450,7 +559,7 @@ export class InvoicingService {
           continue;
         }
 
-        if (isSituation && l.cumulativeQuantity != null) {
+        if (billsPositions && l.cumulativeQuantity != null) {
           throw new ValidationError(
             `Line ${i + 1}: cumulative quantities are tracked per offer position; set the line's offerLineId.`,
           );
@@ -492,20 +601,31 @@ export class InvoicingService {
         });
       }
 
-      /* ── Prior acomptes (for situation type): each acompte deducted once, drafts reserve ── */
+      /* ── Prior acomptes (situations and the final invoice): each acompte deducted once, drafts reserve ── */
       let priorAcomptesCents = 0;
-      if (dto.type === 'situation') {
+      if (dto.type === 'situation' || isFinal) {
         priorAcomptesCents = await remainingAcomptesCents(queryRunner.manager, companyId, dto.projectId);
       }
 
       /* ── VAT, retention, total ── */
-      // Retention guarantees executed work, so an advance payment request carries none.
-      const appliedRetentionRate = dto.type === 'acompte' ? 0 : retentionRate;
+      // Retention guarantees executed work, so an advance payment request carries none, and
+      // nothing is held back any more once the final invoice released it. The final invoice holds
+      // none on its own work and releases what the project held: its retention amount is the
+      // negated release, so total = HT + VAT + released retention − acomptes not yet deducted.
+      const appliedRetentionRate = dto.type === 'acompte' || isFinal || finalInvoice ? 0 : retentionRate;
       const vatAmountCents = swissRound(Math.round(subtotalHtCents * vatRate / 10000));
-      const retentionAmountCents = swissRound(Math.round(subtotalHtCents * appliedRetentionRate / 10000));
+      const retentionAmountCents = isFinal
+        ? -retentionReleasedCents
+        : swissRound(Math.round(subtotalHtCents * appliedRetentionRate / 10000));
       const totalTtcCents = swissRound(
         subtotalHtCents + vatAmountCents - retentionAmountCents - priorAcomptesCents,
       );
+      if (isFinal && totalTtcCents < 0) {
+        throw new BusinessRuleError(
+          'FINAL_INVOICE_NEGATIVE',
+          `The acomptes not yet deducted exceed what the final invoice settles by ${(-totalTtcCents / 100).toFixed(2)} CHF; credit the excess acompte first.`,
+        );
+      }
 
       /* ── Persist invoice ── */
       const invoiceEntity = queryRunner.manager.create(Invoice, {
@@ -524,6 +644,7 @@ export class InvoicingService {
         priorAcomptesCents,
         totalTtcCents,
         amountPaidCents: 0,
+        acompteScheduleItemId: dto.acompteScheduleItemId ?? null,
         notes: dto.notes || null,
         paymentTerms: dto.paymentTerms || null,
         createdById: userId,
@@ -587,10 +708,19 @@ export class InvoicingService {
 
     try {
       /* ── Gapless number ── */
-      const lockKey = Buffer.from(companyId.replace(/-/g, '').slice(0, 8), 'hex').readInt32BE(0);
-      await queryRunner.query('SELECT pg_advisory_xact_lock($1)', [lockKey]);
+      await lockInvoiceNumbering(queryRunner, companyId);
 
       const invoiceNumber = await nextInvoiceNumber(queryRunner, companyId);
+
+      // The final invoice settled everything billed before it (released its retention, deducted its
+      // acomptes): crediting one of those would undo them a second time. Credit the final first.
+      const finalInvoice = await liveFinalInvoice(queryRunner, companyId, original.projectId);
+      if (finalInvoice && finalInvoice.id !== original.id && new Date(original.createdAt) < new Date(finalInvoice.createdAt)) {
+        throw new BusinessRuleError(
+          'FINAL_INVOICE_ISSUED',
+          `Final invoice ${finalInvoice.invoiceNumber} settled invoice ${original.invoiceNumber}; credit the final invoice first.`,
+        );
+      }
 
       const [existingCredit] = await queryRunner.query(
         `SELECT invoice_number FROM invoice
@@ -659,7 +789,7 @@ export class InvoicingService {
         description: `Credit note ${saved.invoiceNumber} for invoice ${original.invoiceNumber}`,
         referenceType: 'invoice',
         referenceId: saved.id,
-        lines: issuanceLines(saved),
+        lines: issuanceLines(saved, original.type === 'final_invoice'),
       });
 
       await queryRunner.commitTransaction();
@@ -869,6 +999,105 @@ export class InvoicingService {
     const situationNumber = await nextSituationNumber(this.dataSource, companyId, projectId);
     const acomptesToDeductCents = await remainingAcomptesCents(this.dataSource, companyId, projectId);
     return { projectId, situationNumber, acomptesToDeductCents, positions };
+  }
+
+  /* ═══════════════════════════════════════════════
+     Final invoice — décompte final (PRD §15.1, §15.4)
+     ═══════════════════════════════════════════════ */
+
+  /**
+   * What the project's final invoice settles, from the server's values: everything billed so far
+   * (issued invoices and situations, not cancelled or credited), the retention they hold (released
+   * by the final invoice), the acomptes not deducted yet, the positions with what was billed of
+   * them (the final invoice bills the rest like a situation), the approved plus-values not billed
+   * yet, and what blocks creating it. Creating the final invoice recomputes all of it under the
+   * invoice lock.
+   *
+   * The final invoice's total = its HT (remaining positions + plus-values + other lines) + VAT
+   * + retention released − acomptes not yet deducted. Together with what was billed before, the
+   * client pays: total executed + plus-values (TTC) − acomptes.
+   */
+  async getFinalInvoicePreview(companyId: string, projectId: string) {
+    await assertProjectExists(this.invoiceRepo.manager, companyId, projectId);
+    const [contract] = await this.dataSource.query(
+      `SELECT c.id, c.reference, c.retention_rate, to_char(c.final_acceptance_date, 'YYYY-MM-DD') AS final_acceptance_date
+         FROM project p JOIN contract c ON c.company_id = p.company_id AND c.id = p.contract_id
+        WHERE p.company_id = $1 AND p.id = $2`,
+      [companyId, projectId],
+    );
+    const finalInvoice = await liveFinalInvoice(this.dataSource, companyId, projectId);
+    const drafts = await pendingDraftNumbers(this.dataSource, companyId, projectId);
+    const billed = await billedSoFar(this.dataSource, companyId, projectId);
+    const retentionToReleaseCents = await heldRetentionCents(this.dataSource, companyId, projectId);
+    const acomptesToDeductCents = await remainingAcomptesCents(this.dataSource, companyId, projectId);
+    const positions = await situationPositions(this.dataSource, companyId, projectId);
+    const plusValues: { id: string; description: string; amount_cents: string }[] = await this.dataSource.query(
+      `SELECT id, description, amount_cents FROM plus_value
+        WHERE company_id = $1 AND project_id = $2 AND status = 'approved' AND invoice_id IS NULL
+        ORDER BY created_at`,
+      [companyId, projectId],
+    );
+
+    const blockers: { rule: string; message: string }[] = [];
+    if (finalInvoice) {
+      blockers.push({ rule: 'FINAL_INVOICE_EXISTS', message: `The project's final invoice is ${finalInvoice.invoiceNumber}.` });
+    }
+    if (!contract?.final_acceptance_date) {
+      blockers.push({ rule: 'FINAL_ACCEPTANCE_REQUIRED', message: 'The final acceptance of the works is not recorded on the contract yet.' });
+    }
+    if (drafts.length) {
+      blockers.push({ rule: 'FINAL_INVOICE_DRAFTS_PENDING', message: `Draft invoices to issue or cancel first: ${drafts.join(', ')}.` });
+    }
+
+    return {
+      projectId,
+      contract: contract
+        ? {
+            id: contract.id,
+            reference: contract.reference,
+            retentionRate: Number(contract.retention_rate),
+            finalAcceptanceDate: contract.final_acceptance_date,
+          }
+        : null,
+      finalInvoice,
+      canCreate: blockers.length === 0,
+      blockers,
+      /** Issued invoices and situations so far (HT includes the plus-values they billed). */
+      billedSoFar: billed,
+      retentionToReleaseCents,
+      acomptesToDeductCents,
+      positions: positions.map((p) => ({
+        ...p,
+        /** Offer quantity not billed yet, and its value at the contracted price. */
+        remainingOfferQuantity: Math.max(roundQuantity(p.offerQuantity - p.previousQuantity), 0),
+        remainingOfferValueCents:
+          p.unitPriceCents == null ? null : Math.round(Math.max(p.offerQuantity - p.previousQuantity, 0) * p.unitPriceCents),
+      })),
+      plusValuesToInvoice: plusValues.map((pv) => ({ id: pv.id, description: pv.description, amountCents: Number(pv.amount_cents) })),
+    };
+  }
+
+  /* ═══════════════════════════════════════════════
+     Invoice number format (PRD §15.1 "Format configurable par entreprise")
+     ═══════════════════════════════════════════════ */
+
+  /** The company's format and the number the next invoice would get (not reserved). */
+  async getInvoiceNumberFormat(companyId: string) {
+    const format = await invoiceNumberFormat(this.dataSource, companyId);
+    return { format, nextNumber: await nextInvoiceNumber(this.dataSource, companyId) };
+  }
+
+  /**
+   * Changes the format of the company's next invoice numbers. Existing numbers never change. Under
+   * the invoice numbering lock, so no invoice is numbered with a half-changed format.
+   */
+  async setInvoiceNumberFormat(companyId: string, format: string) {
+    parseInvoiceNumberFormat(format);
+    await this.dataSource.transaction(async (m) => {
+      await lockInvoiceNumbering(m, companyId);
+      await m.query('UPDATE company SET invoice_number_format = $2, updated_at = now() WHERE id = $1', [companyId, format]);
+    });
+    return this.getInvoiceNumberFormat(companyId);
   }
 
   /* ═══════════════════════════════════════════════

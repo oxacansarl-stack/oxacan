@@ -130,6 +130,15 @@ export class CreateInvoiceDto {
   @IsUUID('all', { each: true })
   plusValueIds?: string[];
 
+  /**
+   * Acomptes only: the planned acompte of the project's contract schedule this invoice bills
+   * (GET /contracts/:id/acompte-schedule). With no lines and no plus-values, the server bills its
+   * planned HT amount on one line.
+   */
+  @IsOptional()
+  @IsUUID()
+  acompteScheduleItemId?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(5000)
@@ -139,6 +148,14 @@ export class CreateInvoiceDto {
   @IsString()
   @MaxLength(1000)
   paymentTerms?: string;
+}
+
+/** e.g. 'F-{YYYY}-{NNNN}'; rules in parseInvoiceNumberFormat (invoice-number.ts). */
+export class UpdateInvoiceNumberFormatDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(40)
+  format!: string;
 }
 
 export class UpdateInvoiceStatusDto {
