@@ -2,28 +2,48 @@
   "title": "Offres",
   "loginRequired": "Connexion requise",
   "actions": {
-    "new": "+ Nouvelle offre",
+    "new": "Nouvelle offre",
     "create": "Créer l'offre",
     "creating": "Création…"
   },
   "form": {
-    "projectName": "Nom du projet *",
-    "selectClient": "Sélectionner un client *",
+    "title": "Nouvelle offre",
+    "help": "Le coefficient de marge et le taux de TVA peuvent encore être modifiés sur l'offre.",
+    "projectName": "Nom du projet",
+    "client": "Client",
+    "selectClient": "Sélectionner un client",
     "reference": "Référence",
-    "marginFactor": "Coefficient de marge (p. ex. 120 = 1.20x)",
-    "vatRate": "Taux de TVA en points de base (p. ex. 810 = 8.10 %)"
+    "referenceHint": "Laissez vide pour la numérotation automatique.",
+    "marginFactor": "Coefficient de marge",
+    "marginFactorHint": "120 = 1.20×",
+    "vatRate": "Taux de TVA",
+    "vatRateHint": "En points de base : 810 = 8.10 %"
   },
   "filters": {
-    "search": "Rechercher par nom de projet…",
+    "search": "Projet ou référence",
+    "all": "Toutes",
     "allStatuses": "Tous les statuts"
   },
   "table": {
-    "projectName": "Nom du projet",
+    "reference": "Référence",
+    "projectName": "Projet",
     "client": "Client",
     "status": "Statut",
     "totalTtc": "Total TTC (CHF)",
     "version": "Version",
     "createdAt": "Créée le"
   },
-  "empty": "Aucune offre trouvée"
+  "summary": {
+    "open_one": "{{count}} offre ouverte",
+    "open_other": "{{count}} offres ouvertes",
+    "count_one": "{{count}} offre sur {{total}}",
+    "count_other": "{{count}} offres sur {{total}}",
+    "sortedBy": "Triées par date de création"
+  },
+  "empty": "Aucune offre trouvée",
+  "emptyHelp": "Créez une offre pour commencer un chiffrage.",
+  "noMatch": "Aucune offre ne correspond",
+  "noMatchHelp": "Modifiez la recherche ou choisissez un autre statut.",
+  "loadFailed": "Impossible de charger les offres.",
+  "createFailed": "Impossible de créer l'offre."
 }
