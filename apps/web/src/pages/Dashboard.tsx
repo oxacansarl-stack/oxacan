@@ -1,11 +1,19 @@
-import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { ClipboardList, FileText, Plus, Receipt, Timer } from 'lucide-react';
 import { apiGet, apiList, ApiError, PageMeta } from '../lib/api';
-import { formatMoney, formatDate, formatMinutes, statusLabel } from '../lib/format';
+import { formatMoney, formatDate, formatMinutes } from '../lib/format';
 import { errorMessage } from '../lib/errors';
 import { useCurrentUser } from '../lib/current-user';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardContent, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, Skeleton, TableSkeleton } from '@/components/states';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -38,67 +46,6 @@ interface TimeEntry {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
-
-const cardStyle: React.CSSProperties = {
-  background: '#fff',
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: '20px 20px',
-};
-
-const statValueStyle: React.CSSProperties = {
-  fontSize: 28,
-  fontWeight: 700,
-  color: '#111827',
-  marginTop: 4,
-};
-
-const statLabelStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  fontWeight: 500,
-  textTransform: 'uppercase' as const,
-  letterSpacing: 0.5,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 16,
-  fontWeight: 600,
-  color: '#111827',
-  marginBottom: 12,
-  marginTop: 0,
-};
-
-const quickActionStyle: React.CSSProperties = {
-  padding: '10px 18px',
-  background: '#2563eb',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 14,
-  fontWeight: 600,
-  cursor: 'pointer',
-  textDecoration: 'none',
-  display: 'inline-block',
-};
-
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  draft: { bg: '#f3f4f6', fg: '#374151' },
-  in_progress: { bg: '#dbeafe', fg: '#1e40af' },
-  submitted: { bg: '#fef3c7', fg: '#92400e' },
-  accepted: { bg: '#dcfce7', fg: '#166534' },
-  rejected: { bg: '#fee2e2', fg: '#991b1b' },
-  sent: { bg: '#dbeafe', fg: '#1d4ed8' },
-  paid: { bg: '#dcfce7', fg: '#166534' },
-  partially_paid: { bg: '#fef3c7', fg: '#92400e' },
-  overdue: { bg: '#fee2e2', fg: '#dc2626' },
-  approved: { bg: '#dcfce7', fg: '#166534' },
-  pending: { bg: '#f3f4f6', fg: '#4b5563' },
-};
-
-/* ------------------------------------------------------------------ */
 /*  Helpers: API responses are already unwrapped (lists are arrays)    */
 /* ------------------------------------------------------------------ */
 
@@ -114,27 +61,37 @@ function isForbidden(error: unknown): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stat Card                                                          */
+/*  Stat strip cell                                                    */
 /* ------------------------------------------------------------------ */
 
-interface StatCardProps {
+function StatCell({
+  label,
+  value,
+  loading,
+  error,
+  className,
+}: {
   label: string;
   value: string | number;
   loading: boolean;
   error?: string;
-  accentColor?: string;
-}
-
-function StatCard({ label, value, loading, error, accentColor }: StatCardProps) {
+  className?: string;
+}) {
   return (
-    <div style={{ ...cardStyle, borderTop: `3px solid ${accentColor || '#2563eb'}` }}>
-      <div style={statLabelStyle}>{label}</div>
-      <div style={statValueStyle}>
-        {loading ? '...' : error ? '--' : value}
-      </div>
-      {error && (
-        <div style={{ fontSize: 12, color: '#ef4444', marginTop: 4 }}>{error}</div>
+    <div className={cn('min-w-0 border-line-soft px-4 py-3.5', className)}>
+      <div className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted">{label}</div>
+      {loading ? (
+        <Skeleton className="mt-2 h-6 w-20" />
+      ) : (
+        <div className="tnum mt-1 font-display text-[22px] font-semibold leading-tight">
+          {error ? '—' : value}
+        </div>
       )}
+      {error ? (
+        <p role="alert" className="mt-1 text-xs text-bad">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -219,6 +176,16 @@ export default function Dashboard() {
     return errorMessage(query.error, t('stats.unavailable'));
   }
 
+  /** A failed list is never shown as an empty one: DataState gets a message it can retry. */
+  function listError(
+    query: { isError: boolean; error: ApiError | null },
+    fallback: string,
+  ): string | null {
+    if (!query.isError) return null;
+    if (query.error?.status === 401) return t('stats.loginRequired');
+    return errorMessage(query.error, fallback);
+  }
+
   const canSeeOffers = isOffice && !isForbidden(recentOffers.error);
   const canSeeInvoices = isOffice && !isForbidden(recentInvoices.error);
 
@@ -239,383 +206,351 @@ export default function Dashboard() {
   const totalPaid = allInvoices.reduce((s, i) => s + (i.paidCents || 0), 0);
   const outstanding = totalInvoiced - totalPaid;
   const maxBar = Math.max(totalInvoiced, 1); // avoid division by zero
+  const paidPercent = Math.round((totalPaid / maxBar) * 100);
+
+  /* --- Recent rows --- */
+  const offerRows = unwrapArray<Offer>(recentOffers.data).slice(0, 5);
+  const invoiceRows = unwrapArray<Invoice>(recentInvoices.data).slice(0, 5);
+  const timeRows = unwrapArray<TimeEntry>(recentTime.data).slice(0, 5);
+
+  type Stat = {
+    key: string;
+    label: string;
+    value: string | number;
+    loading: boolean;
+    error?: string;
+  };
+
+  const projectsStat: Stat = {
+    key: 'activeProjects',
+    label: t('stats.activeProjects'),
+    value: statValue(activeProjects, getCount(activeProjects)),
+    loading: activeProjects.isLoading,
+    error: getError(activeProjects),
+  };
+
+  const offersStat: Stat = {
+    key: 'openOffers',
+    label: t('stats.openOffers'),
+    value: statValue(openOffers, getCount(openOffers)),
+    loading: openOffers.isLoading,
+    error: getError(openOffers),
+  };
+
+  const invoicesStat: Stat = {
+    key: 'pendingInvoices',
+    label: t('stats.pendingInvoices'),
+    value: statValue(pendingInvoices, getCount(pendingInvoices)),
+    loading: pendingInvoices.isLoading,
+    error: getError(pendingInvoices),
+  };
+
+  const revenueStat: Stat = {
+    key: 'monthRevenue',
+    label: t('stats.monthRevenue'),
+    value: statValue(paidInvoices, formatMoney(thisMonthRevenue)),
+    loading: paidInvoices.isLoading,
+    error: getError(paidInvoices),
+  };
+
+  // Offers, invoices and revenue are office figures and are never requested for a field role:
+  // showing them would be three permanently blank cells labelled with information that role
+  // cannot have. They are left out of the strip entirely instead.
+  const stats: Stat[] = [projectsStat, ...(isOffice ? [offersStat, invoicesStat, revenueStat] : [])];
 
   return (
-    <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 24 }}>
-        {t('title')}
-      </h1>
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        actions={
+          <div
+            className="flex flex-wrap items-center gap-2"
+            role="group"
+            aria-label={t('quickActions.title')}
+          >
+            {isOffice ? (
+              <>
+                <Button variant="primary" onClick={() => navigate('/offers')}>
+                  <Plus />
+                  {t('quickActions.newOffer')}
+                </Button>
+                <Button variant="ghost" onClick={() => navigate('/invoices')}>
+                  <Plus />
+                  {t('quickActions.newInvoice')}
+                </Button>
+                <Button variant="ghost" onClick={() => navigate('/timekeeping')}>
+                  <Timer />
+                  {t('quickActions.clockIn')}
+                </Button>
+              </>
+            ) : (
+              <Button variant="primary" onClick={() => navigate('/timekeeping')}>
+                <Timer />
+                {t('quickActions.clockIn')}
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => navigate('/daily-reports')}>
+              <ClipboardList />
+              {t('quickActions.newReport')}
+            </Button>
+          </div>
+        }
+      />
 
       {/* ============================================================ */}
-      {/*  Summary Cards                                                */}
+      {/*  Stat strip — one card, the figures divided by a hairline      */}
       {/* ============================================================ */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: 16,
-          marginBottom: 32,
-        }}
-      >
-        <StatCard
-          label={t('stats.activeProjects')}
-          value={statValue(activeProjects, getCount(activeProjects))}
-          loading={activeProjects.isLoading}
-          error={getError(activeProjects)}
-          accentColor="#2563eb"
-        />
-        <StatCard
-          label={t('stats.openOffers')}
-          value={statValue(openOffers, getCount(openOffers))}
-          loading={openOffers.isLoading}
-          error={getError(openOffers)}
-          accentColor="#f59e0b"
-        />
-        <StatCard
-          label={t('stats.pendingInvoices')}
-          value={statValue(pendingInvoices, getCount(pendingInvoices))}
-          loading={pendingInvoices.isLoading}
-          error={getError(pendingInvoices)}
-          accentColor="#ef4444"
-        />
-        <StatCard
-          label={t('stats.monthRevenue')}
-          value={statValue(paidInvoices, formatMoney(thisMonthRevenue))}
-          loading={paidInvoices.isLoading}
-          error={getError(paidInvoices)}
-          accentColor="#16a34a"
-        />
-      </div>
-
-      {/* ============================================================ */}
-      {/*  Quick Actions                                                */}
-      {/* ============================================================ */}
-      <div style={{ marginBottom: 32 }}>
-        <h2 style={sectionTitleStyle}>{t('quickActions.title')}</h2>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {isOffice && (
-            <>
-              <button style={quickActionStyle} onClick={() => navigate('/offers')}>
-                {t('quickActions.newOffer')}
-              </button>
-              <button
-                style={{ ...quickActionStyle, background: '#16a34a' }}
-                onClick={() => navigate('/invoices')}
-              >
-                {t('quickActions.newInvoice')}
-              </button>
-            </>
-          )}
-          <button
-            style={{ ...quickActionStyle, background: '#7c3aed' }}
-            onClick={() => navigate('/timekeeping')}
-          >
-            {t('quickActions.clockIn')}
-          </button>
-          <button
-            style={{ ...quickActionStyle, background: '#0ea5e9' }}
-            onClick={() => navigate('/daily-reports')}
-          >
-            {t('quickActions.newReport')}
-          </button>
+      <Card role="group" aria-label={t('stats.label')}>
+        {/* Sized to the cells actually rendered: a field role gets the one figure, full width. */}
+        <div className={cn('grid', stats.length > 1 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1')}>
+          {stats.map((stat, i) => (
+            <StatCell
+              key={stat.key}
+              label={stat.label}
+              value={stat.value}
+              loading={stat.loading}
+              error={stat.error}
+              className={cn(
+                // Two columns on mobile, four from md: the divider follows the column it opens.
+                i % 2 === 1 ? 'border-l' : i > 0 && 'md:border-l',
+                i >= 2 && 'border-t md:border-t-0',
+              )}
+            />
+          ))}
         </div>
-      </div>
+      </Card>
 
       {/* ============================================================ */}
       {/*  Financial Overview                                           */}
       {/* ============================================================ */}
       {canSeeInvoices && (
-      <div style={{ ...cardStyle, marginBottom: 32 }}>
-        <h2 style={{ ...sectionTitleStyle, marginBottom: 16 }}>{t('financial.title')}</h2>
-        {recentInvoices.isLoading ? (
-          <div style={{ color: '#6b7280', fontSize: 14 }}>{t('common:state.loading')}</div>
-        ) : (
-          <div>
-            {/* Invoiced bar */}
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: 13,
-                  color: '#6b7280',
-                  marginBottom: 4,
-                }}
-              >
-                <span>{t('financial.totalInvoiced')}</span>
-                <span style={{ fontWeight: 600, color: '#111827' }}>
-                  {formatMoney(totalInvoiced)}
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('financial.title')}</CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={recentInvoices.isLoading}
+            error={listError(recentInvoices, t('financial.loadFailed'))}
+            onRetry={() => recentInvoices.refetch()}
+            loading={<TableSkeleton rows={3} cols={2} />}
+          >
+            <CardContent className="grid gap-4">
+              {/* Invoiced — the reference bar, always full width */}
+              <div className="grid gap-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
+                  <span className="text-muted">{t('financial.totalInvoiced')}</span>
+                  <span className="tnum font-semibold">{formatMoney(totalInvoiced)}</span>
+                </div>
+                <div aria-hidden className="h-2.5 overflow-hidden rounded-full bg-line-soft">
+                  <div className="h-full w-full rounded-full bg-graphite" />
+                </div>
+              </div>
+
+              {/* Paid — share of the invoiced total */}
+              <div className="grid gap-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
+                  <span className="text-muted">{t('financial.totalPaid')}</span>
+                  <span className="tnum font-semibold text-ok">{formatMoney(totalPaid)}</span>
+                </div>
+                <div aria-hidden className="h-2.5 overflow-hidden rounded-full bg-line-soft">
+                  {/* A bar's width is a runtime value — the one inline style the conventions allow. */}
+                  <div
+                    className="h-full rounded-full bg-ok transition-[width] duration-300"
+                    style={{ width: `${paidPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-x-3 border-t border-line-soft pt-3 text-[13.5px]">
+                <span className="text-muted">{t('financial.outstanding')}</span>
+                <span className={cn('tnum font-semibold', outstanding > 0 ? 'text-bad' : 'text-ok')}>
+                  {formatMoney(outstanding)}
                 </span>
               </div>
-              <div
-                style={{
-                  height: 12,
-                  background: '#e5e7eb',
-                  borderRadius: 6,
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    background: '#2563eb',
-                    borderRadius: 6,
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Paid bar */}
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  fontSize: 13,
-                  color: '#6b7280',
-                  marginBottom: 4,
-                }}
-              >
-                <span>{t('financial.totalPaid')}</span>
-                <span style={{ fontWeight: 600, color: '#16a34a' }}>
-                  {formatMoney(totalPaid)}
-                </span>
-              </div>
-              <div
-                style={{
-                  height: 12,
-                  background: '#e5e7eb',
-                  borderRadius: 6,
-                  overflow: 'hidden',
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.round((totalPaid / maxBar) * 100)}%`,
-                    height: '100%',
-                    background: '#16a34a',
-                    borderRadius: 6,
-                    transition: 'width 0.3s',
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Outstanding */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                borderTop: '1px solid #f3f4f6',
-                paddingTop: 12,
-                fontSize: 14,
-              }}
-            >
-              <span style={{ color: '#6b7280' }}>{t('financial.outstanding')}</span>
-              <span
-                style={{
-                  fontWeight: 700,
-                  color: outstanding > 0 ? '#dc2626' : '#16a34a',
-                }}
-              >
-                {formatMoney(outstanding)}
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
+            </CardContent>
+            <CardFooter>
+              <span>{t('financial.basis', { count: allInvoices.length })}</span>
+            </CardFooter>
+          </DataState>
+        </Card>
       )}
 
       {/* ============================================================ */}
-      {/*  Recent Activity — 3-column grid                              */}
+      {/*  Recent Activity                                              */}
       {/* ============================================================ */}
-      <h2 style={sectionTitleStyle}>{t('recent.title')}</h2>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 16,
-          marginBottom: 32,
-        }}
-      >
-        {/* Recent Offers */}
-        {canSeeOffers && (
-        <div style={cardStyle}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            {t('recent.offers')}
-          </h3>
-          {recentOffers.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
-          ) : recentOffers.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentOffers.error)}</div>
-          ) : unwrapArray<Offer>(recentOffers.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noOffers')}</div>
-          ) : (
-            <div>
-              {unwrapArray<Offer>(recentOffers.data)
-                .slice(0, 5)
-                .map((offer) => {
-                  const colors = STATUS_COLORS[offer.status] ?? STATUS_COLORS.draft;
-                  return (
-                    <div
-                      key={offer.id}
-                      onClick={() => navigate(`/offers/${offer.id}`)}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 0',
-                        borderBottom: '1px solid #f3f4f6',
-                        cursor: 'pointer',
-                        fontSize: 13,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 500, color: '#111827' }}>
-                          {offer.projectName}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          {offer.createdAt ? formatDate(offer.createdAt) : ''}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 12,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          background: colors.bg,
-                          color: colors.fg,
-                        }}
-                      >
-                        {statusLabel('offer', offer.status)}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-          )}
-        </div>
-        )}
+      <section aria-labelledby="dash-recent" className="grid gap-3">
+        <h2
+          id="dash-recent"
+          className="font-display text-[15px] font-semibold tracking-[-0.01em] text-ink"
+        >
+          {t('recent.title')}
+        </h2>
 
-        {/* Recent Invoices */}
-        {canSeeInvoices && (
-        <div style={cardStyle}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            {t('recent.invoices')}
-          </h3>
-          {recentInvoices.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
-          ) : recentInvoices.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentInvoices.error)}</div>
-          ) : unwrapArray<Invoice>(recentInvoices.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noInvoices')}</div>
-          ) : (
-            <div>
-              {unwrapArray<Invoice>(recentInvoices.data)
-                .slice(0, 5)
-                .map((inv) => {
-                  const colors = STATUS_COLORS[inv.status] ?? STATUS_COLORS.draft;
-                  return (
-                    <div
-                      key={inv.id}
-                      onClick={() => navigate('/invoices')}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 0',
-                        borderBottom: '1px solid #f3f4f6',
-                        cursor: 'pointer',
-                        fontSize: 13,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 500, color: '#2563eb' }}>
-                          {inv.invoiceNumber || t('recent.draftInvoice')}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          {formatMoney(inv.totalTtcCents || 0)}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 12,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          background: colors.bg,
-                          color: colors.fg,
-                        }}
-                      >
-                        {statusLabel('invoice', inv.status)}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/* Recent Offers */}
+          {canSeeOffers && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('recent.offers')}
+                  {offerRows.length > 0 ? <CardCount>({offerRows.length})</CardCount> : null}
+                </CardTitle>
+              </CardHeader>
+              <DataState
+                isLoading={recentOffers.isLoading}
+                error={listError(recentOffers, t('recent.offersFailed'))}
+                onRetry={() => recentOffers.refetch()}
+                isEmpty={offerRows.length === 0}
+                loading={<TableSkeleton rows={4} cols={4} />}
+                empty={
+                  <EmptyState
+                    icon={<FileText className="size-5" />}
+                    title={t('recent.noOffers')}
+                    description={t('recent.noOffersHelp')}
+                  />
+                }
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('recent.table.project')}</TH>
+                        <TH>{t('recent.table.status')}</TH>
+                        <TH numeric>{t('recent.table.amount')}</TH>
+                        <TH>{t('recent.table.date')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {offerRows.map((offer) => (
+                        <TR key={offer.id} onActivate={() => navigate(`/offers/${offer.id}`)}>
+                          <TD className="font-medium">{offer.projectName}</TD>
+                          <TD>
+                            <StatusBadge domain="offer" value={offer.status} />
+                          </TD>
+                          <TD numeric>{formatMoney(offer.totalTtcCents ?? 0)}</TD>
+                          <TD className="tnum text-muted">{formatDate(offer.createdAt)}</TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+              </DataState>
+            </Card>
           )}
-        </div>
-        )}
 
-        {/* Recent Time Entries */}
-        <div style={cardStyle}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
-            {t('recent.timeEntries')}
-          </h3>
-          {recentTime.isLoading ? (
-            <div style={{ color: '#6b7280', fontSize: 13 }}>{t('common:state.loading')}</div>
-          ) : recentTime.error ? (
-            <div style={{ color: '#ef4444', fontSize: 13 }}>{errorMessage(recentTime.error)}</div>
-          ) : unwrapArray<TimeEntry>(recentTime.data).length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 13 }}>{t('recent.noTimeEntries')}</div>
-          ) : (
-            <div>
-              {unwrapArray<TimeEntry>(recentTime.data)
-                .slice(0, 5)
-                .map((entry) => {
-                  const colors = STATUS_COLORS[entry.status] ?? STATUS_COLORS.pending;
-                  return (
-                    <div
-                      key={entry.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 0',
-                        borderBottom: '1px solid #f3f4f6',
-                        fontSize: 13,
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontWeight: 500, color: '#111827' }}>
-                          {entry.project?.name || t('recent.project')}
-                        </div>
-                        <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                          {entry.date ? formatDate(entry.date) : ''}{' '}
-                          {entry.durationMinutes ? formatMinutes(entry.durationMinutes) : ''}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 12,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          background: colors.bg,
-                          color: colors.fg,
-                        }}
-                      >
-                        {entry.status ? statusLabel('timeEntry', entry.status) : t('recent.openEntry')}
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
+          {/* Recent Invoices */}
+          {canSeeInvoices && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('recent.invoices')}
+                  {invoiceRows.length > 0 ? <CardCount>({invoiceRows.length})</CardCount> : null}
+                </CardTitle>
+              </CardHeader>
+              <DataState
+                isLoading={recentInvoices.isLoading}
+                error={listError(recentInvoices, t('recent.invoicesFailed'))}
+                onRetry={() => recentInvoices.refetch()}
+                isEmpty={invoiceRows.length === 0}
+                loading={<TableSkeleton rows={4} cols={3} />}
+                empty={
+                  <EmptyState
+                    icon={<Receipt className="size-5" />}
+                    title={t('recent.noInvoices')}
+                    description={t('recent.noInvoicesHelp')}
+                  />
+                }
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('recent.table.number')}</TH>
+                        <TH>{t('recent.table.status')}</TH>
+                        <TH numeric>{t('recent.table.amount')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {invoiceRows.map((inv) => (
+                        <TR key={inv.id} onActivate={() => navigate('/invoices')}>
+                          <TD>
+                            {inv.invoiceNumber ? (
+                              <Ref>{inv.invoiceNumber}</Ref>
+                            ) : (
+                              <span className="text-muted">{t('recent.draftInvoice')}</span>
+                            )}
+                          </TD>
+                          <TD>
+                            <StatusBadge domain="invoice" value={inv.status} />
+                          </TD>
+                          <TD numeric>{formatMoney(inv.totalTtcCents ?? 0)}</TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+              </DataState>
+            </Card>
           )}
+
+          {/* Recent Time Entries — the one list every role sees */}
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>
+                {t('recent.timeEntries')}
+                {timeRows.length > 0 ? <CardCount>({timeRows.length})</CardCount> : null}
+              </CardTitle>
+            </CardHeader>
+            <DataState
+              isLoading={recentTime.isLoading}
+              error={listError(recentTime, t('recent.timeEntriesFailed'))}
+              onRetry={() => recentTime.refetch()}
+              isEmpty={timeRows.length === 0}
+              loading={<TableSkeleton rows={4} cols={4} />}
+              empty={
+                <EmptyState
+                  icon={<Timer className="size-5" />}
+                  title={t('recent.noTimeEntries')}
+                  description={t('recent.noTimeEntriesHelp')}
+                />
+              }
+            >
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>{t('recent.table.project')}</TH>
+                      <TH>{t('recent.table.status')}</TH>
+                      <TH>{t('recent.table.date')}</TH>
+                      <TH numeric>{t('recent.table.duration')}</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {timeRows.map((entry) => (
+                      // A time entry has no detail route, so the row stays a plain row.
+                      <TR key={entry.id}>
+                        <TD className="font-medium">{entry.project?.name || t('recent.project')}</TD>
+                        <TD>
+                          {entry.status ? (
+                            <StatusBadge domain="timeEntry" value={entry.status} />
+                          ) : (
+                            // No status yet means the clock is still running.
+                            <Badge tone="live">{t('recent.openEntry')}</Badge>
+                          )}
+                        </TD>
+                        <TD className="tnum text-muted">{formatDate(entry.date)}</TD>
+                        <TD numeric>
+                          {entry.durationMinutes ? formatMinutes(entry.durationMinutes) : '—'}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrap>
+            </DataState>
+          </Card>
         </div>
-      </div>
-    </div>
+      </section>
+    </PageBody>
   );
 }

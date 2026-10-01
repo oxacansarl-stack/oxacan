@@ -1,10 +1,50 @@
-import React, { useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Fragment, useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import {
+  ArrowLeft,
+  ChartGantt,
+  CircleCheck,
+  Flag,
+  HardHat,
+  Layers,
+  ListChecks,
+  MoreHorizontal,
+  Plus,
+} from 'lucide-react';
 import { apiGet, apiPost, apiPatch, ApiError } from '../lib/api';
-import { formatMoney, formatDate, statusLabel, enumLabel } from '../lib/format';
+import { formatDate, formatMoney, statusLabel, enumLabel } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import { useCurrentUser, type CurrentUser, type Role } from '../lib/current-user';
+import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tag } from '@/components/ui/badge';
+import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, ErrorState, Skeleton, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import { useDetailCrumb } from '@/components/shell/breadcrumbs';
+import { TabCount, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -109,80 +149,37 @@ interface Project {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const PROJECT_STATUSES = ['planning', 'active', 'on_hold', 'completed', 'cancelled'] as const;
-
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  planning: { bg: '#e0e7ff', fg: '#3730a3' },
-  active: { bg: '#dcfce7', fg: '#166534' },
-  on_hold: { bg: '#fef3c7', fg: '#92400e' },
-  completed: { bg: '#f1f5f9', fg: '#475569' },
-  cancelled: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
-const TASK_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  todo: { bg: '#f3f4f6', fg: '#374151' },
-  in_progress: { bg: '#dbeafe', fg: '#1e40af' },
-  done: { bg: '#dcfce7', fg: '#166534' },
-  validated: { bg: '#d1fae5', fg: '#065f46' },
-  cancelled: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
-const PRIORITY_COLORS: Record<string, { bg: string; fg: string }> = {
-  low: { bg: '#f3f4f6', fg: '#6b7280' },
-  normal: { bg: '#fef3c7', fg: '#92400e' },
-  high: { bg: '#fed7aa', fg: '#9a3412' },
-  urgent: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
-const MILESTONE_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  pending: { bg: '#f3f4f6', fg: '#374151' },
-  in_progress: { bg: '#dbeafe', fg: '#1e40af' },
-  completed: { bg: '#dcfce7', fg: '#166534' },
-  overdue: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
 // Must match the DB CHECK constraints on task.status / task.priority.
 const TASK_STATUSES = ['todo', 'in_progress', 'done', 'validated', 'cancelled'] as const;
 const TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
-const GANTT_BAR_COLORS: Record<string, string> = {
-  todo: '#9ca3af',
-  in_progress: '#3b82f6',
-  done: '#22c55e',
-  validated: '#059669',
-  cancelled: '#ef4444',
+/** A worker may only report these three (API: WORKER_TASK_STATUSES in dto/task.dto.ts). */
+const WORKER_TASK_STATUSES = new Set<string>(['todo', 'in_progress', 'done']);
+
+/** Mirrors the API's @Roles policy: lots and milestones are office-only, tasks site-lead. */
+const OFFICE_ROLES: Role[] = ['ADMIN', 'PROJECT_MANAGER'];
+const SITE_LEAD_ROLES: Role[] = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'];
+
+/** Priority chip tone — the Tag tones, never a raw colour. */
+const PRIORITY_TONE: Record<string, 'default' | 'warn' | 'bad' | 'dashed'> = {
+  low: 'dashed',
+  normal: 'default',
+  high: 'warn',
+  urgent: 'bad',
 };
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
+/** Gantt bar fill per task status, in design tokens; it follows the StatusBadge tones. */
+const GANTT_BAR_CLASS: Record<string, string> = {
+  todo: 'bg-neu',
+  in_progress: 'bg-copper',
+  done: 'bg-ok/70',
+  validated: 'bg-ok',
+  cancelled: 'bg-bad',
 };
 
-const buttonStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#2563eb',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 14,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
+type TabKey = 'lots' | 'milestones' | 'tasks' | 'gantt';
 
-const buttonSecondaryStyle: React.CSSProperties = {
-  ...buttonStyle,
-  background: '#f3f4f6',
-  color: '#374151',
-};
+const TAB_KEYS: readonly TabKey[] = ['lots', 'milestones', 'tasks', 'gantt'];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -215,18 +212,22 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-/* ------------------------------------------------------------------ */
-/*  Tabs                                                               */
-/* ------------------------------------------------------------------ */
+/** 0–100, so a malformed percentage can never overflow a bar. */
+function clampPercent(value: number | null | undefined): number {
+  return Math.min(100, Math.max(0, Math.round(value ?? 0)));
+}
 
-type TabKey = 'lots' | 'milestones' | 'tasks' | 'gantt';
-
-const TABS: { key: TabKey }[] = [
-  { key: 'lots' },
-  { key: 'milestones' },
-  { key: 'tasks' },
-  { key: 'gantt' },
-];
+/**
+ * The statuses this user may actually set on this task. The API lets a WORKER change only
+ * `status` / `progressPercent`, only on a task assigned to them, and only to todo /
+ * in_progress / done (TasksService.assertWorkerMayUpdate) — anything else answers 403, so it
+ * is not offered at all.
+ */
+function statusChoicesFor(task: Task, me: CurrentUser): readonly string[] {
+  if (me.role !== 'WORKER') return TASK_STATUSES;
+  if (task.assignedTo !== me.id) return [];
+  return TASK_STATUSES.filter((status) => WORKER_TASK_STATUSES.has(status));
+}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -234,20 +235,42 @@ const TABS: { key: TabKey }[] = [
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { t } = useTranslation('projectDetail');
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const me = useCurrentUser();
+  const [params, setParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<TabKey>('lots');
+  /**
+   * The API strips every `*Cents` field for field roles, so a budget column would read as a
+   * blank — or worse, as CHF 0.00. Only the office roles get the money at all (as in Projets).
+   */
+  const canSeeFinancials = me.role === 'ADMIN' || me.role === 'PROJECT_MANAGER';
+  const canPlan = OFFICE_ROLES.includes(me.role);
+  const canAddTask = SITE_LEAD_ROLES.includes(me.role);
+
+  /* --- Open tab, kept in ?tab= so a tab can be linked to and bookmarked --- */
+
+  const requestedTab = params.get('tab') ?? '';
+  const activeTab: TabKey = (TAB_KEYS as readonly string[]).includes(requestedTab)
+    ? (requestedTab as TabKey)
+    : 'lots';
+
+  const openTab = (value: string) => {
+    const next = new URLSearchParams(params);
+    next.set('tab', value);
+    setParams(next, { replace: true });
+  };
 
   /* --- Form states --- */
-  const [showLotForm, setShowLotForm] = useState(false);
+
+  const [lotFormOpen, setLotFormOpen] = useState(false);
   const [lotForm, setLotForm] = useState({ name: '', description: '', budgetChf: '' });
 
-  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
+  const [milestoneFormOpen, setMilestoneFormOpen] = useState(false);
   const [milestoneForm, setMilestoneForm] = useState({ name: '', targetDate: '' });
 
-  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskFormOpen, setTaskFormOpen] = useState(false);
   const [taskForm, setTaskForm] = useState({
     title: '',
     description: '',
@@ -263,37 +286,33 @@ export default function ProjectDetail() {
 
   /* --- Queries --- */
 
-  const {
-    data: project,
-    isLoading,
-    error,
-  } = useQuery<Project, ApiError>({
+  const project = useQuery<Project, ApiError>({
     queryKey: ['project', id],
     queryFn: () => apiGet<Project>(`/projects/${id}`),
     enabled: !!id,
     retry: false,
   });
 
-  const { data: ganttData } = useQuery<GanttData, ApiError>({
+  const gantt = useQuery<GanttData, ApiError>({
     queryKey: ['project-gantt', id],
     queryFn: async () => {
       const raw = await apiGet<GanttApiResponse>(`/projects/${id}/gantt`);
       return {
         tasks: raw.tasks
-          .filter((t) => t.plannedStart && t.plannedEnd)
-          .map((t) => ({
-            id: t.id,
-            title: t.title,
-            lotId: t.lotId ?? '',
-            lotName: t.lot?.name ?? '',
-            status: t.status,
-            plannedStart: t.plannedStart as string,
-            plannedEnd: t.plannedEnd as string,
+          .filter((task) => task.plannedStart && task.plannedEnd)
+          .map((task) => ({
+            id: task.id,
+            title: task.title,
+            lotId: task.lotId ?? '',
+            lotName: task.lot?.name ?? '',
+            status: task.status,
+            plannedStart: task.plannedStart as string,
+            plannedEnd: task.plannedEnd as string,
             dependencies: raw.dependencies
-              .filter((d) => d.successorId === t.id)
+              .filter((d) => d.successorId === task.id)
               .map((d) => d.predecessorId),
           })),
-        milestones: (project?.milestones ?? [])
+        milestones: (project.data?.milestones ?? [])
           .filter((m) => m.targetDate)
           .map((m) => ({ id: m.id, name: m.name, date: m.targetDate })),
       };
@@ -301,6 +320,9 @@ export default function ProjectDetail() {
     enabled: !!id && activeTab === 'gantt',
     retry: false,
   });
+
+  // Names the project in the top bar's breadcrumb instead of repeating it in the page body.
+  useDetailCrumb(project.data?.name);
 
   /* --- Mutations --- */
 
@@ -318,7 +340,7 @@ export default function ProjectDetail() {
       ),
     onSuccess: () => {
       invalidate();
-      setShowLotForm(false);
+      setLotFormOpen(false);
       setLotForm({ name: '', description: '', budgetChf: '' });
     },
   });
@@ -328,7 +350,7 @@ export default function ProjectDetail() {
       apiPost(`/projects/${id}/milestones`, { name: data.name.trim(), targetDate: data.targetDate }),
     onSuccess: () => {
       invalidate();
-      setShowMilestoneForm(false);
+      setMilestoneFormOpen(false);
       setMilestoneForm({ name: '', targetDate: '' });
     },
   });
@@ -355,7 +377,7 @@ export default function ProjectDetail() {
     }) => apiPost(`/projects/${id}/tasks`, compact(data)),
     onSuccess: () => {
       invalidate();
-      setShowTaskForm(false);
+      setTaskFormOpen(false);
       setTaskForm({
         title: '',
         description: '',
@@ -380,606 +402,842 @@ export default function ProjectDetail() {
 
   /* --- Derived --- */
 
-  const lots = project?.lots ?? [];
-  const milestones = project?.milestones ?? [];
-  const tasks = project?.tasks ?? [];
+  const lots = project.data?.lots ?? [];
+  const milestones = project.data?.milestones ?? [];
+  const tasks = project.data?.tasks ?? [];
 
-  const filteredTasks = taskLotFilter
-    ? tasks.filter((t) => t.lotId === taskLotFilter)
-    : tasks;
+  const filteredTasks = taskLotFilter ? tasks.filter((task) => task.lotId === taskLotFilter) : tasks;
 
   /* Group tasks by lot */
   const tasksByLot = useMemo(() => {
     const map = new Map<string, Task[]>();
-    for (const t of filteredTasks) {
-      const key = t.lotId || '__unassigned__';
+    for (const task of filteredTasks) {
+      const key = task.lotId || '__unassigned__';
       if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(t);
+      map.get(key)!.push(task);
     }
     return map;
   }, [filteredTasks]);
 
   const lotTaskCounts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const t of tasks) if (t.lotId) m.set(t.lotId, (m.get(t.lotId) ?? 0) + 1);
+    for (const task of tasks) if (task.lotId) m.set(task.lotId, (m.get(task.lotId) ?? 0) + 1);
     return m;
   }, [tasks]);
 
   const lotNameMap = useMemo(() => {
     const m = new Map<string, string>();
-    for (const l of lots) m.set(l.id, l.name);
+    for (const lot of lots) m.set(lot.id, lot.name);
     return m;
   }, [lots]);
 
-  /* --- Render --- */
+  /* --- Actions --- */
 
-  if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
+  const openLotForm = () => {
+    addLotMutation.reset();
+    setLotFormOpen(true);
+  };
+
+  const openMilestoneForm = () => {
+    addMilestoneMutation.reset();
+    setMilestoneFormOpen(true);
+  };
+
+  const openTaskForm = () => {
+    addTaskMutation.reset();
+    setTaskFormOpen(true);
+  };
+
+  /** A lot row opens its tasks: the same list, pre-filtered on that lot. */
+  const showLotTasks = (lotId: string) => {
+    setTaskLotFilter(lotId);
+    openTab('tasks');
+  };
+
+  const completeMilestone = async (milestone: Milestone) => {
+    const ok = await confirm({
+      title: t('milestones.confirm.title', { name: milestone.name }),
+      description: t('milestones.confirm.description', { date: formatDate(todayIso()) }),
+      confirmLabel: t('milestones.markCompleted'),
+      tone: 'default',
+    });
+    if (!ok) return;
+    completeMilestoneMutation.mutate(milestone.id);
+  };
+
+  const backToProjects = (
+    <Button variant="ghost" asChild>
+      <Link to="/projects">
+        <ArrowLeft />
+        {t('back')}
+      </Link>
+    </Button>
+  );
+
+  /* --- Render: the states where the header itself has no project to name --- */
+
+  if (project.isPending) {
+    return (
+      <PageBody>
+        <div className="grid gap-2">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-7 w-72" />
+          <Skeleton className="h-3 w-56" />
+        </div>
+        <Card>
+          <TableSkeleton rows={6} cols={5} />
+        </Card>
+      </PageBody>
+    );
   }
 
-  if (isLoading) {
-    return <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>;
+  if (!project.data) {
+    const status = project.error?.status;
+    return (
+      <PageBody>
+        <PageHeader title={t('title')} kicker={t('common:navGroup.sites')} actions={backToProjects} />
+        <Card>
+          {status === 404 ? (
+            <EmptyState
+              icon={<HardHat className="size-5" />}
+              title={t('notFound')}
+              description={t('notFoundHelp')}
+              action={
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to="/projects">{t('back')}</Link>
+                </Button>
+              }
+            />
+          ) : (
+            <ErrorState
+              message={
+                status === 401 ? t('loginRequired') : errorMessage(project.error, t('loadFailed'))
+              }
+              onRetry={() => project.refetch()}
+            />
+          )}
+        </Card>
+      </PageBody>
+    );
   }
 
-  if (error && error.status !== 404) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>;
-  }
+  const data = project.data;
+  const progressPct = clampPercent(data.progressPercent);
 
-  if (!project) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{t('notFound')}</div>;
-  }
+  /* A failed reload must never read as "no rows", so every tab guards its table the same way. */
+  const failure: ApiError | null = project.isError ? project.error : null;
+  const loadError = failure
+    ? failure.status === 401
+      ? t('loginRequired')
+      : errorMessage(failure, t('loadFailed'))
+    : null;
+  const retry = () => project.refetch();
 
-  const colors = STATUS_COLORS[project.status] ?? STATUS_COLORS.planning;
-  const progressPct = Math.min(100, Math.max(0, project.progressPercent ?? 0));
-  const progressColor =
-    progressPct >= 100 ? '#22c55e' : progressPct >= 50 ? '#2563eb' : '#f59e0b';
+  const lotColumns = canSeeFinancials ? 4 : 3;
 
   return (
-    <div>
-      {/* Back nav */}
-      <button
-        onClick={() => navigate('/projects')}
-        style={{
-          background: 'none',
-          border: 'none',
-          color: '#2563eb',
-          fontSize: 14,
-          cursor: 'pointer',
-          padding: 0,
-          marginBottom: 16,
-        }}
-      >
-        {t('back')}
-      </button>
+    <PageBody>
+      <PageHeader
+        kicker={t('common:navGroup.sites')}
+        title={data.name}
+        meta={
+          <>
+            <span>{data.client?.name ?? '—'}</span>
+            <MetaDivider />
+            <Ref>{data.reference || '—'}</Ref>
+            <MetaDivider />
+            <StatusBadge domain="project" value={data.status} />
+          </>
+        }
+        actions={backToProjects}
+      />
 
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          marginBottom: 24,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: '0 0 6px 0' }}>
-            {project.name}
-          </h1>
-          <div style={{ fontSize: 14, color: '#6b7280', display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span>{project.client?.name ?? '-'}</span>
-            <span style={{ color: '#d1d5db' }}>|</span>
-            <span>{t('reference', { reference: project.reference || '-' })}</span>
-            <span style={{ color: '#d1d5db' }}>|</span>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '2px 10px',
-                borderRadius: 12,
-                fontSize: 12,
-                fontWeight: 600,
-                background: colors.bg,
-                color: colors.fg,
-              }}
-            >
-              {statusLabel('project', project.status)}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Progress bar (large) */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{t('progress')}</span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: progressColor }}>{progressPct}%</span>
-        </div>
-        <div
-          style={{
-            width: '100%',
-            height: 12,
-            background: '#e5e7eb',
-            borderRadius: 6,
-            overflow: 'hidden',
-          }}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Tabs
+          value={activeTab}
+          onValueChange={openTab}
+          className="grid min-w-0 content-start gap-5"
         >
-          <div
-            style={{
-              width: `${progressPct}%`,
-              height: '100%',
-              background: progressColor,
-              borderRadius: 6,
-              transition: 'width 0.3s',
-            }}
-          />
-        </div>
-      </div>
+          <TabsList>
+            <TabsTrigger value="lots">
+              <Layers aria-hidden />
+              {t('tabs.lots')}
+              <TabCount>{lots.length}</TabCount>
+            </TabsTrigger>
+            <TabsTrigger value="milestones">
+              <Flag aria-hidden />
+              {t('tabs.milestones')}
+              <TabCount>{milestones.length}</TabCount>
+            </TabsTrigger>
+            <TabsTrigger value="tasks">
+              <ListChecks aria-hidden />
+              {t('tabs.tasks')}
+              <TabCount>{tasks.length}</TabCount>
+            </TabsTrigger>
+            <TabsTrigger value="gantt">
+              <ChartGantt aria-hidden />
+              {t('tabs.gantt')}
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Summary cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
-          gap: 16,
-          marginBottom: 32,
-        }}
-      >
-        <SummaryCard
-          label={t('summary.budget')}
-          value={project.budgetHtCents != null ? formatMoney(project.budgetHtCents) : '—'}
-          highlight
-        />
-        <SummaryCard
-          label={t('summary.actualCost')}
-          value={project.actualCostCents != null ? formatMoney(project.actualCostCents) : '—'}
-        />
-        <SummaryCard label={t('summary.manager')} value={userName(project.manager) || '-'} />
-        <SummaryCard
-          label={t('summary.start')}
-          value={project.startDate ? formatDate(project.startDate) : '-'}
-        />
-        <SummaryCard
-          label={t('summary.end')}
-          value={project.endDate ? formatDate(project.endDate) : '-'}
-        />
-      </div>
+          {/* ---------------- Lots ---------------- */}
+          <TabsContent value="lots">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('tabs.lots')}
+                  <CardCount>{lots.length}</CardCount>
+                </CardTitle>
+                {canPlan ? (
+                  <Button variant="primary" size="sm" onClick={openLotForm}>
+                    <Plus />
+                    {t('lots.add')}
+                  </Button>
+                ) : null}
+              </CardHeader>
 
-      {/* Tabs */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 0,
-          borderBottom: '2px solid #e5e7eb',
-          marginBottom: 24,
-        }}
-      >
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              padding: '10px 20px',
-              border: 'none',
-              background: 'none',
-              fontSize: 14,
-              fontWeight: activeTab === tab.key ? 600 : 400,
-              color: activeTab === tab.key ? '#2563eb' : '#6b7280',
-              borderBottom: activeTab === tab.key ? '2px solid #2563eb' : '2px solid transparent',
-              marginBottom: -2,
-              cursor: 'pointer',
-              transition: 'color 0.15s',
-            }}
-          >
-            {t(`tabs.${tab.key}`)}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab: Lots */}
-      {activeTab === 'lots' && (
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              {t('lots.title', { count: lots.length })}
-            </h2>
-            <button
-              style={buttonStyle}
-              onClick={() => setShowLotForm(!showLotForm)}
-            >
-              {showLotForm ? t('common:actions.cancel') : t('lots.add')}
-            </button>
-          </div>
-
-          {showLotForm && (
-            <div
-              style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 2fr 1fr',
-                  gap: 10,
-                  marginBottom: 12,
-                }}
-              >
-                <input
-                  style={inputStyle}
-                  placeholder={t('lots.namePlaceholder')}
-                  value={lotForm.name}
-                  onChange={(e) => setLotForm({ ...lotForm, name: e.target.value })}
-                />
-                <input
-                  style={inputStyle}
-                  placeholder={t('lots.descriptionPlaceholder')}
-                  value={lotForm.description}
-                  onChange={(e) => setLotForm({ ...lotForm, description: e.target.value })}
-                />
-                <input
-                  style={inputStyle}
-                  type="number"
-                  min={0}
-                  step="0.05"
-                  placeholder={t('lots.budgetPlaceholder')}
-                  value={lotForm.budgetChf}
-                  onChange={(e) => setLotForm({ ...lotForm, budgetChf: e.target.value })}
-                />
-              </div>
-              <button
-                style={buttonStyle}
-                onClick={() => lotForm.name && addLotMutation.mutate(lotForm)}
-                disabled={addLotMutation.isPending}
-              >
-                {addLotMutation.isPending ? t('adding') : t('lots.submit')}
-              </button>
-              {addLotMutation.error && (
-                <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {errorMessage(addLotMutation.error)}
-                </span>
-              )}
-            </div>
-          )}
-
-          {lots.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('lots.empty')}</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {(['name', 'description', 'budget', 'tasks'] as const).map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: 'left',
-                        padding: '8px 10px',
-                        borderBottom: '2px solid #e5e7eb',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: '#6b7280',
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {t(`lots.table.${h}`)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {lots.map((lot) => (
-                  <tr key={lot.id}>
-                    <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, fontWeight: 500 }}>
-                      {lot.name}
-                    </td>
-                    <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, color: '#6b7280' }}>
-                      {lot.description || '-'}
-                    </td>
-                    <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>
-                      {lot.budgetCents != null ? formatMoney(lot.budgetCents) : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                      {lotTaskCounts.get(lot.id) ?? 0}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Milestones */}
-      {activeTab === 'milestones' && (
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              {t('milestones.title', { count: milestones.length })}
-            </h2>
-            <button
-              style={buttonStyle}
-              onClick={() => setShowMilestoneForm(!showMilestoneForm)}
-            >
-              {showMilestoneForm ? t('common:actions.cancel') : t('milestones.add')}
-            </button>
-          </div>
-
-          {showMilestoneForm && (
-            <div
-              style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr',
-                  gap: 10,
-                  marginBottom: 12,
-                }}
-              >
-                <input
-                  style={inputStyle}
-                  placeholder={t('milestones.namePlaceholder')}
-                  value={milestoneForm.name}
-                  onChange={(e) => setMilestoneForm({ ...milestoneForm, name: e.target.value })}
-                />
-                <input
-                  style={inputStyle}
-                  type="date"
-                  value={milestoneForm.targetDate}
-                  onChange={(e) => setMilestoneForm({ ...milestoneForm, targetDate: e.target.value })}
-                />
-              </div>
-              <button
-                style={buttonStyle}
-                onClick={() =>
-                  milestoneForm.name && milestoneForm.targetDate && addMilestoneMutation.mutate(milestoneForm)
+              <DataState
+                isLoading={project.isPending}
+                error={loadError}
+                onRetry={retry}
+                isEmpty={lots.length === 0}
+                loading={<TableSkeleton cols={lotColumns} />}
+                empty={
+                  <EmptyState
+                    icon={<Layers className="size-5" />}
+                    title={t('lots.empty')}
+                    description={t('lots.emptyHelp')}
+                    action={
+                      canPlan ? (
+                        <Button variant="ghost" size="sm" onClick={openLotForm}>
+                          <Plus />
+                          {t('lots.add')}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
                 }
-                disabled={addMilestoneMutation.isPending}
               >
-                {addMilestoneMutation.isPending ? t('adding') : t('milestones.submit')}
-              </button>
-              {addMilestoneMutation.error && (
-                <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {errorMessage(addMilestoneMutation.error)}
-                </span>
-              )}
-            </div>
-          )}
-
-          {completeMilestoneMutation.error && (
-            <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
-              {errorMessage(completeMilestoneMutation.error)}
-            </div>
-          )}
-
-          {milestones.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('milestones.empty')}</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {(['name', 'targetDate', 'completedDate', 'status', 'actions'] as const).map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: 'left',
-                        padding: '8px 10px',
-                        borderBottom: '2px solid #e5e7eb',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: '#6b7280',
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {t(`milestones.table.${h}`)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {milestones.map((m) => {
-                  const mColors = MILESTONE_STATUS_COLORS[m.status] ?? MILESTONE_STATUS_COLORS.pending;
-                  return (
-                    <tr key={m.id}>
-                      <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, fontWeight: 500 }}>
-                        {m.name}
-                      </td>
-                      <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                        {m.targetDate ? formatDate(m.targetDate) : '-'}
-                      </td>
-                      <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 14, color: '#6b7280' }}>
-                        {m.completedDate ? formatDate(m.completedDate) : '-'}
-                      </td>
-                      <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 8px',
-                            borderRadius: 4,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            background: mColors.bg,
-                            color: mColors.fg,
-                          }}
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('lots.table.name')}</TH>
+                        <TH>{t('lots.table.description')}</TH>
+                        {canSeeFinancials ? <TH numeric>{t('lots.table.budget')}</TH> : null}
+                        <TH numeric>{t('lots.table.tasks')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {lots.map((lot) => (
+                        <TR
+                          key={lot.id}
+                          onActivate={() => showLotTasks(lot.id)}
+                          title={t('lots.openTasks')}
                         >
-                          {statusLabel('milestone', m.status)}
-                        </span>
-                      </td>
-                      <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6' }}>
-                        {m.status !== 'completed' && (
-                          <button
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: '#2563eb',
-                              cursor: 'pointer',
-                              fontSize: 13,
-                              padding: '2px 6px',
-                            }}
-                            onClick={() => completeMilestoneMutation.mutate(m.id)}
-                            disabled={completeMilestoneMutation.isPending}
-                          >
-                            {t('milestones.markCompleted')}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+                          <TD className="font-medium">{lot.name}</TD>
+                          <TD className="text-muted">{lot.description || '—'}</TD>
+                          {canSeeFinancials ? (
+                            <TD numeric>
+                              {lot.budgetCents != null ? (
+                                formatMoney(lot.budgetCents)
+                              ) : (
+                                <span className="text-muted">—</span>
+                              )}
+                            </TD>
+                          ) : null}
+                          <TD numeric className="text-muted">
+                            {lotTaskCounts.get(lot.id) ?? 0}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('lots.count', { count: lots.length })}</span>
+                  <span>{t('lots.rowHint')}</span>
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
 
-      {/* Tab: Tasks */}
-      {activeTab === 'tasks' && (
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
-              {t('tasks.title', { count: tasks.length })}
-            </h2>
-            <button
-              style={buttonStyle}
-              onClick={() => setShowTaskForm(!showTaskForm)}
-            >
-              {showTaskForm ? t('common:actions.cancel') : t('tasks.add')}
-            </button>
-          </div>
+          {/* ---------------- Milestones ---------------- */}
+          <TabsContent value="milestones">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('tabs.milestones')}
+                  <CardCount>{milestones.length}</CardCount>
+                </CardTitle>
+                {canPlan ? (
+                  <Button variant="primary" size="sm" onClick={openMilestoneForm}>
+                    <Plus />
+                    {t('milestones.add')}
+                  </Button>
+                ) : null}
+              </CardHeader>
 
-          {/* Lot filter */}
-          <div style={{ marginBottom: 16 }}>
-            <select
-              style={{ ...inputStyle, maxWidth: 250 }}
-              value={taskLotFilter}
-              onChange={(e) => setTaskLotFilter(e.target.value)}
-            >
-              <option value="">{t('tasks.allLots')}</option>
-              {lots.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </div>
+              {completeMilestoneMutation.isError ? (
+                <p
+                  role="alert"
+                  className="border-b border-line-soft bg-bad-bg px-4 py-2.5 text-[13px] text-bad"
+                >
+                  {errorMessage(completeMilestoneMutation.error, t('milestones.updateFailed'))}
+                </p>
+              ) : null}
 
-          {/* Add task form */}
-          {showTaskForm && (
-            <div
-              style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
-                {t('tasks.newTask')}
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1fr',
-                  gap: 10,
-                  marginBottom: 10,
-                }}
+              <DataState
+                isLoading={project.isPending}
+                error={loadError}
+                onRetry={retry}
+                isEmpty={milestones.length === 0}
+                loading={<TableSkeleton cols={4} />}
+                empty={
+                  <EmptyState
+                    icon={<Flag className="size-5" />}
+                    title={t('milestones.empty')}
+                    description={t('milestones.emptyHelp')}
+                    action={
+                      canPlan ? (
+                        <Button variant="ghost" size="sm" onClick={openMilestoneForm}>
+                          <Plus />
+                          {t('milestones.add')}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                }
               >
-                <input
-                  style={inputStyle}
-                  placeholder={t('tasks.titlePlaceholder')}
-                  value={taskForm.title}
-                  onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
-                />
-                <select
-                  style={inputStyle}
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('milestones.table.name')}</TH>
+                        <TH>{t('milestones.table.targetDate')}</TH>
+                        <TH>{t('milestones.table.completedDate')}</TH>
+                        <TH>{t('milestones.table.status')}</TH>
+                        <TH className="w-px">
+                          <span className="sr-only">{t('milestones.table.actions')}</span>
+                        </TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {milestones.map((milestone) => (
+                        <TR key={milestone.id}>
+                          <TD className="font-medium">{milestone.name}</TD>
+                          <TD className="tnum">{formatDate(milestone.targetDate)}</TD>
+                          <TD className="tnum text-muted">{formatDate(milestone.completedDate)}</TD>
+                          <TD>
+                            <StatusBadge domain="milestone" value={milestone.status} />
+                          </TD>
+                          <TD>
+                            {canPlan && milestone.status !== 'completed' ? (
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                disabled={completeMilestoneMutation.isPending}
+                                onClick={() => completeMilestone(milestone)}
+                              >
+                                <CircleCheck />
+                                {t('milestones.markCompleted')}
+                              </Button>
+                            ) : null}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('milestones.count', { count: milestones.length })}</span>
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
+
+          {/* ---------------- Tasks ---------------- */}
+          <TabsContent value="tasks">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('tabs.tasks')}
+                  <CardCount>{tasks.length}</CardCount>
+                </CardTitle>
+                {canAddTask ? (
+                  <Button variant="primary" size="sm" onClick={openTaskForm}>
+                    <Plus />
+                    {t('tasks.add')}
+                  </Button>
+                ) : null}
+              </CardHeader>
+
+              <div className="flex flex-wrap items-center gap-2.5 border-b border-line-soft p-3">
+                <label htmlFor="task-lot-filter" className="text-[13px] text-muted">
+                  {t('tasks.filterLot')}
+                </label>
+                <Select
+                  id="task-lot-filter"
+                  className="max-w-[240px]"
+                  value={taskLotFilter}
+                  onChange={(e) => setTaskLotFilter(e.target.value)}
+                >
+                  <option value="">{t('tasks.allLots')}</option>
+                  {lots.map((lot) => (
+                    <option key={lot.id} value={lot.id}>
+                      {lot.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              {updateTaskStatusMutation.isError ? (
+                <p
+                  role="alert"
+                  className="border-b border-line-soft bg-bad-bg px-4 py-2.5 text-[13px] text-bad"
+                >
+                  {errorMessage(updateTaskStatusMutation.error, t('tasks.updateFailed'))}
+                </p>
+              ) : null}
+
+              <DataState
+                isLoading={project.isPending}
+                error={loadError}
+                onRetry={retry}
+                isEmpty={filteredTasks.length === 0}
+                loading={<TableSkeleton rows={6} cols={6} />}
+                empty={
+                  tasks.length === 0 ? (
+                    <EmptyState
+                      icon={<ListChecks className="size-5" />}
+                      title={t('tasks.empty')}
+                      description={t('tasks.emptyHelp')}
+                      action={
+                        canAddTask ? (
+                          <Button variant="ghost" size="sm" onClick={openTaskForm}>
+                            <Plus />
+                            {t('tasks.add')}
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      title={t('tasks.noMatch')}
+                      description={t('tasks.noMatchHelp')}
+                      action={
+                        <Button variant="ghost" size="sm" onClick={() => setTaskLotFilter('')}>
+                          {t('tasks.allLots')}
+                        </Button>
+                      }
+                    />
+                  )
+                }
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('tasks.table.title')}</TH>
+                        <TH>{t('tasks.table.status')}</TH>
+                        <TH>{t('tasks.table.priority')}</TH>
+                        <TH>{t('tasks.table.assignedTo')}</TH>
+                        <TH>{t('tasks.table.start')}</TH>
+                        <TH>{t('tasks.table.end')}</TH>
+                        <TH>{t('tasks.table.progress')}</TH>
+                        <TH>{t('tasks.table.dependencies')}</TH>
+                        <TH className="w-px">
+                          <span className="sr-only">{t('tasks.table.actions')}</span>
+                        </TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {Array.from(tasksByLot.entries()).map(([lotId, lotTasks]) => (
+                        <Fragment key={lotId}>
+                          <tr>
+                            {/* Group label, not a column header: no scope to claim. */}
+                            <th
+                              colSpan={9}
+                              className="border-b border-line bg-chalk px-3.5 py-2 text-left text-xs font-semibold text-ink-2"
+                            >
+                              {lotNameMap.get(lotId) ?? t('tasks.unassigned')}
+                              <span className="tnum ml-2 font-normal text-muted">
+                                {lotTasks.length}
+                              </span>
+                            </th>
+                          </tr>
+                          {lotTasks.map((task) => {
+                            const taskProgress = clampPercent(task.progressPercent);
+                            const choices = statusChoicesFor(task, me);
+                            return (
+                              <TR key={task.id}>
+                                <TD className="font-medium">
+                                  <span className="block max-w-[260px] truncate" title={task.title}>
+                                    {task.title}
+                                  </span>
+                                </TD>
+                                <TD>
+                                  <StatusBadge domain="task" value={task.status} />
+                                </TD>
+                                <TD>
+                                  <Tag tone={PRIORITY_TONE[task.priority] ?? 'default'}>
+                                    {enumLabel('taskPriority', task.priority)}
+                                  </Tag>
+                                </TD>
+                                <TD>
+                                  {userName(task.assignee) || <span className="text-muted">—</span>}
+                                </TD>
+                                <TD className="tnum text-muted">{formatDate(task.plannedStart)}</TD>
+                                <TD className="tnum text-muted">{formatDate(task.plannedEnd)}</TD>
+                                <TD>
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      role="progressbar"
+                                      aria-label={t('tasks.table.progress')}
+                                      aria-valuemin={0}
+                                      aria-valuemax={100}
+                                      aria-valuenow={taskProgress}
+                                      className="h-2 w-14 shrink-0 overflow-hidden rounded-full bg-line-soft"
+                                    >
+                                      {/* The one permitted inline style: a width only known at runtime. */}
+                                      <div
+                                        className={cn(
+                                          'h-full rounded-full',
+                                          taskProgress >= 100 ? 'bg-ok' : 'bg-copper',
+                                        )}
+                                        style={{ width: `${taskProgress}%` }}
+                                      />
+                                    </div>
+                                    <span className="tnum text-xs text-muted">
+                                      {t('progressValue', { percent: taskProgress })}
+                                    </span>
+                                  </div>
+                                </TD>
+                                <TD className="text-muted">
+                                  {task.dependencies && task.dependencies.length > 0
+                                    ? task.dependencies
+                                        .map((d) => d.predecessorTitle ?? d.predecessorId)
+                                        .join(', ')
+                                    : '—'}
+                                </TD>
+                                <TD>
+                                  {choices.length > 0 ? (
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          variant="quiet"
+                                          size="iconSm"
+                                          aria-label={t('tasks.rowActions', { title: task.title })}
+                                        >
+                                          <MoreHorizontal />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent>
+                                        <DropdownMenuLabel>{t('tasks.changeStatus')}</DropdownMenuLabel>
+                                        {choices.map((status) => (
+                                          <DropdownMenuItem
+                                            key={status}
+                                            disabled={
+                                              status === task.status ||
+                                              updateTaskStatusMutation.isPending
+                                            }
+                                            onSelect={() =>
+                                              updateTaskStatusMutation.mutate({
+                                                taskId: task.id,
+                                                status,
+                                              })
+                                            }
+                                          >
+                                            {status === task.status ? (
+                                              <CircleCheck />
+                                            ) : (
+                                              <span aria-hidden className="size-4" />
+                                            )}
+                                            {statusLabel('task', status)}
+                                          </DropdownMenuItem>
+                                        ))}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  ) : null}
+                                </TD>
+                              </TR>
+                            );
+                          })}
+                        </Fragment>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('tasks.count', { count: filteredTasks.length, total: tasks.length })}</span>
+                  <span>{t('tasks.groupedByLot')}</span>
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
+
+          {/* ---------------- Gantt ---------------- */}
+          <TabsContent value="gantt">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('gantt.title')}</CardTitle>
+              </CardHeader>
+              <DataState
+                isLoading={gantt.isPending}
+                error={gantt.isError ? errorMessage(gantt.error, t('gantt.loadFailed')) : null}
+                onRetry={() => gantt.refetch()}
+                isEmpty={(gantt.data?.tasks.length ?? 0) === 0}
+                loading={<TableSkeleton rows={6} cols={3} />}
+                empty={
+                  <EmptyState
+                    icon={<ChartGantt className="size-5" />}
+                    title={t('gantt.noTasks')}
+                    description={t('gantt.noTasksHelp')}
+                  />
+                }
+              >
+                {gantt.data ? <GanttChart data={gantt.data} /> : null}
+              </DataState>
+            </Card>
+          </TabsContent>
+        </Tabs>
+
+        {/* ---------------- Sticky summary ---------------- */}
+        <aside className="grid content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_1.5rem)] lg:self-start">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('summary.title')}</CardTitle>
+            </CardHeader>
+            <div className="grid gap-4 p-4">
+              <div className="grid gap-1.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-[13px] font-medium text-ink-2">{t('progress')}</span>
+                  <span className="tnum text-[13px] font-medium">
+                    {t('progressValue', { percent: progressPct })}
+                  </span>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label={t('progress')}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progressPct}
+                  className="h-2.5 overflow-hidden rounded-full bg-line-soft"
+                >
+                  {/* The one permitted inline style: a width only known at runtime. */}
+                  <div
+                    className={cn(
+                      'h-full rounded-full',
+                      progressPct >= 100 ? 'bg-ok' : progressPct >= 50 ? 'bg-copper' : 'bg-warn',
+                    )}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+              </div>
+
+              <dl className="grid gap-2.5 border-t border-line-soft pt-3.5 text-[13.5px]">
+                {canSeeFinancials ? (
+                  <>
+                    <SummaryRow
+                      label={t('summary.budget')}
+                      value={data.budgetHtCents != null ? formatMoney(data.budgetHtCents) : '—'}
+                      numeric
+                    />
+                    <SummaryRow
+                      label={t('summary.actualCost')}
+                      value={data.actualCostCents != null ? formatMoney(data.actualCostCents) : '—'}
+                      numeric
+                    />
+                  </>
+                ) : null}
+                <SummaryRow label={t('summary.manager')} value={userName(data.manager) || '—'} />
+                <SummaryRow label={t('summary.start')} value={formatDate(data.startDate)} numeric />
+                <SummaryRow label={t('summary.end')} value={formatDate(data.endDate)} numeric />
+              </dl>
+            </div>
+          </Card>
+        </aside>
+      </div>
+
+      {/* ---------------- Dialogs ---------------- */}
+
+      <Dialog open={lotFormOpen} onOpenChange={setLotFormOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('lots.form.heading')}</DialogTitle>
+            <DialogDescription>{t('lots.form.help')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('lots.form.name')} htmlFor="lot-name" required>
+              <Input
+                id="lot-name"
+                value={lotForm.name}
+                onChange={(e) => setLotForm({ ...lotForm, name: e.target.value })}
+              />
+            </Field>
+            <Field label={t('lots.form.description')} htmlFor="lot-description">
+              <Textarea
+                id="lot-description"
+                value={lotForm.description}
+                onChange={(e) => setLotForm({ ...lotForm, description: e.target.value })}
+              />
+            </Field>
+            <Field
+              label={t('lots.form.budget')}
+              htmlFor="lot-budget"
+              hint={t('lots.form.budgetHint')}
+            >
+              <Input
+                id="lot-budget"
+                type="number"
+                min={0}
+                step="0.05"
+                inputMode="decimal"
+                value={lotForm.budgetChf}
+                onChange={(e) => setLotForm({ ...lotForm, budgetChf: e.target.value })}
+              />
+            </Field>
+            {addLotMutation.isError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {errorMessage(addLotMutation.error, t('lots.createFailed'))}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setLotFormOpen(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={lotForm.name.trim().length === 0 || addLotMutation.isPending}
+              onClick={() => addLotMutation.mutate(lotForm)}
+            >
+              {addLotMutation.isPending ? t('adding') : t('lots.submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={milestoneFormOpen} onOpenChange={setMilestoneFormOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('milestones.form.heading')}</DialogTitle>
+            <DialogDescription>{t('milestones.form.help')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('milestones.form.name')} htmlFor="milestone-name" required>
+              <Input
+                id="milestone-name"
+                value={milestoneForm.name}
+                onChange={(e) => setMilestoneForm({ ...milestoneForm, name: e.target.value })}
+              />
+            </Field>
+            <Field label={t('milestones.form.targetDate')} htmlFor="milestone-date" required>
+              <Input
+                id="milestone-date"
+                type="date"
+                value={milestoneForm.targetDate}
+                onChange={(e) => setMilestoneForm({ ...milestoneForm, targetDate: e.target.value })}
+              />
+            </Field>
+            {addMilestoneMutation.isError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {errorMessage(addMilestoneMutation.error, t('milestones.createFailed'))}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setMilestoneFormOpen(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={
+                milestoneForm.name.trim().length === 0 ||
+                milestoneForm.targetDate.length === 0 ||
+                addMilestoneMutation.isPending
+              }
+              onClick={() => addMilestoneMutation.mutate(milestoneForm)}
+            >
+              {addMilestoneMutation.isPending ? t('adding') : t('milestones.submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={taskFormOpen} onOpenChange={setTaskFormOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('tasks.form.heading')}</DialogTitle>
+            <DialogDescription>{t('tasks.form.help')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('tasks.form.title')} htmlFor="task-title" required>
+              <Input
+                id="task-title"
+                value={taskForm.title}
+                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+              />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('tasks.form.lot')} htmlFor="task-lot">
+                <Select
+                  id="task-lot"
                   value={taskForm.lotId}
                   onChange={(e) => setTaskForm({ ...taskForm, lotId: e.target.value })}
                 >
                   <option value="">{t('tasks.selectLot')}</option>
-                  {lots.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
+                  {lots.map((lot) => (
+                    <option key={lot.id} value={lot.id}>
+                      {lot.name}
                     </option>
                   ))}
-                </select>
-                <select
-                  style={inputStyle}
+                </Select>
+              </Field>
+              <Field label={t('tasks.form.priority')} htmlFor="task-priority">
+                <Select
+                  id="task-priority"
                   value={taskForm.priority}
                   onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}
                 >
-                  {TASK_PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {enumLabel('taskPriority', p)}
+                  {TASK_PRIORITIES.map((priority) => (
+                    <option key={priority} value={priority}>
+                      {enumLabel('taskPriority', priority)}
                     </option>
                   ))}
-                </select>
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-                  gap: 10,
-                  marginBottom: 12,
-                }}
-              >
-                <input
-                  style={inputStyle}
-                  placeholder={t('tasks.descriptionPlaceholder')}
-                  value={taskForm.description}
-                  onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
-                />
-                <input
-                  style={inputStyle}
+                </Select>
+              </Field>
+            </div>
+            <Field label={t('tasks.form.description')} htmlFor="task-description">
+              <Textarea
+                id="task-description"
+                value={taskForm.description}
+                onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+              />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label={t('tasks.form.plannedStart')} htmlFor="task-start">
+                <Input
+                  id="task-start"
                   type="date"
-                  placeholder={t('tasks.plannedStart')}
                   value={taskForm.plannedStart}
                   onChange={(e) => setTaskForm({ ...taskForm, plannedStart: e.target.value })}
-                  title={t('tasks.plannedStart')}
                 />
-                <input
-                  style={inputStyle}
+              </Field>
+              <Field label={t('tasks.form.plannedEnd')} htmlFor="task-end">
+                <Input
+                  id="task-end"
                   type="date"
-                  placeholder={t('tasks.plannedEnd')}
                   value={taskForm.plannedEnd}
                   onChange={(e) => setTaskForm({ ...taskForm, plannedEnd: e.target.value })}
-                  title={t('tasks.plannedEnd')}
                 />
-                <input
-                  style={inputStyle}
+              </Field>
+              <Field label={t('tasks.form.estimatedHours')} htmlFor="task-hours">
+                <Input
+                  id="task-hours"
                   type="number"
-                  placeholder={t('tasks.estimatedHours')}
+                  min={0}
+                  inputMode="decimal"
                   value={taskForm.estimatedHours}
                   onChange={(e) =>
                     setTaskForm({
@@ -988,232 +1246,107 @@ export default function ProjectDetail() {
                     })
                   }
                 />
-                <input
-                  style={inputStyle}
-                  placeholder={t('tasks.assigneePlaceholder')}
-                  value={taskForm.assignedTo}
-                  onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
-                />
-              </div>
-              <button
-                style={buttonStyle}
-                onClick={() => {
-                  if (!taskForm.title) return;
-                  addTaskMutation.mutate({
-                    title: taskForm.title,
-                    description: taskForm.description,
-                    lotId: taskForm.lotId,
-                    priority: taskForm.priority,
-                    plannedStart: taskForm.plannedStart,
-                    plannedEnd: taskForm.plannedEnd,
-                    estimatedHours: taskForm.estimatedHours === '' ? null : Number(taskForm.estimatedHours),
-                    assignedTo: taskForm.assignedTo,
-                  });
-                }}
-                disabled={addTaskMutation.isPending}
-              >
-                {addTaskMutation.isPending ? t('adding') : t('tasks.submit')}
-              </button>
-              {addTaskMutation.error && (
-                <span style={{ color: '#ef4444', marginLeft: 12, fontSize: 13 }}>
-                  {errorMessage(addTaskMutation.error)}
-                </span>
-              )}
+              </Field>
             </div>
-          )}
+            <Field
+              label={t('tasks.form.assignedTo')}
+              htmlFor="task-assignee"
+              hint={t('tasks.form.assignedToHint')}
+            >
+              <Input
+                id="task-assignee"
+                value={taskForm.assignedTo}
+                onChange={(e) => setTaskForm({ ...taskForm, assignedTo: e.target.value })}
+              />
+            </Field>
+            {addTaskMutation.isError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {errorMessage(addTaskMutation.error, t('tasks.createFailed'))}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setTaskFormOpen(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={taskForm.title.trim().length === 0 || addTaskMutation.isPending}
+              onClick={() =>
+                addTaskMutation.mutate({
+                  title: taskForm.title,
+                  description: taskForm.description,
+                  lotId: taskForm.lotId,
+                  priority: taskForm.priority,
+                  plannedStart: taskForm.plannedStart,
+                  plannedEnd: taskForm.plannedEnd,
+                  estimatedHours:
+                    taskForm.estimatedHours === '' ? null : Number(taskForm.estimatedHours),
+                  assignedTo: taskForm.assignedTo,
+                })
+              }
+            >
+              {addTaskMutation.isPending ? t('adding') : t('tasks.submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
+  );
+}
 
-          {updateTaskStatusMutation.error && (
-            <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>
-              {errorMessage(updateTaskStatusMutation.error)}
-            </div>
-          )}
+/* ------------------------------------------------------------------ */
+/*  Summary row                                                        */
+/* ------------------------------------------------------------------ */
 
-          {/* Tasks grouped by lot */}
-          {filteredTasks.length === 0 ? (
-            <div style={{ color: '#9ca3af', fontSize: 14 }}>{t('tasks.empty')}</div>
-          ) : (
-            Array.from(tasksByLot.entries()).map(([lotId, lotTasks]) => (
-              <div key={lotId} style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: '#374151',
-                    marginBottom: 8,
-                    marginTop: 0,
-                    padding: '6px 10px',
-                    background: '#f9fafb',
-                    borderRadius: 4,
-                  }}
-                >
-                  {lotNameMap.get(lotId) ?? t('tasks.unassigned')}
-                </h3>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      {(['title', 'status', 'priority', 'assignedTo', 'start', 'end', 'progress', 'dependencies'] as const).map((h) => (
-                        <th
-                          key={h}
-                          style={{
-                            textAlign: 'left',
-                            padding: '6px 10px',
-                            borderBottom: '2px solid #e5e7eb',
-                            fontSize: 11,
-                            fontWeight: 600,
-                            color: '#6b7280',
-                            textTransform: 'uppercase',
-                            letterSpacing: 0.5,
-                          }}
-                        >
-                          {t(`tasks.table.${h}`)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lotTasks.map((task) => {
-                      const tColors = TASK_STATUS_COLORS[task.status] ?? TASK_STATUS_COLORS.todo;
-                      const pColors = PRIORITY_COLORS[task.priority] ?? PRIORITY_COLORS.normal;
-                      const taskProg = Math.min(100, Math.max(0, task.progressPercent ?? 0));
-                      return (
-                        <tr key={task.id}>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13, fontWeight: 500 }}>
-                            {task.title}
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6' }}>
-                            <select
-                              style={{
-                                padding: '2px 6px',
-                                borderRadius: 4,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                background: tColors.bg,
-                                color: tColors.fg,
-                                border: 'none',
-                                cursor: 'pointer',
-                              }}
-                              value={task.status}
-                              onChange={(e) =>
-                                updateTaskStatusMutation.mutate({
-                                  taskId: task.id,
-                                  status: e.target.value,
-                                })
-                              }
-                            >
-                              {TASK_STATUSES.map((s) => (
-                                <option key={s} value={s}>
-                                  {statusLabel('task', s)}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6' }}>
-                            <span
-                              style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: 4,
-                                fontSize: 11,
-                                fontWeight: 600,
-                                background: pColors.bg,
-                                color: pColors.fg,
-                              }}
-                            >
-                              {enumLabel('taskPriority', task.priority)}
-                            </span>
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 13 }}>
-                            {userName(task.assignee) || '-'}
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {task.plannedStart ? formatDate(task.plannedStart) : '-'}
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {task.plannedEnd ? formatDate(task.plannedEnd) : '-'}
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <div
-                                style={{
-                                  width: 50,
-                                  height: 6,
-                                  background: '#e5e7eb',
-                                  borderRadius: 3,
-                                  overflow: 'hidden',
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    width: `${taskProg}%`,
-                                    height: '100%',
-                                    background: taskProg >= 100 ? '#22c55e' : '#3b82f6',
-                                    borderRadius: 3,
-                                  }}
-                                />
-                              </div>
-                              <span style={{ fontSize: 11, color: '#6b7280' }}>{taskProg}%</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '6px 10px', borderBottom: '1px solid #f3f4f6', fontSize: 12, color: '#6b7280' }}>
-                            {task.dependencies && task.dependencies.length > 0
-                              ? task.dependencies.map((d) => d.predecessorTitle ?? d.predecessorId).join(', ')
-                              : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Tab: Gantt Chart */}
-      {activeTab === 'gantt' && (
-        <GanttChart data={ganttData ?? null} />
-      )}
+function SummaryRow({
+  label,
+  value,
+  numeric,
+}: {
+  label: string;
+  value: string;
+  numeric?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className={cn('min-w-0 truncate text-right font-medium', numeric && 'tnum')}>{value}</dd>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Gantt Chart Component                                              */
+/*  Gantt chart                                                        */
 /* ------------------------------------------------------------------ */
 
-function GanttChart({ data }: { data: GanttData | null }) {
+/*
+ * The chart is hand-drawn: absolutely positioned bars over a day grid, plus an SVG overlay for
+ * the dependency arrows. Its geometry is computed at runtime, which is the one case the UI
+ * conventions allow `style` for — every colour, border and font below is a design token class.
+ * The constants and the Tailwind sizes must stay in step:
+ *   HEADER_HEIGHT 40 → h-10 · ROW_HEIGHT 32 → h-8 · LOT_HEADER_HEIGHT 28 → h-7
+ *   bar height ROW_HEIGHT - 16 → h-4 · label column 220px → w-[220px]
+ */
+function GanttChart({ data }: { data: GanttData }) {
   const { t, i18n } = useTranslation('projectDetail');
   const PX_PER_DAY = 3;
   const ROW_HEIGHT = 32;
-  const LABEL_WIDTH = 220;
   const HEADER_HEIGHT = 40;
   const LOT_HEADER_HEIGHT = 28;
 
-  if (!data || data.tasks.length === 0) {
-    return (
-      <div style={{ color: '#9ca3af', fontSize: 14, padding: 20 }}>
-        {t('gantt.noTasks')}
-      </div>
-    );
-  }
-
   /* Compute date range */
   const allDates: Date[] = [];
-  for (const t of data.tasks) {
-    if (t.plannedStart) allDates.push(new Date(t.plannedStart));
-    if (t.plannedEnd) allDates.push(new Date(t.plannedEnd));
+  for (const task of data.tasks) {
+    if (task.plannedStart) allDates.push(new Date(task.plannedStart));
+    if (task.plannedEnd) allDates.push(new Date(task.plannedEnd));
   }
-  for (const m of data.milestones) {
-    if (m.date) allDates.push(new Date(m.date));
+  for (const milestone of data.milestones) {
+    if (milestone.date) allDates.push(new Date(milestone.date));
   }
 
   if (allDates.length === 0) {
-    return (
-      <div style={{ color: '#9ca3af', fontSize: 14, padding: 20 }}>
-        {t('gantt.noDates')}
-      </div>
-    );
+    return <EmptyState icon={<ChartGantt className="size-5" />} title={t('gantt.noDates')} />;
   }
 
   const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())));
@@ -1246,15 +1379,15 @@ function GanttChart({ data }: { data: GanttData | null }) {
   const rows: GanttRow[] = [];
   for (const [lotName, lotTasks] of lotGroups) {
     rows.push({ type: 'lot_header', label: lotName });
-    for (const t of lotTasks) {
-      rows.push({ type: 'task', label: t.title, task: t });
+    for (const task of lotTasks) {
+      rows.push({ type: 'task', label: task.title, task });
     }
   }
 
   /* Compute chart height */
   let chartContentHeight = 0;
-  for (const r of rows) {
-    chartContentHeight += r.type === 'lot_header' ? LOT_HEADER_HEIGHT : ROW_HEIGHT;
+  for (const row of rows) {
+    chartContentHeight += row.type === 'lot_header' ? LOT_HEADER_HEIGHT : ROW_HEIGHT;
   }
   const chartHeight = chartContentHeight + HEADER_HEIGHT;
 
@@ -1286,26 +1419,26 @@ function GanttChart({ data }: { data: GanttData | null }) {
   /* Task positions map for dependency arrows */
   const taskPositions = new Map<string, { x: number; y: number; width: number }>();
   let yAcc = HEADER_HEIGHT;
-  for (const r of rows) {
-    if (r.type === 'lot_header') {
+  for (const row of rows) {
+    if (row.type === 'lot_header') {
       yAcc += LOT_HEADER_HEIGHT;
-    } else if (r.task) {
-      const t = r.task;
-      const start = dayOffset(t.plannedStart) * PX_PER_DAY;
-      const end = dayOffset(t.plannedEnd) * PX_PER_DAY;
+    } else if (row.task) {
+      const task = row.task;
+      const start = dayOffset(task.plannedStart) * PX_PER_DAY;
+      const end = dayOffset(task.plannedEnd) * PX_PER_DAY;
       const barWidth = Math.max(end - start, PX_PER_DAY);
-      taskPositions.set(t.id, { x: start, y: yAcc + ROW_HEIGHT / 2, width: barWidth });
+      taskPositions.set(task.id, { x: start, y: yAcc + ROW_HEIGHT / 2, width: barWidth });
       yAcc += ROW_HEIGHT;
     }
   }
 
   /* Dependency arrows */
   const arrows: { x1: number; y1: number; x2: number; y2: number }[] = [];
-  for (const t of data.tasks) {
-    if (!t.dependencies) continue;
-    const target = taskPositions.get(t.id);
+  for (const task of data.tasks) {
+    if (!task.dependencies) continue;
+    const target = taskPositions.get(task.id);
     if (!target) continue;
-    for (const depId of t.dependencies) {
+    for (const depId of task.dependencies) {
       const source = taskPositions.get(depId);
       if (!source) continue;
       arrows.push({
@@ -1317,319 +1450,182 @@ function GanttChart({ data }: { data: GanttData | null }) {
     }
   }
 
-  /* Render */
-  let yPos = HEADER_HEIGHT;
-
   return (
-    <div>
-      <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: '0 0 16px 0' }}>
-        {t('gantt.title')}
-      </h2>
+    <div className="flex overflow-hidden rounded-b-card">
+      {/* Labels column */}
+      <div className="w-[220px] min-w-[220px] border-r border-line bg-paper-2">
+        <div className="flex h-10 items-center border-b border-line px-3 text-xs font-medium text-muted">
+          {t('gantt.task')}
+        </div>
+        {rows.map((row, i) =>
+          row.type === 'lot_header' ? (
+            <div
+              key={`lbl-${i}`}
+              className="flex h-7 items-center border-b border-line bg-chalk px-3 text-xs font-semibold text-ink-2"
+            >
+              <span className="truncate">{row.label}</span>
+            </div>
+          ) : (
+            <div
+              key={`lbl-${i}`}
+              className="flex h-8 items-center border-b border-line-soft px-3 text-xs text-ink-2"
+              title={row.label}
+            >
+              <span className="truncate">{row.label}</span>
+            </div>
+          ),
+        )}
+      </div>
+
+      {/* Chart area — keyboard-scrollable, so the planning is reachable without a mouse. */}
       <div
-        style={{
-          display: 'flex',
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          overflow: 'hidden',
-        }}
+        tabIndex={0}
+        role="group"
+        aria-label={t('gantt.chartLabel')}
+        className="min-w-0 flex-1 overflow-x-auto"
       >
-        {/* Labels column */}
-        <div
-          style={{
-            width: LABEL_WIDTH,
-            minWidth: LABEL_WIDTH,
-            borderRight: '1px solid #e5e7eb',
-            background: '#f9fafb',
-          }}
-        >
-          {/* Header spacer */}
-          <div
-            style={{
-              height: HEADER_HEIGHT,
-              borderBottom: '1px solid #e5e7eb',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              color: '#6b7280',
-              textTransform: 'uppercase',
-            }}
-          >
-            {t('gantt.task')}
-          </div>
-          {rows.map((r, i) => {
-            if (r.type === 'lot_header') {
+        {/* Geometry only: the chart is as wide as its date range. */}
+        <div className="relative" style={{ width: chartWidth, height: chartHeight }}>
+          {/* Month headers */}
+          {months.map((month, i) => (
+            <div
+              key={`month-${i}`}
+              className="absolute top-0 flex h-10 items-center border-b border-l border-line px-1.5 text-[11px] font-medium text-muted"
+              style={{ left: month.x }}
+            >
+              {month.label}
+            </div>
+          ))}
+
+          {/* Month grid lines */}
+          {months.map((month, i) => (
+            <div
+              key={`grid-${i}`}
+              aria-hidden
+              className="absolute top-10 w-px bg-line-soft"
+              style={{ left: month.x, height: chartContentHeight }}
+            />
+          ))}
+
+          {/* Row backgrounds + task bars */}
+          {(() => {
+            let yPos = HEADER_HEIGHT;
+            return rows.map((row, i) => {
+              const currentY = yPos;
+              if (row.type === 'lot_header') {
+                yPos += LOT_HEADER_HEIGHT;
+                return (
+                  <div
+                    key={`row-${i}`}
+                    aria-hidden
+                    className="absolute left-0 h-7 border-b border-line bg-chalk"
+                    style={{ top: currentY, width: chartWidth }}
+                  />
+                );
+              }
+
+              yPos += ROW_HEIGHT;
+              const task = row.task!;
+              const barStart = dayOffset(task.plannedStart) * PX_PER_DAY;
+              const barEnd = dayOffset(task.plannedEnd) * PX_PER_DAY;
+              const barWidth = Math.max(barEnd - barStart, PX_PER_DAY);
+              const barClass = GANTT_BAR_CLASS[task.status] ?? GANTT_BAR_CLASS.todo;
+              const barLabel = t('gantt.barLabel', {
+                title: task.title,
+                start: formatDate(task.plannedStart),
+                end: formatDate(task.plannedEnd),
+                status: statusLabel('task', task.status),
+              });
+
               return (
-                <div
-                  key={`lbl-${i}`}
-                  style={{
-                    height: LOT_HEADER_HEIGHT,
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 12px',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    color: '#1e40af',
-                    background: '#eff6ff',
-                    borderBottom: '1px solid #e5e7eb',
-                  }}
-                >
-                  {r.label}
+                <div key={`row-${i}`}>
+                  {/* Row stripe */}
+                  <div
+                    aria-hidden
+                    className={cn(
+                      'absolute left-0 h-8 border-b border-line-soft',
+                      i % 2 === 0 ? 'bg-paper' : 'bg-paper-2',
+                    )}
+                    style={{ top: currentY, width: chartWidth }}
+                  />
+                  {/* Task bar */}
+                  <div
+                    role="img"
+                    aria-label={barLabel}
+                    className={cn('absolute h-4 min-w-[4px] rounded-[3px]', barClass)}
+                    style={{ left: barStart, top: currentY + 8, width: barWidth }}
+                    title={t('gantt.barTitle', {
+                      title: task.title,
+                      start: formatDate(task.plannedStart),
+                      end: formatDate(task.plannedEnd),
+                      status: statusLabel('task', task.status),
+                    })}
+                  />
                 </div>
               );
-            }
+            });
+          })()}
+
+          {/* Milestone diamonds */}
+          {data.milestones.map((milestone) => {
+            if (!milestone.date) return null;
+            const mx = dayOffset(milestone.date) * PX_PER_DAY;
+            const label = t('gantt.milestoneTitle', {
+              name: milestone.name,
+              date: formatDate(milestone.date),
+            });
             return (
               <div
-                key={`lbl-${i}`}
-                style={{
-                  height: ROW_HEIGHT,
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '0 12px',
-                  fontSize: 12,
-                  color: '#374151',
-                  borderBottom: '1px solid #f3f4f6',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-                title={r.label}
-              >
-                {r.label}
-              </div>
+                key={`ms-${milestone.id}`}
+                role="img"
+                aria-label={label}
+                className="absolute size-3 rotate-45 rounded-[2px] bg-warn"
+                style={{ left: mx - 6, top: HEADER_HEIGHT + chartContentHeight - 20 }}
+                title={label}
+              />
             );
           })}
-        </div>
 
-        {/* Chart area */}
-        <div style={{ flex: 1, overflowX: 'auto' }}>
-          <div style={{ position: 'relative', width: chartWidth, height: chartHeight }}>
-            {/* Month headers */}
-            {months.map((m, i) => (
-              <div
-                key={`month-${i}`}
-                style={{
-                  position: 'absolute',
-                  left: m.x,
-                  top: 0,
-                  height: HEADER_HEIGHT,
-                  borderLeft: '1px solid #e5e7eb',
-                  borderBottom: '1px solid #e5e7eb',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '0 6px',
-                  fontSize: 11,
-                  color: '#6b7280',
-                  fontWeight: 500,
-                }}
-              >
-                {m.label}
-              </div>
-            ))}
+          {/* Today line */}
+          {showToday ? (
+            <div
+              role="img"
+              aria-label={t('gantt.today')}
+              className="absolute top-10 z-[2] w-0 border-l-2 border-dashed border-bad"
+              style={{ left: todayX, height: chartContentHeight }}
+              title={t('gantt.today')}
+            />
+          ) : null}
 
-            {/* Month grid lines */}
-            {months.map((m, i) => (
-              <div
-                key={`grid-${i}`}
-                style={{
-                  position: 'absolute',
-                  left: m.x,
-                  top: HEADER_HEIGHT,
-                  width: 1,
-                  height: chartContentHeight,
-                  background: '#f3f4f6',
-                }}
-              />
-            ))}
-
-            {/* Row backgrounds + task bars */}
-            {(() => {
-              yPos = HEADER_HEIGHT;
-              return rows.map((r, i) => {
-                const currentY = yPos;
-                if (r.type === 'lot_header') {
-                  yPos += LOT_HEADER_HEIGHT;
-                  return (
-                    <div
-                      key={`row-${i}`}
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: currentY,
-                        width: chartWidth,
-                        height: LOT_HEADER_HEIGHT,
-                        background: '#eff6ff',
-                        borderBottom: '1px solid #e5e7eb',
-                      }}
-                    />
-                  );
-                }
-
-                yPos += ROW_HEIGHT;
-                const task = r.task!;
-                const barStart = dayOffset(task.plannedStart) * PX_PER_DAY;
-                const barEnd = dayOffset(task.plannedEnd) * PX_PER_DAY;
-                const barWidth = Math.max(barEnd - barStart, PX_PER_DAY);
-                const barColor = GANTT_BAR_COLORS[task.status] ?? GANTT_BAR_COLORS.todo;
-
+          {/* Dependency arrows (SVG overlay) */}
+          {arrows.length > 0 ? (
+            <svg
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0 overflow-visible"
+              style={{ width: chartWidth, height: chartHeight }}
+            >
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" className="fill-muted" />
+                </marker>
+              </defs>
+              {arrows.map((arrow, i) => {
+                /* Simple right-angle connector */
+                const midX = arrow.x1 + (arrow.x2 - arrow.x1) / 2;
                 return (
-                  <div key={`row-${i}`}>
-                    {/* Row stripe */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        top: currentY,
-                        width: chartWidth,
-                        height: ROW_HEIGHT,
-                        background: i % 2 === 0 ? '#fff' : '#fafafa',
-                        borderBottom: '1px solid #f3f4f6',
-                      }}
-                    />
-                    {/* Task bar */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: barStart,
-                        top: currentY + 8,
-                        width: barWidth,
-                        height: ROW_HEIGHT - 16,
-                        background: barColor,
-                        borderRadius: 3,
-                        cursor: 'default',
-                        minWidth: 4,
-                      }}
-                      title={t('gantt.barTitle', {
-                        title: task.title,
-                        start: formatDate(task.plannedStart),
-                        end: formatDate(task.plannedEnd),
-                        status: statusLabel('task', task.status),
-                      })}
-                    />
-                  </div>
+                  <path
+                    key={`dep-${i}`}
+                    d={`M ${arrow.x1} ${arrow.y1} L ${midX} ${arrow.y1} L ${midX} ${arrow.y2} L ${arrow.x2} ${arrow.y2}`}
+                    fill="none"
+                    className="stroke-muted"
+                    strokeWidth={1.5}
+                    markerEnd="url(#arrowhead)"
+                  />
                 );
-              });
-            })()}
-
-            {/* Milestone diamonds */}
-            {data.milestones.map((m) => {
-              if (!m.date) return null;
-              const mx = dayOffset(m.date) * PX_PER_DAY;
-              return (
-                <div
-                  key={`ms-${m.id}`}
-                  style={{
-                    position: 'absolute',
-                    left: mx - 6,
-                    top: HEADER_HEIGHT + chartContentHeight - 20,
-                    width: 12,
-                    height: 12,
-                    background: '#f59e0b',
-                    transform: 'rotate(45deg)',
-                    borderRadius: 2,
-                  }}
-                  title={t('gantt.milestoneTitle', { name: m.name, date: formatDate(m.date) })}
-                />
-              );
-            })}
-
-            {/* Today line */}
-            {showToday && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: todayX,
-                  top: HEADER_HEIGHT,
-                  width: 0,
-                  height: chartContentHeight,
-                  borderLeft: '2px dashed #ef4444',
-                  zIndex: 2,
-                }}
-                title={t('gantt.today')}
-              />
-            )}
-
-            {/* Dependency arrows (SVG overlay) */}
-            {arrows.length > 0 && (
-              <svg
-                style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  width: chartWidth,
-                  height: chartHeight,
-                  pointerEvents: 'none',
-                  overflow: 'visible',
-                }}
-              >
-                <defs>
-                  <marker
-                    id="arrowhead"
-                    markerWidth="8"
-                    markerHeight="6"
-                    refX="8"
-                    refY="3"
-                    orient="auto"
-                  >
-                    <polygon points="0 0, 8 3, 0 6" fill="#9ca3af" />
-                  </marker>
-                </defs>
-                {arrows.map((a, i) => {
-                  /* Simple right-angle connector */
-                  const midX = a.x1 + (a.x2 - a.x1) / 2;
-                  return (
-                    <path
-                      key={`dep-${i}`}
-                      d={`M ${a.x1} ${a.y1} L ${midX} ${a.y1} L ${midX} ${a.y2} L ${a.x2} ${a.y2}`}
-                      fill="none"
-                      stroke="#9ca3af"
-                      strokeWidth={1.5}
-                      markerEnd="url(#arrowhead)"
-                    />
-                  );
-                })}
-              </svg>
-            )}
-          </div>
+              })}
+            </svg>
+          ) : null}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  SummaryCard                                                        */
-/* ------------------------------------------------------------------ */
-
-function SummaryCard({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        background: highlight ? '#eff6ff' : '#fff',
-        border: `1px solid ${highlight ? '#bfdbfe' : '#e5e7eb'}`,
-        borderRadius: 8,
-        padding: '16px 14px',
-      }}
-    >
-      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{label}</div>
-      <div
-        style={{
-          fontSize: 20,
-          fontWeight: 700,
-          color: highlight ? '#1d4ed8' : '#111827',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {value}
       </div>
     </div>
   );

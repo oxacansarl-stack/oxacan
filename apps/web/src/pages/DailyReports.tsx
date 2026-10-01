@@ -1,8 +1,35 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState, type FormEvent, type SyntheticEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { ClipboardList, MoreHorizontal, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
+import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { formatDate } from '../lib/format';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { Tag } from '@/components/ui/badge';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -30,67 +57,61 @@ interface DailyReport {
   updatedAt?: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  minHeight: 80,
-  resize: 'vertical' as const,
-  fontFamily: 'inherit',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#dc2626',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
-/** 'YYYY-MM-DD' → local Date without timezone shift */
-function parseDay(date: string): Date {
-  const [y, m, d] = date.slice(0, 10).split('-').map(Number);
-  return new Date(y, m - 1, d);
+interface ReportForm {
+  projectId: string;
+  date: string;
+  workDescription: string;
+  weather: string;
+  temperature: string;
+  materials: string;
+  notes: string;
 }
+
+/** What the form sends; `id` set means an update of an existing report. */
+interface SavePayload {
+  id: string | null;
+  projectId: string;
+  date: string;
+  workDescription: string;
+  weather: string;
+  temperatureCelsius: number | null;
+  materialsUsed: { name: string }[];
+  notes: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Constants and helpers                                             */
+/* ------------------------------------------------------------------ */
+
+/** The list asks for one page of the API's date-descending feed. */
+const PAGE_LIMIT = 100;
+
+/** The API rejects anything outside this range (DailyReportFieldsDto). */
+const TEMPERATURE_LIMIT = 60;
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+const emptyForm = (): ReportForm => ({
+  projectId: '',
+  date: today(),
+  workDescription: '',
+  weather: '',
+  temperature: '',
+  materials: '',
+  notes: '',
+});
+
+/** Keeps a control inside a row from also opening the row's record. */
+const stopRowActivation = (event: SyntheticEvent) => event.stopPropagation();
 
 function materialLabel(m: Record<string, unknown>): string {
   const label = m.name ?? m.description ?? m.label;
   return typeof label === 'string' ? label : JSON.stringify(m);
+}
+
+/** "2026-004 — Villa Dubois"; plain data, so it needs no translation. */
+function projectOption(project: Project | { name: string; reference?: string }): string {
+  return project.reference ? `${project.reference} — ${project.name}` : project.name;
 }
 
 /* ------------------------------------------------------------------ */
@@ -99,448 +120,547 @@ function materialLabel(m: Record<string, unknown>): string {
 
 export default function DailyReports() {
   const { t } = useTranslation('dailyReports');
-  // Form state
-  const [showForm, setShowForm] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [formProjectId, setFormProjectId] = useState('');
-  const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
-  const [formWorkDescription, setFormWorkDescription] = useState('');
-  const [formWeather, setFormWeather] = useState('');
-  const [formTemperature, setFormTemperature] = useState('');
-  const [formMaterials, setFormMaterials] = useState('');
-  const [formNotes, setFormNotes] = useState('');
-  const [formLoading, setFormLoading] = useState(false);
+  const confirm = useConfirm();
+  const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
 
-  // List state
-  const [reports, setReports] = useState<DailyReport[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  // Filters
+  // Filters (applied by the API)
   const [filterProject, setFilterProject] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
 
-  // ---- Load projects ----
+  // Create / edit dialog
+  const [formOpen, setFormOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<ReportForm>(emptyForm);
+
+  // A failed row action is reported above the table, where the row was.
+  const [actionAlert, setActionAlert] = useState<string | null>(null);
+
+  // The top bar's "Créer" menu links here with ?new=1.
   useEffect(() => {
-    apiGet<Project[]>('/projects')
-      .then((list) => setProjects(list ?? []))
-      .catch(() => {});
-  }, []);
+    if (params.get('new') === '1') {
+      setFormOpen(true);
+      const next = new URLSearchParams(params);
+      next.delete('new');
+      setParams(next, { replace: true });
+    }
+  }, [params, setParams]);
 
-  // ---- Load reports ----
-  const loadReports = useCallback(() => {
-    setLoading(true);
-    const params = new URLSearchParams({ limit: '100' });
-    if (filterProject) params.set('projectId', filterProject);
-    if (filterDateFrom) params.set('dateFrom', filterDateFrom);
-    if (filterDateTo) params.set('dateTo', filterDateTo);
+  /* --- Queries --- */
 
-    apiGet<DailyReport[]>(`/daily-reports?${params.toString()}`)
-      .then((list) => {
-        setReports(list ?? []);
-        setError('');
-      })
-      .catch((err) => setError(errorMessage(err, t('messages.loadFailed'))))
-      .finally(() => setLoading(false));
-  }, [filterProject, filterDateFrom, filterDateTo]);
+  const reports = useQuery<DailyReport[], ApiError>({
+    queryKey: ['daily-reports', filterProject, filterDateFrom, filterDateTo],
+    queryFn: () => {
+      const query = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+      if (filterProject) query.set('projectId', filterProject);
+      if (filterDateFrom) query.set('dateFrom', filterDateFrom);
+      if (filterDateTo) query.set('dateTo', filterDateTo);
+      return apiGet<DailyReport[]>(`/daily-reports?${query.toString()}`);
+    },
+    retry: false,
+  });
 
-  useEffect(() => {
-    loadReports();
-  }, [loadReports]);
+  const projects = useQuery<Project[], ApiError>({
+    queryKey: ['projects-list'],
+    queryFn: () => apiGet<Project[]>('/projects'),
+    retry: false,
+  });
 
-  // ---- Reset form ----
-  const resetForm = () => {
-    setFormProjectId('');
-    setFormDate(new Date().toISOString().slice(0, 10));
-    setFormWorkDescription('');
-    setFormWeather('');
-    setFormTemperature('');
-    setFormMaterials('');
-    setFormNotes('');
+  /* --- Mutations --- */
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['daily-reports'] });
+
+  const closeForm = () => {
+    setFormOpen(false);
     setEditId(null);
+    setForm(emptyForm());
   };
 
-  // ---- Create / Update report ----
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formProjectId) return;
+  const save = useMutation({
+    mutationFn: (payload: SavePayload) =>
+      payload.id
+        ? // Project and date are fixed once created; null clears a field.
+          apiPut(`/daily-reports/${payload.id}`, {
+            workDescription: payload.workDescription || null,
+            weather: payload.weather || null,
+            temperatureCelsius: payload.temperatureCelsius,
+            materialsUsed: payload.materialsUsed,
+            notes: payload.notes || null,
+          })
+        : apiPost('/daily-reports', {
+            projectId: payload.projectId,
+            date: payload.date,
+            workDescription: payload.workDescription || undefined,
+            weather: payload.weather || undefined,
+            temperatureCelsius: payload.temperatureCelsius ?? undefined,
+            materialsUsed: payload.materialsUsed.length > 0 ? payload.materialsUsed : undefined,
+            notes: payload.notes || undefined,
+          }),
+    onSuccess: () => {
+      closeForm();
+      invalidate();
+    },
+  });
 
-    const temperatureCelsius = formTemperature ? parseFloat(formTemperature) : null;
-    if (temperatureCelsius != null && (!Number.isFinite(temperatureCelsius) || Math.abs(temperatureCelsius) > 60)) {
-      setError(t('messages.invalidTemperature'));
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`/daily-reports/${id}`),
+    onMutate: () => setActionAlert(null),
+    onSuccess: () => invalidate(),
+    onError: (err) => setActionAlert(errorMessage(err, t('messages.deleteFailed'))),
+  });
+
+  /* --- Form plumbing --- */
+
+  const openCreate = () => {
+    save.reset();
+    setEditId(null);
+    setForm(emptyForm());
+    setFormOpen(true);
+  };
+
+  const openEdit = (report: DailyReport) => {
+    save.reset();
+    setEditId(report.id);
+    setForm({
+      projectId: report.projectId,
+      date: report.date ? report.date.slice(0, 10) : today(),
+      workDescription: report.workDescription || '',
+      weather: report.weather || '',
+      temperature: report.temperatureCelsius != null ? String(report.temperatureCelsius) : '',
+      materials: (report.materialsUsed || []).map(materialLabel).join('\n'),
+      notes: report.notes || '',
+    });
+    setFormOpen(true);
+  };
+
+  // The API accepts −60…60 °C only; the field says so before the request is made.
+  const temperatureCelsius = form.temperature ? parseFloat(form.temperature) : null;
+  const temperatureInvalid =
+    temperatureCelsius != null &&
+    (!Number.isFinite(temperatureCelsius) || Math.abs(temperatureCelsius) > TEMPERATURE_LIMIT);
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!form.projectId || temperatureInvalid) return;
+
+    save.mutate({
+      id: editId,
+      projectId: form.projectId,
+      date: form.date,
+      workDescription: form.workDescription,
+      weather: form.weather,
+      temperatureCelsius,
+      // One material per line → JSONB objects
+      materialsUsed: form.materials
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((name) => ({ name })),
+      notes: form.notes,
+    });
+  };
+
+  const handleDelete = async (report: DailyReport) => {
+    if (
+      !(await confirm({
+        title: t('prompts.confirmDelete'),
+        description: t('common:confirm.irreversible'),
+      }))
+    ) {
       return;
     }
-    setFormLoading(true);
-
-    // One material per line → JSONB objects
-    const materialsUsed = formMaterials
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((name) => ({ name }));
-
-    try {
-      if (editId) {
-        // Project and date are fixed once created; null clears a field.
-        await apiPut(`/daily-reports/${editId}`, {
-          workDescription: formWorkDescription || null,
-          weather: formWeather || null,
-          temperatureCelsius,
-          materialsUsed,
-          notes: formNotes || null,
-        });
-      } else {
-        await apiPost('/daily-reports', {
-          projectId: formProjectId,
-          date: formDate,
-          workDescription: formWorkDescription || undefined,
-          weather: formWeather || undefined,
-          temperatureCelsius: temperatureCelsius ?? undefined,
-          materialsUsed: materialsUsed.length > 0 ? materialsUsed : undefined,
-          notes: formNotes || undefined,
-        });
-      }
-      resetForm();
-      setShowForm(false);
-      loadReports();
-    } catch (err) {
-      setError(errorMessage(err, t('messages.saveFailed')));
-    } finally {
-      setFormLoading(false);
-    }
+    remove.mutate(report.id);
   };
 
-  // ---- Edit ----
-  const handleEdit = (report: DailyReport) => {
-    setEditId(report.id);
-    setFormProjectId(report.projectId);
-    setFormDate(report.date ? report.date.slice(0, 10) : new Date().toISOString().slice(0, 10));
-    setFormWorkDescription(report.workDescription || '');
-    setFormWeather(report.weather || '');
-    setFormTemperature(report.temperatureCelsius != null ? String(report.temperatureCelsius) : '');
-    setFormMaterials((report.materialsUsed || []).map(materialLabel).join('\n'));
-    setFormNotes(report.notes || '');
-    setShowForm(true);
-  };
+  /* --- Derived --- */
 
-  // ---- Delete ----
-  const handleDelete = async (id: string) => {
-    if (!confirm(t('prompts.confirmDelete'))) return;
-    try {
-      await apiDelete(`/daily-reports/${id}`);
-      loadReports();
-    } catch (err) {
-      setError(errorMessage(err, t('messages.deleteFailed')));
-    }
+  const rows = reports.data ?? [];
+  const projectList = projects.data ?? [];
+  const filtered = Boolean(filterProject || filterDateFrom || filterDateTo);
+  const editing = editId ? rows.find((report) => report.id === editId) : undefined;
+
+  const resetFilters = () => {
+    setFilterProject('');
+    setFilterDateFrom('');
+    setFilterDateTo('');
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
-          <p style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>{t('subtitle')}</p>
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        kicker={t('common:navGroup.sites')}
+        meta={<span>{t('subtitle')}</span>}
+        actions={
+          <Button variant="primary" onClick={openCreate}>
+            <Plus />
+            {t('actions.new')}
+          </Button>
+        }
+      />
+
+      <Card>
+        <div className="flex flex-wrap items-end gap-3 border-b border-line-soft p-3">
+          <Field
+            label={t('filters.project')}
+            htmlFor="report-filter-project"
+            className="w-full sm:w-[240px]"
+          >
+            <Select
+              id="report-filter-project"
+              value={filterProject}
+              onChange={(e) => setFilterProject(e.target.value)}
+            >
+              <option value="">{t('filters.allProjects')}</option>
+              {projectList.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {projectOption(project)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={t('filters.from')} htmlFor="report-filter-from" className="w-[150px]">
+            <Input
+              id="report-filter-from"
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+            />
+          </Field>
+          <Field label={t('filters.to')} htmlFor="report-filter-to" className="w-[150px]">
+            <Input
+              id="report-filter-to"
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+            />
+          </Field>
+          {filtered ? (
+            <Button variant="quiet" size="sm" className="ml-auto" onClick={resetFilters}>
+              {t('filters.reset')}
+            </Button>
+          ) : null}
         </div>
-        <button
-          style={{ ...btnPrimary }}
-          onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}
-        >
-          {showForm ? t('common:actions.cancel') : t('actions.new')}
-        </button>
-      </div>
 
-      {error && (
-        <div style={{ padding: '10px 16px', background: '#fee2e2', color: '#991b1b', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {error}
-        </div>
-      )}
+        {/* A failed project load must not read as "no project to filter by". */}
+        {projects.isError ? (
+          <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+            {errorMessage(projects.error, t('form.projectsLoadFailed'))}
+          </p>
+        ) : null}
 
-      {/* Create / Edit Form */}
-      {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            background: '#f8f9fa',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            padding: 20,
-            marginBottom: 24,
-          }}
-        >
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16 }}>
-            {editId ? t('form.editTitle') : t('form.newTitle')}
-          </div>
+        {actionAlert ? (
+          <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+            {actionAlert}
+          </p>
+        ) : null}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.project')}</label>
-              <select style={{ ...inputStyle }} value={formProjectId} onChange={(e) => setFormProjectId(e.target.value)} required disabled={!!editId}>
-                <option value="">{t('form.selectProject')}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.date')}</label>
-              <input type="date" style={{ ...inputStyle }} value={formDate} onChange={(e) => setFormDate(e.target.value)} required disabled={!!editId} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.weather')}</label>
-              <input
-                style={{ ...inputStyle }}
-                placeholder={t('form.weatherPlaceholder')}
-                value={formWeather}
-                onChange={(e) => setFormWeather(e.target.value)}
+        <DataState
+          isLoading={reports.isPending}
+          error={
+            reports.isError
+              ? reports.error.status === 401
+                ? t('loginRequired')
+                : errorMessage(reports.error, t('messages.loadFailed'))
+              : null
+          }
+          onRetry={() => reports.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<TableSkeleton rows={6} cols={6} />}
+          empty={
+            filtered ? (
+              <EmptyState
+                icon={<ClipboardList className="size-5" />}
+                title={t('noMatch')}
+                description={t('noMatchHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={resetFilters}>
+                    {t('filters.reset')}
+                  </Button>
+                }
               />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.temperature')}</label>
-              <input
-                type="number"
-                step="0.5"
-                style={{ ...inputStyle }}
-                placeholder={t('form.temperaturePlaceholder')}
-                value={formTemperature}
-                onChange={(e) => setFormTemperature(e.target.value)}
+            ) : (
+              <EmptyState
+                icon={<ClipboardList className="size-5" />}
+                title={t('empty')}
+                description={t('emptyHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={openCreate}>
+                    <Plus />
+                    {t('actions.new')}
+                  </Button>
+                }
               />
-            </div>
-          </div>
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('table.date')}</TH>
+                  <TH>{t('table.reference')}</TH>
+                  <TH>{t('table.project')}</TH>
+                  <TH>{t('table.workDescription')}</TH>
+                  <TH>{t('table.weather')}</TH>
+                  <TH numeric>{t('table.materials')}</TH>
+                  <TH className="w-11">
+                    <span className="sr-only">{t('table.actions')}</span>
+                  </TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((report) => {
+                  const materials = report.materialsUsed || [];
+                  const weather = [
+                    report.weather || null,
+                    report.temperatureCelsius != null
+                      ? t('table.temperature', { value: report.temperatureCelsius })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
 
-          <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.workDescription')}</label>
-            <textarea
-              style={{ ...textareaStyle }}
-              placeholder={t('form.workDescriptionPlaceholder')}
-              value={formWorkDescription}
-              onChange={(e) => setFormWorkDescription(e.target.value)}
-            />
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.materials')}</label>
-            <textarea
-              style={{ ...textareaStyle, minHeight: 60 }}
-              placeholder={t('form.materialsPlaceholder')}
-              value={formMaterials}
-              onChange={(e) => setFormMaterials(e.target.value)}
-            />
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('form.notes')}</label>
-            <textarea
-              style={{ ...textareaStyle, minHeight: 60 }}
-              placeholder={t('form.notesPlaceholder')}
-              value={formNotes}
-              onChange={(e) => setFormNotes(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-            <button type="button" style={{ ...btnOutline }} onClick={() => { setShowForm(false); resetForm(); }}>{t('common:actions.cancel')}</button>
-            <button type="submit" style={{ ...btnPrimary }} disabled={formLoading}>
-              {formLoading ? t('common:actions.saving') : editId ? t('actions.update') : t('actions.create')}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div style={{ flex: '0 0 200px' }}>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.project')}</label>
-          <select style={{ ...inputStyle }} value={filterProject} onChange={(e) => setFilterProject(e.target.value)}>
-            <option value="">{t('filters.allProjects')}</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.reference ? `${p.reference} - ` : ''}{p.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.from')}</label>
-          <input type="date" style={{ ...inputStyle, width: 150 }} value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>{t('filters.to')}</label>
-          <input type="date" style={{ ...inputStyle, width: 150 }} value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
-        </div>
-      </div>
-
-      {/* Reports List (Cards) */}
-      {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
-      ) : reports.length === 0 ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
-          {t('empty')}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {reports.map((report) => {
-            const isExpanded = expandedId === report.id;
-            const materials = report.materialsUsed || [];
-
-            return (
-              <div
-                key={report.id}
-                style={{
-                  background: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 8,
-                  overflow: 'hidden',
-                  transition: 'box-shadow 0.15s',
-                }}
-              >
-                {/* Card header (always visible) */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '14px 20px',
-                    cursor: 'pointer',
-                    gap: 16,
-                  }}
-                  onClick={() => setExpandedId(isExpanded ? null : report.id)}
-                  onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = '#f9fafb'; }}
-                  onMouseOut={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1, minWidth: 0 }}>
-                    {/* Date badge */}
-                    <div
-                      style={{
-                        flex: '0 0 auto',
-                        background: '#eff6ff',
-                        color: '#2563eb',
-                        borderRadius: 8,
-                        padding: '8px 12px',
-                        textAlign: 'center',
-                        minWidth: 60,
-                      }}
-                    >
-                      <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1 }}>
-                        {report.date ? parseDay(report.date).getDate() : '-'}
-                      </div>
-                      <div style={{ fontSize: 11, fontWeight: 500, marginTop: 2 }}>
-                        {report.date
-                          ? parseDay(report.date).toLocaleDateString('fr-CH', { month: 'short' })
-                          : ''}
-                      </div>
-                    </div>
-
-                    {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
-                        {report.project?.name || t('card.unknownProject')}
-                        {report.project?.reference && (
-                          <span style={{ fontWeight: 400, color: '#6b7280', marginLeft: 8, fontSize: 13 }}>
-                            ({report.project.reference})
+                  return (
+                    <TR key={report.id} onActivate={() => openEdit(report)}>
+                      <TD className="tnum whitespace-nowrap">{formatDate(report.date)}</TD>
+                      <TD>
+                        <Ref>{report.project?.reference || '—'}</Ref>
+                      </TD>
+                      <TD className={cn('font-medium', !report.project?.name && 'text-muted')}>
+                        {report.project?.name || t('table.unknownProject')}
+                      </TD>
+                      <TD>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'block max-w-[280px] truncate',
+                              !report.workDescription && 'text-muted',
+                            )}
+                            title={report.workDescription || undefined}
+                          >
+                            {report.workDescription || t('table.noDescription')}
                           </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {report.workDescription || t('card.noDescription')}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Weather info */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 0 auto' }}>
-                    {report.weather && (
-                      <span style={{ fontSize: 13, color: '#6b7280', background: '#f3f4f6', padding: '4px 10px', borderRadius: 6 }}>
-                        {report.weather}
-                        {report.temperatureCelsius != null && ` ${report.temperatureCelsius}°C`}
-                      </span>
-                    )}
-                    <span style={{ fontSize: 18, color: '#9ca3af', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
-                      &#9662;
-                    </span>
-                  </div>
-                </div>
-
-                {/* Expanded content */}
-                {isExpanded && (
-                  <div style={{ padding: '0 20px 16px', borderTop: '1px solid #f3f4f6' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 16 }}>
-                      {/* Work Description */}
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          {t('card.workDescription')}
+                          {report.notes ? (
+                            <span className="shrink-0 text-muted" title={t('table.hasNotes')}>
+                              <StickyNote aria-hidden className="size-3.5" />
+                              <span className="sr-only">{t('table.hasNotes')}</span>
+                            </span>
+                          ) : null}
                         </div>
-                        <div style={{ fontSize: 14, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                          {report.workDescription || t('card.noneProvided')}
-                        </div>
-                      </div>
-
-                      {/* Materials */}
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          {t('card.materials')}
-                        </div>
-                        {materials.length > 0 ? (
-                          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, color: '#374151', lineHeight: 1.8 }}>
-                            {materials.map((m, i) => (
-                              <li key={i}>{materialLabel(m)}</li>
-                            ))}
-                          </ul>
+                      </TD>
+                      <TD>
+                        {weather ? (
+                          <Tag className="max-w-[180px]" title={weather}>
+                            <span className="truncate">{weather}</span>
+                          </Tag>
                         ) : (
-                          <div style={{ fontSize: 14, color: '#9ca3af' }}>{t('card.noneRecorded')}</div>
+                          <span className="text-muted">—</span>
                         )}
-                      </div>
-                    </div>
+                      </TD>
+                      <TD numeric className="text-muted">
+                        {materials.length > 0 ? materials.length : '—'}
+                      </TD>
+                      <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="quiet"
+                              size="iconSm"
+                              aria-label={t('actions.rowActions')}
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onSelect={() => openEdit(report)}>
+                              <Pencil />
+                              {t('common:actions.edit')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-bad"
+                              disabled={remove.isPending}
+                              onSelect={() => {
+                                void handleDelete(report);
+                              }}
+                            >
+                              <Trash2 />
+                              {t('common:actions.delete')}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: rows.length })}</span>
+            <span>
+              {rows.length >= PAGE_LIMIT
+                ? t('summary.capped', { count: PAGE_LIMIT })
+                : t('summary.sortedBy')}
+            </span>
+          </CardFooter>
+        </DataState>
+      </Card>
 
-                    {/* Weather details */}
-                    {(report.weather || report.temperatureCelsius != null) && (
-                      <div style={{ marginTop: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          {t('card.weather')}
-                        </div>
-                        <div style={{ fontSize: 14, color: '#374151' }}>
-                          {report.weather || t('card.notRecorded')}
-                          {report.temperatureCelsius != null && ` — ${report.temperatureCelsius}°C`}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Notes */}
-                    {report.notes && (
-                      <div style={{ marginTop: 16 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                          {t('card.notes')}
-                        </div>
-                        <div style={{ fontSize: 14, color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                          {report.notes}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Actions */}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 16, paddingTop: 12, borderTop: '1px solid #f3f4f6' }}>
-                      <button style={{ ...btnOutline, fontSize: 13 }} onClick={() => handleEdit(report)}>
-                        {t('common:actions.edit')}
-                      </button>
-                      <button
-                        style={{ ...btnDanger, fontSize: 13, background: 'none', color: '#dc2626', border: '1px solid #fecaca' }}
-                        onClick={() => handleDelete(report.id)}
-                      >
-                        {t('common:actions.delete')}
-                      </button>
-                      <div style={{ flex: 1 }} />
-                      <span style={{ fontSize: 12, color: '#9ca3af', alignSelf: 'center' }}>
-                        {t('card.created', { date: formatDate(report.createdAt) })}
-                      </span>
-                    </div>
-                  </div>
-                )}
+      {/* Create / edit a report */}
+      <Dialog open={formOpen} onOpenChange={(open) => (open ? setFormOpen(true) : closeForm())}>
+        <DialogContent>
+          <form onSubmit={handleSubmit}>
+            <DialogHeader>
+              <DialogTitle>{editId ? t('form.editTitle') : t('form.newTitle')}</DialogTitle>
+              <DialogDescription>
+                {editId ? t('form.editHelp') : t('form.newHelp')}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  label={t('form.project')}
+                  htmlFor="report-project"
+                  hint={editId ? t('form.locked') : undefined}
+                  required
+                >
+                  <Select
+                    id="report-project"
+                    value={form.projectId}
+                    onChange={(e) => setForm({ ...form, projectId: e.target.value })}
+                    disabled={!!editId}
+                    required
+                  >
+                    <option value="">{t('form.selectProject')}</option>
+                    {/* An existing report keeps its project visible even if the list failed. */}
+                    {editing && !projectList.some((p) => p.id === editing.projectId) ? (
+                      <option value={editing.projectId}>
+                        {editing.project ? projectOption(editing.project) : editing.projectId}
+                      </option>
+                    ) : null}
+                    {projectList.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {projectOption(project)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label={t('form.date')}
+                  htmlFor="report-date"
+                  hint={editId ? t('form.locked') : undefined}
+                  required
+                >
+                  <Input
+                    id="report-date"
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    disabled={!!editId}
+                    required
+                  />
+                </Field>
+                <Field label={t('form.weather')} htmlFor="report-weather">
+                  <Input
+                    id="report-weather"
+                    placeholder={t('form.weatherPlaceholder')}
+                    value={form.weather}
+                    onChange={(e) => setForm({ ...form, weather: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('form.temperature')}
+                  htmlFor="report-temperature"
+                  error={temperatureInvalid ? t('messages.invalidTemperature') : undefined}
+                >
+                  <Input
+                    id="report-temperature"
+                    type="number"
+                    step="0.5"
+                    inputMode="decimal"
+                    placeholder={t('form.temperaturePlaceholder')}
+                    value={form.temperature}
+                    onChange={(e) => setForm({ ...form, temperature: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('form.workDescription')}
+                  htmlFor="report-work"
+                  className="sm:col-span-2"
+                >
+                  <Textarea
+                    id="report-work"
+                    placeholder={t('form.workDescriptionPlaceholder')}
+                    value={form.workDescription}
+                    onChange={(e) => setForm({ ...form, workDescription: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('form.materials')}
+                  htmlFor="report-materials"
+                  hint={t('form.materialsHint')}
+                  className="sm:col-span-2"
+                >
+                  <Textarea
+                    id="report-materials"
+                    className="min-h-16"
+                    placeholder={t('form.materialsPlaceholder')}
+                    value={form.materials}
+                    onChange={(e) => setForm({ ...form, materials: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('form.notes')} htmlFor="report-notes" className="sm:col-span-2">
+                  <Textarea
+                    id="report-notes"
+                    className="min-h-16"
+                    placeholder={t('form.notesPlaceholder')}
+                    value={form.notes}
+                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  />
+                </Field>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+
+              {editing ? (
+                <p className="text-xs text-muted">
+                  {t('form.created', { date: formatDate(editing.createdAt) })}
+                </p>
+              ) : null}
+
+              {projects.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(projects.error, t('form.projectsLoadFailed'))}
+                </p>
+              ) : null}
+
+              {save.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(save.error, t('messages.saveFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={closeForm}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!form.projectId || temperatureInvalid || save.isPending}
+              >
+                {save.isPending
+                  ? editId
+                    ? t('common:actions.saving')
+                    : t('actions.creating')
+                  : editId
+                    ? t('actions.update')
+                    : t('actions.create')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }

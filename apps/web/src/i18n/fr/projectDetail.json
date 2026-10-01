@@ -1,10 +1,15 @@
 {
+  "title": "Projet",
   "loginRequired": "Connexion requise",
   "notFound": "Projet introuvable",
-  "back": "← Retour aux projets",
-  "reference": "Réf. : {{reference}}",
+  "notFoundHelp": "Ce projet n'existe pas, a été supprimé, ou ne fait pas partie de votre entreprise.",
+  "loadFailed": "Impossible de charger le projet.",
+  "back": "Retour aux projets",
   "progress": "Avancement",
+  "progressValue": "{{percent}} %",
+  "adding": "Ajout…",
   "summary": {
+    "title": "Résumé",
     "budget": "Budget HT",
     "actualCost": "Coût réel",
     "manager": "Chef de projet",
@@ -15,53 +20,79 @@
     "lots": "Lots",
     "milestones": "Jalons",
     "tasks": "Tâches",
-    "gantt": "Diagramme de Gantt"
+    "gantt": "Gantt"
   },
   "lots": {
-    "title": "Lots ({{count}})",
-    "add": "+ Ajouter un lot",
+    "add": "Ajouter un lot",
     "submit": "Ajouter le lot",
-    "namePlaceholder": "Nom *",
-    "descriptionPlaceholder": "Description",
-    "budgetPlaceholder": "Budget (CHF)",
     "empty": "Aucun lot défini",
+    "emptyHelp": "Découpez le chantier en lots pour y rattacher les tâches et suivre les budgets.",
+    "openTasks": "Voir les tâches de ce lot",
+    "rowHint": "Ouvrez un lot pour voir ses tâches",
+    "count_one": "{{count}} lot",
+    "count_other": "{{count}} lots",
+    "createFailed": "Impossible d'ajouter le lot.",
     "table": {
       "name": "Nom",
       "description": "Description",
       "budget": "Budget (CHF)",
       "tasks": "Tâches"
+    },
+    "form": {
+      "heading": "Nouveau lot",
+      "help": "Le budget du lot est facultatif et peut être complété plus tard.",
+      "name": "Nom",
+      "description": "Description",
+      "budget": "Budget",
+      "budgetHint": "En francs, par exemple 12500.50. Laissez vide si le budget n'est pas encore arrêté."
     }
   },
   "milestones": {
-    "title": "Jalons ({{count}})",
-    "add": "+ Ajouter un jalon",
+    "add": "Ajouter un jalon",
     "submit": "Ajouter le jalon",
-    "namePlaceholder": "Nom du jalon *",
     "empty": "Aucun jalon défini",
+    "emptyHelp": "Les jalons marquent les dates clés du chantier et apparaissent sur le diagramme de Gantt.",
     "markCompleted": "Marquer comme atteint",
+    "count_one": "{{count}} jalon",
+    "count_other": "{{count}} jalons",
+    "createFailed": "Impossible d'ajouter le jalon.",
+    "updateFailed": "Impossible de mettre à jour le jalon.",
+    "confirm": {
+      "title": "Marquer « {{name}} » comme atteint ?",
+      "description": "Le jalon sera daté du {{date}} et ne pourra plus être rouvert depuis cet écran."
+    },
     "table": {
       "name": "Nom",
       "targetDate": "Date prévue",
       "completedDate": "Date d'achèvement",
       "status": "Statut",
       "actions": "Actions"
+    },
+    "form": {
+      "heading": "Nouveau jalon",
+      "help": "Un jalon porte un nom et une date prévue.",
+      "name": "Nom du jalon",
+      "targetDate": "Date prévue"
     }
   },
   "tasks": {
-    "title": "Tâches ({{count}})",
-    "add": "+ Ajouter une tâche",
+    "add": "Ajouter une tâche",
     "submit": "Ajouter la tâche",
     "allLots": "Tous les lots",
-    "newTask": "Nouvelle tâche",
-    "titlePlaceholder": "Titre *",
+    "filterLot": "Lot",
     "selectLot": "Sélectionner un lot",
-    "descriptionPlaceholder": "Description",
-    "plannedStart": "Début prévu",
-    "plannedEnd": "Fin prévue",
-    "estimatedHours": "Heures estimées",
-    "assigneePlaceholder": "Responsable (ID utilisateur)",
-    "empty": "Aucune tâche trouvée",
     "unassigned": "Sans lot",
+    "empty": "Aucune tâche planifiée",
+    "emptyHelp": "Ajoutez les tâches du chantier pour suivre l'avancement et alimenter le diagramme de Gantt.",
+    "noMatch": "Aucune tâche dans ce lot",
+    "noMatchHelp": "Choisissez un autre lot ou affichez tous les lots.",
+    "changeStatus": "Changer le statut",
+    "rowActions": "Actions pour « {{title}} »",
+    "groupedByLot": "Regroupées par lot",
+    "count_one": "{{count}} tâche sur {{total}}",
+    "count_other": "{{count}} tâches sur {{total}}",
+    "createFailed": "Impossible d'ajouter la tâche.",
+    "updateFailed": "Impossible de mettre à jour la tâche.",
     "table": {
       "title": "Titre",
       "status": "Statut",
@@ -70,16 +101,33 @@
       "start": "Début",
       "end": "Fin",
       "progress": "Avancement",
-      "dependencies": "Dépendances"
+      "dependencies": "Dépendances",
+      "actions": "Actions"
+    },
+    "form": {
+      "heading": "Nouvelle tâche",
+      "help": "Le lot, les dates et le responsable peuvent être complétés plus tard.",
+      "title": "Titre",
+      "lot": "Lot",
+      "priority": "Priorité",
+      "description": "Description",
+      "plannedStart": "Début prévu",
+      "plannedEnd": "Fin prévue",
+      "estimatedHours": "Heures estimées",
+      "assignedTo": "Responsable",
+      "assignedToHint": "Identifiant de l'utilisateur à qui la tâche est assignée."
     }
   },
-  "adding": "Ajout…",
   "gantt": {
     "title": "Diagramme de Gantt",
     "task": "Tâche",
-    "noTasks": "Aucune tâche avec des dates prévues pour le diagramme de Gantt.",
+    "noTasks": "Aucune tâche datée",
+    "noTasksHelp": "Renseignez un début et une fin prévus sur les tâches pour les voir apparaître sur le planning.",
     "noDates": "Aucune date disponible pour le diagramme de Gantt.",
+    "loadFailed": "Impossible de charger le diagramme de Gantt.",
     "unassigned": "Sans lot",
+    "chartLabel": "Planning du chantier — défilement horizontal",
+    "barLabel": "{{title}} — du {{start}} au {{end}} — {{status}}",
     "barTitle": "{{title}}\n{{start}} – {{end}}\nStatut : {{status}}",
     "milestoneTitle": "Jalon : {{name}}\n{{date}}",
     "today": "Aujourd'hui"

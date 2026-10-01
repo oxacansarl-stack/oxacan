@@ -1,20 +1,24 @@
 {
   "title": "Clients",
   "actions": {
-    "new": "+ Nouveau client",
+    "new": "Nouveau client",
     "create": "Créer le client",
     "creating": "Création…"
   },
   "form": {
-    "name": "Nom *",
+    "title": "Nouveau client",
+    "help": "Seul le nom est obligatoire : les coordonnées peuvent être complétées plus tard.",
+    "name": "Nom",
+    "type": "Type",
     "email": "E-mail",
     "phone": "Téléphone",
     "city": "Localité",
     "canton": "Canton"
   },
   "filters": {
-    "search": "Rechercher un client…",
-    "allStages": "Toutes les étapes"
+    "all": "Toutes",
+    "search": "Nom, localité ou téléphone",
+    "searchLabel": "Rechercher un client"
   },
   "stage": {
     "prospect": "Prospect",
@@ -30,17 +34,28 @@
     "city": "Localité",
     "phone": "Téléphone"
   },
+  "summary": {
+    "active_one": "{{count}} client actif",
+    "active_other": "{{count}} clients actifs",
+    "count_one": "{{count}} client sur {{total}}",
+    "count_other": "{{count}} clients sur {{total}}",
+    "sortedBy": "Triés par date de création"
+  },
   "detail": {
     "contacts": "Contacts",
     "interactions": "Interactions"
   },
   "empty": {
-    "clients": "Aucun client trouvé",
+    "clients": "Aucun client",
+    "clientsHelp": "Créez un client pour suivre ses contacts et vos échanges.",
+    "noMatch": "Aucun client ne correspond",
+    "noMatchHelp": "Modifiez la recherche ou choisissez une autre étape du pipeline.",
     "contacts": "Aucun contact",
     "interactions": "Aucune interaction"
   },
   "messages": {
     "loadFailed": "Impossible de charger les clients.",
+    "detailFailed": "Impossible de charger la fiche du client.",
     "createFailed": "Impossible de créer le client."
   }
 }

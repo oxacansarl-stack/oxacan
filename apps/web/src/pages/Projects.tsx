@@ -1,14 +1,19 @@
-import React, { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { HardHat, Search } from 'lucide-react';
 import { apiGet, ApiError } from '../lib/api';
-import { formatMoney, formatDate, statusLabel } from '../lib/format';
+import { formatDate, formatMoney, statusLabel } from '../lib/format';
 import { errorMessage } from '../lib/errors';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+import { useCurrentUser } from '../lib/current-user';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardFooter } from '@/components/ui/card';
+import { SearchInput } from '@/components/ui/input';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 interface Client {
   id: string;
@@ -31,57 +36,32 @@ interface Project {
   createdAt: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
-
 const STATUSES = ['planning', 'active', 'on_hold', 'completed', 'cancelled'] as const;
-
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  planning: { bg: '#e0e7ff', fg: '#3730a3' },
-  active: { bg: '#dcfce7', fg: '#166534' },
-  on_hold: { bg: '#fef3c7', fg: '#92400e' },
-  completed: { bg: '#f1f5f9', fg: '#475569' },
-  cancelled: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
 
 function managerName(m: Project['manager']): string {
   return m ? `${m.firstName} ${m.lastName}`.trim() : '';
 }
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                          */
-/* ------------------------------------------------------------------ */
+/** 0–100, so a malformed percentage can never overflow the bar. */
+function clampPercent(value: number | null | undefined): number {
+  return Math.min(100, Math.max(0, Math.round(value ?? 0)));
+}
 
 export default function Projects() {
-  const navigate = useNavigate();
   const { t } = useTranslation('projects');
+  const navigate = useNavigate();
+  const { role } = useCurrentUser();
+
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
 
-  const {
-    data: projects = [],
-    isLoading,
-    error,
-  } = useQuery<Project[], ApiError>({
+  /**
+   * The API strips every `*Cents` field for field roles, so a budget column would read as a
+   * blank — or worse, as CHF 0.00. Only the office roles get the column at all.
+   */
+  const canSeeFinancials = role === 'ADMIN' || role === 'PROJECT_MANAGER';
+
+  const projects = useQuery<Project[], ApiError>({
     queryKey: ['projects', statusFilter],
     queryFn: () => {
       const params = new URLSearchParams({ limit: '100' });
@@ -91,183 +71,161 @@ export default function Projects() {
     retry: false,
   });
 
-  const filtered = projects.filter((p) => {
-    if (!search) return true;
-    const term = search.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(term) ||
-      (p.reference ?? '').toLowerCase().includes(term) ||
-      managerName(p.manager).toLowerCase().includes(term)
-    );
-  });
+  const rows = projects.data ?? [];
 
-  if (error instanceof ApiError && error.status === 401) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{t('loginRequired')}</div>;
-  }
-  if (error) {
-    return <div style={{ color: '#ef4444', padding: 20 }}>{errorMessage(error)}</div>;
-  }
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter(
+      (project) =>
+        project.name.toLowerCase().includes(term) ||
+        (project.reference ?? '').toLowerCase().includes(term) ||
+        managerName(project.manager).toLowerCase().includes(term),
+    );
+  }, [rows, search]);
+
+  // Only meaningful on the unfiltered view, where every status is present.
+  const activeProjects = statusFilter ? null : rows.filter((project) => project.status === 'active');
+
+  const columnCount = canSeeFinancials ? 8 : 7;
 
   return (
-    <div>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 20,
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          {t('title')}
-        </h1>
-      </div>
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        kicker={t('common:navGroup.sites')}
+        meta={
+          activeProjects && activeProjects.length > 0 ? (
+            <span>{t('summary.active', { count: activeProjects.length })}</span>
+          ) : undefined
+        }
+      />
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-        <input
-          style={{ ...inputStyle, maxWidth: 300 }}
-          placeholder={t('searchPlaceholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select
-          style={{ ...inputStyle, maxWidth: 200 }}
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+          <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('filters.status')}>
+            {['', ...STATUSES].map((value) => (
+              <button
+                key={value || 'all'}
+                type="button"
+                aria-pressed={statusFilter === value}
+                onClick={() => setStatusFilter(value)}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-ink',
+                  statusFilter === value && 'bg-chalk font-medium text-ink',
+                )}
+              >
+                {value ? statusLabel('project', value) : t('filters.all')}
+              </button>
+            ))}
+          </div>
+          <SearchInput
+            icon={<Search className="size-4" />}
+            placeholder={t('searchPlaceholder')}
+            aria-label={t('searchPlaceholder')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <DataState
+          isLoading={projects.isPending}
+          error={
+            projects.isError
+              ? projects.error.status === 401
+                ? t('loginRequired')
+                : errorMessage(projects.error, t('loadFailed'))
+              : null
+          }
+          onRetry={() => projects.refetch()}
+          isEmpty={visible.length === 0}
+          empty={
+            rows.length === 0 ? (
+              <EmptyState
+                icon={<HardHat className="size-5" />}
+                title={t('empty')}
+                description={t('emptyHelp')}
+              />
+            ) : (
+              <EmptyState title={t('noMatch')} description={t('noMatchHelp')} />
+            )
+          }
+          loading={<TableSkeleton cols={columnCount} />}
         >
-          <option value="">{t('allStatuses')}</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {statusLabel('project', s)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {(['reference', 'name', 'client', 'status', 'progress', 'budget', 'manager', 'startDate'] as const).map(
-                (h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      borderBottom: '2px solid #e5e7eb',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#6b7280',
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.5,
-                    }}
-                  >
-                    {t(`table.${h}`)}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr>
-                <td
-                  colSpan={8}
-                  style={{ padding: 20, textAlign: 'center', color: '#9ca3af' }}
-                >
-                  {t('empty')}
-                </td>
-              </tr>
-            )}
-            {filtered.map((project) => {
-              const colors = STATUS_COLORS[project.status] ?? STATUS_COLORS.planning;
-              const progressPct = Math.min(100, Math.max(0, project.progressPercent ?? 0));
-              const progressColor =
-                progressPct >= 100 ? '#22c55e' : progressPct >= 50 ? '#2563eb' : '#f59e0b';
-
-              return (
-                <tr
-                  key={project.id}
-                  onClick={() => navigate(`/projects/${project.id}`)}
-                  style={{ cursor: 'pointer' }}
-                  onMouseOver={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = '#f9fafb';
-                  }}
-                  onMouseOut={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = '';
-                  }}
-                >
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontWeight: 500, fontSize: 14 }}>
-                    {project.reference || '-'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                    {project.name}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                    {project.client?.name ?? '-'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 10px',
-                        borderRadius: 12,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        background: colors.bg,
-                        color: colors.fg,
-                      }}
-                    >
-                      {statusLabel('project', project.status)}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div
-                        style={{
-                          width: 80,
-                          height: 8,
-                          background: '#e5e7eb',
-                          borderRadius: 4,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${progressPct}%`,
-                            height: '100%',
-                            background: progressColor,
-                            borderRadius: 4,
-                            transition: 'width 0.3s',
-                          }}
-                        />
-                      </div>
-                      <span style={{ fontSize: 12, color: '#6b7280', fontVariantNumeric: 'tabular-nums' }}>
-                        {progressPct}%
-                      </span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontVariantNumeric: 'tabular-nums', fontSize: 14 }}>
-                    {project.budgetHtCents != null ? formatMoney(project.budgetHtCents) : '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 14 }}>
-                    {managerName(project.manager) || '-'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6', fontSize: 13, color: '#6b7280' }}>
-                    {project.startDate ? formatDate(project.startDate) : '-'}
-                  </td>
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('table.reference')}</TH>
+                  <TH>{t('table.name')}</TH>
+                  <TH>{t('table.client')}</TH>
+                  <TH>{t('table.status')}</TH>
+                  <TH>{t('table.progress')}</TH>
+                  {canSeeFinancials ? <TH numeric>{t('table.budget')}</TH> : null}
+                  <TH>{t('table.manager')}</TH>
+                  <TH>{t('table.startDate')}</TH>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+              </THead>
+              <TBody>
+                {visible.map((project) => {
+                  const progressPct = clampPercent(project.progressPercent);
+                  return (
+                    <TR key={project.id} onActivate={() => navigate(`/projects/${project.id}`)}>
+                      <TD>
+                        <Ref>{project.reference || '—'}</Ref>
+                      </TD>
+                      <TD className="font-medium">{project.name}</TD>
+                      <TD>{project.client?.name ?? '—'}</TD>
+                      <TD>
+                        <StatusBadge domain="project" value={project.status} />
+                      </TD>
+                      <TD>
+                        <div className="flex items-center gap-2">
+                          <div
+                            role="progressbar"
+                            aria-label={t('table.progress')}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={progressPct}
+                            className="h-2 w-20 shrink-0 overflow-hidden rounded-full bg-line-soft"
+                          >
+                            {/* The one permitted inline style: a width only known at runtime. */}
+                            <div
+                              className={cn(
+                                'h-full rounded-full',
+                                progressPct >= 100 ? 'bg-ok' : progressPct >= 50 ? 'bg-copper' : 'bg-warn',
+                              )}
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <span className="tnum text-xs text-muted">
+                            {t('table.progressValue', { percent: progressPct })}
+                          </span>
+                        </div>
+                      </TD>
+                      {canSeeFinancials ? (
+                        <TD numeric>
+                          {project.budgetHtCents != null ? (
+                            formatMoney(project.budgetHtCents)
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </TD>
+                      ) : null}
+                      <TD>{managerName(project.manager) || '—'}</TD>
+                      <TD className="tnum text-muted">{formatDate(project.startDate)}</TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: visible.length, total: rows.length })}</span>
+            <span>{t('summary.sortedBy')}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+    </PageBody>
   );
 }

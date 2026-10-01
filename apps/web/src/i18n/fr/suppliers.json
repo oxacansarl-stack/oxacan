@@ -3,16 +3,21 @@
   "count_one": "{{count}} fournisseur",
   "count_other": "{{count}} fournisseurs",
   "actions": {
-    "new": "+ Nouveau fournisseur",
+    "new": "Nouveau fournisseur",
     "create": "Créer le fournisseur",
     "creating": "Création…",
-    "dismiss": "Masquer"
+    "dismiss": "Masquer",
+    "rowActions": "Actions du fournisseur"
   },
-  "search": {
-    "placeholder": "Rechercher par nom, contact, e-mail…"
+  "filters": {
+    "search": "Nom ou personne de contact",
+    "searchLabel": "Rechercher un fournisseur"
   },
   "form": {
     "title": "Nouveau fournisseur",
+    "editTitle": "Modifier le fournisseur",
+    "help": "Seul le nom est obligatoire. Les autres informations peuvent être complétées plus tard.",
+    "editHelp": "Mettez à jour les coordonnées et le délai de paiement de ce fournisseur.",
     "name": "Nom",
     "namePlaceholder": "Raison sociale",
     "contactPerson": "Personne de contact",
@@ -22,6 +27,7 @@
     "phone": "Téléphone",
     "phonePlaceholder": "+41 …",
     "paymentTermsDays": "Délai de paiement (jours)",
+    "paymentTermsHint": "En jours, de 0 à 365.",
     "address": "Adresse",
     "addressPlaceholder": "Rue, NPA, localité"
   },
@@ -36,14 +42,19 @@
     "days_other": "{{count}} jours"
   },
   "delete": {
-    "question": "Supprimer ?"
-  },
-  "state": {
-    "loading": "Chargement des fournisseurs…"
+    "title": "Supprimer {{name}} ?",
+    "description": "Cette action est irréversible. Un fournisseur lié à des commandes ne peut pas être supprimé."
   },
   "empty": {
+    "none": "Aucun fournisseur",
+    "noneHelp": "Ajoutez vos fournisseurs pour pouvoir leur passer des commandes.",
     "search": "Aucun fournisseur ne correspond à « {{search}} »",
-    "none": "Aucun fournisseur pour l'instant. Cliquez sur « + Nouveau fournisseur » pour en ajouter un."
+    "searchHelp": "La recherche porte sur le nom et la personne de contact."
+  },
+  "summary": {
+    "count_one": "{{count}} fournisseur sur {{total}}",
+    "count_other": "{{count}} fournisseurs sur {{total}}",
+    "sortedBy": "Triés par nom"
   },
   "messages": {
     "loadFailed": "Impossible de charger les fournisseurs",

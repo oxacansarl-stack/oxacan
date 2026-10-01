@@ -1,12 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { apiList, apiPatch, apiPost } from '../lib/api';
+import { Bell, CheckCheck } from 'lucide-react';
+import { apiList, apiPatch, apiPost, ApiError, type PageMeta } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+import { formatDateTime } from '../lib/format';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { cn } from '@/lib/cn';
 
 interface Notification {
   id: string;
@@ -16,36 +21,11 @@ interface Notification {
   createdAt: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
+type Filter = 'all' | 'unread';
 
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
+type NotificationPage = { items: Notification[]; meta: PageMeta };
 
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
+/** Relative age of a notification; the exact timestamp stays available as a tooltip. */
 function timeAgo(dateStr: string, t: TFunction): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
@@ -57,180 +37,214 @@ function timeAgo(dateStr: string, t: TFunction): string {
   return mins > 0 ? t('timeAgo.minutes', { count: mins }) : t('timeAgo.justNow');
 }
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                          */
-/* ------------------------------------------------------------------ */
-
+/**
+ * Every notification the user received, all or unread only. A row is the clickable unit: opening
+ * an unread one marks it read and it stays in place, so the list never jumps under the pointer.
+ */
 export default function Notifications() {
   const { t } = useTranslation('notifications');
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [filter, setFilter] = useState<Filter>('all');
 
-  const fetchNotifications = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      let path = `/notifications?page=${page}`;
-      if (filter === 'unread') path += '&isRead=false';
-      const { items, meta } = await apiList<Notification>(path);
-      setNotifications(items);
-      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
-    } catch (e: any) {
-      setError(errorMessage(e, t('messages.loadFailed')));
-      setNotifications([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, filter, t]);
+  const listKey = ['notifications', 'list', page, filter];
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
+  const list = useQuery<NotificationPage, ApiError>({
+    queryKey: listKey,
+    queryFn: () =>
+      apiList<Notification>(`/notifications?page=${page}${filter === 'unread' ? '&isRead=false' : ''}`),
+    retry: false,
+  });
 
-  const markAsRead = async (id: string) => {
-    try {
-      await apiPatch(`/notifications/${id}/read`);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
-    } catch (e: any) {
-      setError(errorMessage(e, t('messages.markReadFailed')));
-    }
+  /**
+   * Marking read flips the flag on every cached page of this list, not only the one on screen —
+   * no reshuffle, no refetch, and a cached sibling page cannot come back still showing the
+   * notification as unread with a live mark-read button. Everything else under the shared
+   * ['notifications'] key — the top bar's unread count, which lives in a sibling query — is
+   * invalidated so the bell drops its badge at once; the list pages are the one exception,
+   * because refetching them would pull the row the user just read out of the "Non lues" filter.
+   */
+  const patchRows = (update: (n: Notification) => Notification) => {
+    queryClient.setQueriesData<NotificationPage>({ queryKey: ['notifications', 'list'] }, (current) =>
+      current ? { ...current, items: current.items.map(update) } : current,
+    );
+    queryClient.invalidateQueries({
+      queryKey: ['notifications'],
+      predicate: (query) => query.queryKey[1] !== 'list',
+    });
   };
 
-  const markAllRead = async () => {
-    try {
-      await apiPost('/notifications/read-all');
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    } catch (e: any) {
-      setError(errorMessage(e, t('messages.markAllReadFailed')));
-    }
-  };
+  const markRead = useMutation<unknown, ApiError, string>({
+    mutationFn: (id) => apiPatch(`/notifications/${id}/read`),
+    onSuccess: (_result, id) => patchRows((n) => (n.id === id ? { ...n, isRead: true } : n)),
+  });
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const markAllRead = useMutation<unknown, ApiError, void>({
+    mutationFn: () => apiPost('/notifications/read-all'),
+    onSuccess: () => patchRows((n) => ({ ...n, isRead: true })),
+  });
+
+  const rows = list.data?.items ?? [];
+  const meta = list.data?.meta;
+  const total = meta?.total ?? rows.length;
+  const totalPages = Math.max(1, meta?.totalPages ?? 1);
+  const unreadCount = rows.filter((n) => !n.isRead).length;
+  const settled = !list.isPending && !list.isError;
+
+  const mutationError = markRead.isError
+    ? errorMessage(markRead.error, t('messages.markReadFailed'))
+    : markAllRead.isError
+      ? errorMessage(markAllRead.error, t('messages.markAllReadFailed'))
+      : null;
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>
-            {unreadCount > 0 ? t('unreadCount', { count: unreadCount }) : t('allCaughtUp')}
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        meta={
+          settled ? (
+            <span>{unreadCount > 0 ? t('unreadCount', { count: unreadCount }) : t('allCaughtUp')}</span>
+          ) : undefined
+        }
+        actions={
+          settled && unreadCount > 0 ? (
+            <Button variant="primary" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
+              <CheckCheck />
+              {markAllRead.isPending ? t('actions.markingAllRead') : t('actions.markAllRead')}
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <Tabs
+        value={filter}
+        onValueChange={(value) => {
+          setFilter(value as Filter);
+          setPage(1);
+        }}
+      >
+        <TabsList aria-label={t('tabs.label')}>
+          <TabsTrigger value="all">{t('tabs.all')}</TabsTrigger>
+          <TabsTrigger value="unread">{t('tabs.unread')}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <Card>
+        {mutationError ? (
+          <p role="alert" className="border-b border-line-soft px-4 py-2.5 text-[13px] text-bad">
+            {mutationError}
           </p>
-        </div>
-        {unreadCount > 0 && (
-          <button style={btnPrimary} onClick={markAllRead}>
-            {t('actions.markAllRead')}
-          </button>
-        )}
-      </div>
+        ) : null}
 
-      {error && (
-        <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
-        </div>
-      )}
-
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid #e5e7eb' }}>
-        {(['all', 'unread'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => { setFilter(tab); setPage(1); }}
-            style={{
-              padding: '10px 20px',
-              border: 'none',
-              borderBottom: filter === tab ? '2px solid #2563eb' : '2px solid transparent',
-              background: 'none',
-              color: filter === tab ? '#2563eb' : '#6b7280',
-              fontWeight: filter === tab ? 600 : 400,
-              fontSize: 14,
-              cursor: 'pointer',
-              marginBottom: -2,
-            }}
-          >
-            {t(`tabs.${tab}`)}
-          </button>
-        ))}
-      </div>
-
-      {/* Notification list */}
-      {loading ? (
-        <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loading')}</p>
-      ) : notifications.length === 0 ? (
-        <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>
-          {filter === 'unread' ? t('empty.unread') : t('empty.all')}
-        </p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {notifications.map(n => (
-            <div
-              key={n.id}
-              onClick={() => { if (!n.isRead) markAsRead(n.id); }}
-              style={{
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: '16px 20px',
-                borderLeft: !n.isRead ? '4px solid #2563eb' : '4px solid transparent',
-                background: !n.isRead ? '#fafbff' : '#fff',
-                cursor: !n.isRead ? 'pointer' : 'default',
-                transition: 'background 0.15s',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    {!n.isRead && (
-                      <span style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: '#2563eb',
-                        display: 'inline-block',
-                        flexShrink: 0,
-                      }} />
+        <DataState
+          isLoading={list.isPending}
+          error={list.isError ? errorMessage(list.error, t('messages.loadFailed')) : null}
+          onRetry={() => list.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<TableSkeleton rows={5} cols={3} />}
+          empty={
+            filter === 'unread' ? (
+              <EmptyState
+                icon={<CheckCheck className="size-5" />}
+                title={t('empty.unread')}
+                description={t('empty.unreadHelp')}
+              />
+            ) : (
+              <EmptyState
+                icon={<Bell className="size-5" />}
+                title={t('empty.all')}
+                description={t('empty.allHelp')}
+              />
+            )
+          }
+        >
+          <ul className="grid">
+            {rows.map((n) => {
+              // A row is always a <button>, so its content stays phrasing-only: spans, no <div>/<p>.
+              const content = (
+                <span className="grid grid-cols-[6px_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 sm:grid-cols-[6px_minmax(0,1fr)_auto]">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'mt-[7px] size-1.5 shrink-0 rounded-full',
+                      n.isRead ? 'bg-transparent' : 'bg-copper',
                     )}
-                    <span style={{ fontSize: 15, fontWeight: n.isRead ? 400 : 600, color: '#111827' }}>
+                  />
+                  <span className="grid min-w-0 gap-1">
+                    {/* The API already writes these in French (PRD wording) — shown verbatim. */}
+                    <span className={cn('block', n.isRead ? 'text-ink-2' : 'font-semibold text-ink')}>
                       {n.title}
                     </span>
-                  </div>
-                  <p style={{ margin: 0, fontSize: 14, color: '#6b7280', lineHeight: 1.5 }}>
-                    {n.body}
-                  </p>
-                </div>
-                <span style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: 16 }}>
-                  {timeAgo(n.createdAt, t)}
+                    {n.body ? <span className="block text-[13.5px] text-muted">{n.body}</span> : null}
+                  </span>
+                  <span
+                    title={formatDateTime(n.createdAt)}
+                    className="col-start-2 text-xs text-muted sm:col-start-3 sm:pl-4 sm:text-right"
+                  >
+                    {timeAgo(n.createdAt, t)}
+                  </span>
                 </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+              );
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-          <button
-            style={btnOutline}
-            disabled={page <= 1}
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-          >
-            {t('common:actions.previous')}
-          </button>
-          <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-            {t('common:state.page', { page, total: totalPages })}
-          </span>
-          <button
-            style={btnOutline}
-            disabled={page >= totalPages}
-            onClick={() => setPage(p => p + 1)}
-          >
-            {t('common:actions.next')}
-          </button>
-        </div>
-      )}
-    </div>
+              return (
+                <li
+                  key={n.id}
+                  className={cn('border-b border-line-soft last:border-b-0', !n.isRead && 'bg-paper-2')}
+                >
+                  {/*
+                    Read and unread rows are the same element type on purpose. Activating an unread
+                    row is exactly what makes it read, so swapping <button> for <div> here would
+                    unmount the node the keyboard is on and send the next Tab back to the top of the
+                    document. A read row stays a mounted button, out of the tab order (tabIndex -1,
+                    as before) and inert (aria-disabled, no handler), so focus survives the flip and
+                    Tab continues from the notification the user just read.
+                  */}
+                  <button
+                    type="button"
+                    tabIndex={n.isRead ? -1 : 0}
+                    aria-disabled={n.isRead || undefined}
+                    onClick={n.isRead ? undefined : () => markRead.mutate(n.id)}
+                    aria-label={n.isRead ? undefined : t('actions.markReadNamed', { title: n.title })}
+                    className={cn(
+                      'block w-full border-l-2 px-4 py-3.5 text-left',
+                      n.isRead ? 'border-transparent' : 'border-copper transition-colors hover:bg-chalk',
+                    )}
+                  >
+                    {content}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <CardFooter>
+            <span>{t('summary.count', { count: rows.length, total })}</span>
+            {totalPages > 1 ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  {t('common:actions.previous')}
+                </Button>
+                <span className="tnum">{t('common:state.page', { page, total: totalPages })}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  {t('common:actions.next')}
+                </Button>
+              </div>
+            ) : (
+              <span>{t('summary.sortedBy')}</span>
+            )}
+          </CardFooter>
+        </DataState>
+      </Card>
+    </PageBody>
   );
 }

@@ -1,5 +1,6 @@
 {
-  "brand": "Portail de projet OXACAN",
+  "brand": "Portail de projet",
+  "kicker": "Suivi de chantier",
   "loading": "Chargement du portail de votre projet…",
   "unavailable": {
     "title": "Portail indisponible",
@@ -7,24 +8,41 @@
     "loadFailed": "Impossible de charger les données du portail. Veuillez réessayer plus tard."
   },
   "progress": "Avancement global",
+  "progressValue": "{{percent}} %",
   "tasks": {
     "title": "Aperçu des tâches",
     "todo": "À faire",
     "inProgress": "En cours",
-    "done": "Terminées"
+    "done": "Terminées",
+    "empty": "Aucune tâche planifiée",
+    "emptyHelp": "Les tâches de votre chantier apparaîtront ici dès qu'elles seront planifiées."
   },
   "lots": {
     "title": "Lots",
-    "taskCount_one": "{{count}} tâche",
-    "taskCount_other": "{{count}} tâches"
+    "empty": "Aucun lot défini",
+    "emptyHelp": "Le découpage de votre chantier en lots apparaîtra ici.",
+    "table": {
+      "name": "Nom",
+      "tasks": "Tâches"
+    }
   },
   "milestones": {
-    "title": "Jalons"
+    "title": "Jalons",
+    "empty": "Aucun jalon défini",
+    "emptyHelp": "Les dates clés de votre chantier apparaîtront ici.",
+    "table": {
+      "name": "Nom",
+      "targetDate": "Date prévue",
+      "status": "Statut"
+    }
   },
   "reports": {
-    "title": "Dernières nouvelles du chantier"
+    "title": "Dernières nouvelles du chantier",
+    "noDetail": "Aucun détail communiqué",
+    "empty": "Aucune nouvelle pour l'instant",
+    "emptyHelp": "Les comptes rendus publiés par votre chef de projet apparaîtront ici."
   },
   "footer": {
-    "poweredBy": "Propulsé par "
+    "poweredBy": "Propulsé par"
   }
 }

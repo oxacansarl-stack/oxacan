@@ -1,25 +1,32 @@
 {
   "title": "Factures",
-  "subtitle": "Gérez les factures, les situations et les plus-values",
+  "subtitle": "Factures, situations et plus-values",
   "tabs": {
+    "label": "Sections de la page",
     "invoices": "Factures",
     "plusValues": "Plus-values"
   },
   "actions": {
-    "newInvoice": "+ Nouvelle facture",
-    "newPlusValue": "+ Nouvelle plus-value",
-    "backToList": "← Retour aux factures",
+    "newInvoice": "Nouvelle facture",
+    "newPlusValue": "Nouvelle plus-value",
+    "backToList": "Retour aux factures",
     "createInvoice": "Créer la facture",
-    "addLine": "+ Ajouter une ligne",
+    "creating": "Création…",
+    "addLine": "Ajouter une ligne",
+    "removeLine": "Supprimer la ligne",
     "recordPayment": "Saisir un paiement",
     "savePayment": "Enregistrer le paiement",
     "markSent": "Marquer comme envoyée",
     "markOverdue": "Marquer en retard",
+    "cancelInvoice": "Annuler la facture",
     "creditNote": "Note de crédit",
-    "downloadPdf": "Télécharger le PDF"
+    "downloadPdf": "Télécharger le PDF",
+    "moreActions": "Autres actions"
   },
   "filters": {
+    "status": "Filtrer par statut",
     "allStatuses": "Toutes",
+    "type": "Filtrer par type",
     "allTypes": "Tous les types",
     "searchPlaceholder": "Rechercher un n° de facture…"
   },
@@ -35,11 +42,10 @@
     "description": "Description",
     "unit": "Unité",
     "quantity": "Qté",
-    "unitPrice": "Prix unitaire",
     "unitPriceChf": "Prix unitaire (CHF)",
     "position": "Pos.",
     "offerQuantity": "Qté offre",
-    "total": "Total",
+    "totalChf": "Total (CHF)",
     "cumulativeQuantity": "Qté cumulée",
     "previouslyInvoiced": "Déjà facturé",
     "previousQuantity": "Qté déjà facturée",
@@ -53,9 +59,10 @@
   },
   "form": {
     "createTitle": "Nouvelle facture",
-    "project": "Projet *",
+    "help": "La facture est créée en brouillon : son numéro, sa TVA et sa retenue de garantie sont calculés par le serveur.",
+    "project": "Projet",
     "selectProject": "Sélectionnez un projet",
-    "client": "Client *",
+    "client": "Client",
     "selectClient": "Sélectionnez un client",
     "type": "Type",
     "vatRate": "Taux de TVA (%)",
@@ -72,9 +79,17 @@
   "summary": {
     "subtotalHt": "Sous-total HT",
     "vat": "TVA ({{rate}} %)",
-    "retention": "Retenue de garantie (-5 %)",
+    "retention": "Retenue de garantie",
+    "retentionReleased": "Retenue libérée",
+    "retentionNote": "La retenue de garantie est calculée par le serveur au taux du contrat du chantier, à défaut celui de l'entreprise. Ce total ne la déduit donc pas encore.",
+    "finalReleaseNote": "La facture finale ne retient rien et libère la retenue déjà retenue sur le chantier : le serveur ajoutera ce montant au total.",
     "priorAcomptes": "Acomptes déduits",
-    "totalTtc": "Total TTC"
+    "acomptesPendingNote": "Les acomptes à déduire ne sont pas encore connus : ce total ne les déduit donc pas. Le serveur les déduira à la création.",
+    "totalTtc": "Total TTC",
+    "totalBeforeRetention": "Total TTC avant retenue",
+    "totalBeforeRelease": "Total TTC avant libération de la retenue",
+    "rowCount_one": "{{count}} facture",
+    "rowCount_other": "{{count}} factures"
   },
   "detail": {
     "fallbackTitle": "Facture",
@@ -82,39 +97,59 @@
     "issueDate": "Date d'émission",
     "dueDate": "Échéance",
     "notes": "Remarques",
+    "summaryTitle": "Montants",
     "lines": "Lignes",
     "noLines": "Aucune ligne",
+    "noLinesHelp": "Cette facture ne contient aucune ligne.",
     "payments": "Paiements",
+    "noPayments": "Aucun paiement",
+    "noPaymentsHelp": "Les paiements saisis sur cette facture apparaîtront ici.",
     "paidAmount": "Payé : {{amount}}",
-    "paidPercent": "{{percent}} %"
+    "paidPercent": "{{percent}} %",
+    "progressLabel": "Part payée de la facture",
+    "notFound": "Facture introuvable",
+    "notFoundHelp": "Cette facture n'existe plus ou vous n'y avez pas accès."
   },
   "payment": {
     "title": "Saisir un paiement",
+    "help": "Le montant ne peut pas dépasser le solde restant de la facture.",
     "amount": "Montant (CHF)",
     "date": "Date",
     "method": "Mode de paiement",
     "reference": "Référence"
   },
   "plusValues": {
+    "title": "Plus-values",
     "createTitle": "Nouvelle plus-value",
-    "project": "Projet *",
+    "help": "Une plus-value détectée sur un chantier est soumise au client, puis approuvée ou refusée avant d'être facturée.",
+    "project": "Projet",
     "selectProject": "Sélectionnez un projet",
-    "description": "Description *",
-    "amount": "Montant (CHF) *",
+    "description": "Description",
+    "amount": "Montant (CHF)",
     "submit": "Soumettre",
     "approve": "Approuver",
-    "reject": "Refuser"
+    "reject": "Refuser",
+    "incomplete": "Renseignez le projet, la description et un montant supérieur à zéro.",
+    "rowActions": "Actions de la plus-value",
+    "rowCount_one": "{{count}} plus-value",
+    "rowCount_other": "{{count}} plus-values"
   },
   "state": {
-    "loadingInvoices": "Chargement des factures…",
-    "noInvoices": "Aucune facture trouvée",
-    "loadingPlusValues": "Chargement des plus-values…",
-    "noPlusValues": "Aucune plus-value trouvée",
-    "loadingPositions": "Chargement des positions de l'offre…",
+    "noInvoices": "Aucune facture",
+    "noInvoicesHelp": "Créez une facture, une situation ou un acompte pour un chantier.",
+    "noMatch": "Aucune facture ne correspond",
+    "noMatchHelp": "Modifiez le numéro recherché ou changez de filtre.",
+    "noPlusValues": "Aucune plus-value",
+    "noPlusValuesHelp": "Les plus-values détectées sur vos chantiers apparaîtront ici.",
+    "noPositionsTitle": "Aucune position chiffrée",
     "noPositions": "Aucune position chiffrée dans l'offre de ce projet."
   },
   "confirm": {
-    "creditNote": "Établir une note de crédit pour cette facture ? Cette action est irréversible."
+    "creditNoteTitle": "Établir une note de crédit ?",
+    "creditNoteHelp": "Une note de crédit sera établie pour la facture {{number}}. Cette action est irréversible.",
+    "cancelTitle": "Annuler cette facture ?",
+    "cancelHelp": "Le brouillon {{number}} sera annulé. Cette action est irréversible : une facture annulée ne peut pas être rouverte ni modifiée.",
+    "keepDraft": "Conserver le brouillon"
   },
   "validation": {
     "projectRequired": "Le projet est obligatoire.",
@@ -132,6 +167,7 @@
     "loadPlusValues": "Impossible de charger les plus-values.",
     "loadInvoice": "Impossible de charger la facture.",
     "loadSituation": "Impossible de charger les positions de la situation.",
+    "loadFinalPreview": "Impossible de charger les acomptes à déduire du décompte final.",
     "createInvoice": "Impossible de créer la facture.",
     "updateStatus": "Impossible de modifier le statut.",
     "createCreditNote": "Impossible d'établir la note de crédit.",

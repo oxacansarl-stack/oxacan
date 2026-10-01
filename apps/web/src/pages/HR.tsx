@@ -1,10 +1,49 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
 import i18n from '../i18n';
 import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { formatMoney } from '../lib/format';
+import { formatDate, formatMoney } from '../lib/format';
 import { useCurrentUser } from '../lib/current-user';
+import { OFFICE } from '@/app/nav';
+import { TabbedPage } from '@/components/tab-page';
+import { Card, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
+import { Field, Input, SearchInput, Select } from '@/components/ui/input';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -82,77 +121,19 @@ const EMPTY_EMPLOYEE: NewEmployeeForm = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Style constants                                                    */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#dc2626',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '10px 12px',
-  borderBottom: '2px solid #e5e7eb',
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-  letterSpacing: 0.5,
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderBottom: '1px solid #f3f4f6',
-  fontSize: 14,
-};
-
-/* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
-
-const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
-  ADMIN: { bg: '#ede9fe', fg: '#7c3aed' },
-  PROJECT_MANAGER: { bg: '#dbeafe', fg: '#2563eb' },
-  TEAM_LEADER: { bg: '#d1fae5', fg: '#059669' },
-  WORKER: { bg: '#fef3c7', fg: '#d97706' },
-};
 
 /** app_user.role CHECK values */
 const ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'] as const;
 const LICENCE_TIERS = ['saas', 'application'] as const;
+
+const ROLE_TONES: Record<string, BadgeTone> = {
+  ADMIN: 'copper',
+  PROJECT_MANAGER: 'info',
+  TEAM_LEADER: 'ok',
+  WORKER: 'neutral',
+};
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -180,244 +161,656 @@ function displayName(u: { firstName?: string; lastName?: string; email: string }
   return [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email;
 }
 
-function roleBadge(role: string): React.ReactNode {
-  const colors = ROLE_COLORS[role] ?? { bg: '#f3f4f6', fg: '#374151' };
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 10px',
-        borderRadius: 12,
-        fontSize: 12,
-        fontWeight: 600,
-        background: colors.bg,
-        color: colors.fg,
-      }}
-    >
-      {roleLabel(role)}
-    </span>
-  );
+function RoleBadge({ role }: { role: string }) {
+  return <Badge tone={ROLE_TONES[role] ?? 'neutral'}>{roleLabel(role)}</Badge>;
 }
 
-function activeBadge(isActive: boolean): React.ReactNode {
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 10px',
-        borderRadius: 12,
-        fontSize: 12,
-        fontWeight: 600,
-        background: isActive ? '#dcfce7' : '#fee2e2',
-        color: isActive ? '#166534' : '#991b1b',
-      }}
-    >
-      {isActive ? i18n.t('active', { ns: 'hr' }) : i18n.t('inactive', { ns: 'hr' })}
-    </span>
-  );
+function AccountBadge({ isActive }: { isActive: boolean }) {
+  const { t } = useTranslation('hr');
+  return <Badge tone={isActive ? 'ok' : 'bad'}>{t(isActive ? 'active' : 'inactive')}</Badge>;
 }
 
+/** Keeps a control inside a row from also activating the row. */
+const stopRowActivation = (event: SyntheticEvent) => event.stopPropagation();
+
 /* ------------------------------------------------------------------ */
-/*  Component                                                          */
+/*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * RH & équipes. Role gating mirrors the API's @Roles policy (PRD §18.2):
+ * — Équipes is readable by a team leader, but creating, renaming, deleting a team and its
+ *   membership are office-only;
+ * — Collaborateurs lists hourly rates and is office-only, so the tab is not rendered for a
+ *   team leader at all — every request it makes would answer 403;
+ * — creating, inviting and (de)activating an account, and setting a role or a licence, are
+ *   the administrator's job.
+ */
 export default function HR() {
   const { t } = useTranslation('hr');
-  // The employee directory (with pay rates) is office-only; team leaders see their teams.
-  const { role, id: currentUserId } = useCurrentUser();
-  const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
-  // Creating, inviting and (de)activating accounts is the administrator's job (PRD §18.2).
-  const isAdmin = role === 'ADMIN';
-  const [activeTab, setActiveTab] = useState<'teams' | 'employees'>('teams');
 
-  /* ============ TEAMS STATE ============ */
+  return (
+    <TabbedPage
+      title={t('title')}
+      kicker={t('common:navGroup.people')}
+      tabs={[
+        { value: 'teams', label: t('tabs.teams'), render: () => <TeamsPanel /> },
+        {
+          value: 'employees',
+          label: t('tabs.employees'),
+          roles: OFFICE,
+          render: () => <EmployeesPanel />,
+        },
+      ]}
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Équipes                                                            */
+/* ------------------------------------------------------------------ */
+
+function TeamsPanel() {
+  const { t } = useTranslation('hr');
+  const confirm = useConfirm();
+  const { role } = useCurrentUser();
+  // Reading teams is allowed for a team leader; every write is office-only in the API.
+  const canManage = role === 'ADMIN' || role === 'PROJECT_MANAGER';
+
   const [teams, setTeams] = useState<Team[]>([]);
-  const [teamsLoading, setTeamsLoading] = useState(false);
-  const [teamsError, setTeamsError] = useState('');
-  const [teamsSearch, setTeamsSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  /** Failure of a row or membership action, shown above the list instead of window.alert. */
+  const [actionError, setActionError] = useState('');
 
-  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
-  const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null);
-  const [teamDetailLoading, setTeamDetailLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TeamDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [createLeaderId, setCreateLeaderId] = useState('');
-  const [createLoading, setCreateLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', leaderId: '' });
+  const [createPending, setCreatePending] = useState(false);
   const [createError, setCreateError] = useState('');
 
-  const [editTeamName, setEditTeamName] = useState('');
-  const [editTeamLeaderId, setEditTeamLeaderId] = useState('');
-  const [editTeamLoading, setEditTeamLoading] = useState(false);
-
-  const [addMemberUserId, setAddMemberUserId] = useState('');
-  const [addMemberLoading, setAddMemberLoading] = useState(false);
-
-  /* ============ EMPLOYEES STATE ============ */
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [employeesLoading, setEmployeesLoading] = useState(false);
-  const [employeesError, setEmployeesError] = useState('');
-  const [empSearch, setEmpSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'' | 'true' | 'false'>('');
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRole, setEditRole] = useState('');
-  const [editHourlyRate, setEditHourlyRate] = useState('');
-  const [editIsActive, setEditIsActive] = useState(true);
-  const [editLoading, setEditLoading] = useState(false);
+  const [editTeam, setEditTeam] = useState<Team | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', leaderId: '' });
+  const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState('');
 
-  /* Add employee (admin) */
-  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [addMemberUserId, setAddMemberUserId] = useState('');
+  const [addMemberPending, setAddMemberPending] = useState(false);
+
+  /** Candidates for the leader and member pickers. */
+  const [pickerEmployees, setPickerEmployees] = useState<Employee[]>([]);
+
+  /* ---------- data ---------- */
+
+  const fetchTeams = useCallback(() => {
+    setLoading(true);
+    setError('');
+    const params = new URLSearchParams({ limit: '100' });
+    if (search) params.set('search', search);
+    apiGet<Team[]>(`/hr/teams?${params.toString()}`)
+      .then((list) => setTeams(list ?? []))
+      .catch((err) => setError(errorMessage(err, t('messages.loadTeamsFailed'))))
+      .finally(() => setLoading(false));
+  }, [search, t]);
+
+  const fetchPickerEmployees = useCallback(() => {
+    // Office roles only; a team leader gets 403 and the pickers stay empty.
+    apiGet<Employee[]>('/hr/employees?isActive=true&limit=200')
+      .then((list) => setPickerEmployees(list ?? []))
+      .catch(() => {});
+  }, []);
+
+  const fetchDetail = useCallback(
+    (teamId: string) => {
+      setDetailLoading(true);
+      setDetailError('');
+      apiGet<TeamDetail>(`/hr/teams/${teamId}`)
+        .then((loaded) => setDetail(loaded))
+        .catch((err) => {
+          setDetail(null);
+          setDetailError(errorMessage(err, t('teams.detailFailed')));
+        })
+        .finally(() => setDetailLoading(false));
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
+
+  useEffect(() => {
+    if (canManage) fetchPickerEmployees();
+  }, [canManage, fetchPickerEmployees]);
+
+  /* ---------- actions ---------- */
+
+  const toggleTeam = (teamId: string) => {
+    if (selectedId === teamId) {
+      setSelectedId(null);
+      setDetail(null);
+      setDetailError('');
+    } else {
+      setSelectedId(teamId);
+      setAddMemberUserId('');
+      fetchDetail(teamId);
+    }
+  };
+
+  const openCreate = () => {
+    setCreateForm({ name: '', leaderId: '' });
+    setCreateError('');
+    setCreateOpen(true);
+  };
+
+  const submitCreate = () => {
+    if (!createForm.name.trim()) return;
+    setCreatePending(true);
+    setCreateError('');
+    const body: { name: string; leaderId?: string } = { name: createForm.name.trim() };
+    if (createForm.leaderId) body.leaderId = createForm.leaderId;
+    apiPost('/hr/teams', body)
+      .then(() => {
+        setCreateForm({ name: '', leaderId: '' });
+        setCreateOpen(false);
+        fetchTeams();
+      })
+      .catch((err) => setCreateError(errorMessage(err, t('messages.createTeamFailed'))))
+      .finally(() => setCreatePending(false));
+  };
+
+  const openEdit = (team: Team) => {
+    setEditTeam(team);
+    setEditForm({ name: team.name, leaderId: team.leaderId ?? '' });
+    setEditError('');
+  };
+
+  const submitEdit = (teamId: string) => {
+    setEditPending(true);
+    setEditError('');
+    // null removes the leader
+    const body: { name?: string; leaderId: string | null } = { leaderId: editForm.leaderId || null };
+    if (editForm.name.trim()) body.name = editForm.name.trim();
+    apiPut(`/hr/teams/${teamId}`, body)
+      .then(() => {
+        setEditTeam(null);
+        fetchTeams();
+        if (selectedId === teamId) fetchDetail(teamId);
+      })
+      .catch((err) => setEditError(errorMessage(err, t('messages.updateTeamFailed'))))
+      .finally(() => setEditPending(false));
+  };
+
+  const removeTeam = async (team: Team) => {
+    const ok = await confirm({
+      title: t('teams.confirmDeleteTitle'),
+      description: t('teams.confirmDelete'),
+      confirmLabel: t('teams.delete'),
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setActionError('');
+    apiDelete(`/hr/teams/${team.id}`)
+      .then(() => {
+        if (selectedId === team.id) {
+          setSelectedId(null);
+          setDetail(null);
+        }
+        fetchTeams();
+      })
+      .catch((err) => setActionError(errorMessage(err, t('messages.deleteTeamFailed'))));
+  };
+
+  const addMember = (teamId: string) => {
+    if (!addMemberUserId) return;
+    setAddMemberPending(true);
+    setActionError('');
+    apiPost(`/hr/teams/${teamId}/members`, { userId: addMemberUserId })
+      .then(() => {
+        setAddMemberUserId('');
+        fetchDetail(teamId);
+        fetchTeams();
+      })
+      .catch((err) => setActionError(errorMessage(err, t('messages.addMemberFailed'))))
+      .finally(() => setAddMemberPending(false));
+  };
+
+  const removeMember = (teamId: string, userId: string) => {
+    setActionError('');
+    apiDelete(`/hr/teams/${teamId}/members/${userId}`)
+      .then(() => {
+        fetchDetail(teamId);
+        fetchTeams();
+      })
+      .catch((err) => setActionError(errorMessage(err, t('messages.removeMemberFailed'))));
+  };
+
+  /* ---------- render ---------- */
+
+  const selectedTeam = teams.find((team) => team.id === selectedId) ?? null;
+  const memberRows = detail?.members ?? [];
+  const available = useMemo(
+    () => pickerEmployees.filter((emp) => !memberRows.some((m) => m.userId === emp.id)),
+    [pickerEmployees, memberRows],
+  );
+
+  return (
+    <div className="grid gap-5">
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-card border border-line bg-bad-bg px-3.5 py-2.5 text-[13px] text-bad"
+        >
+          {actionError}
+        </p>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('teams.title')}
+            {teams.length > 0 ? <CardCount>({teams.length})</CardCount> : null}
+          </CardTitle>
+          {canManage ? (
+            <Button variant="primary" onClick={openCreate}>
+              <Plus />
+              {t('teams.new')}
+            </Button>
+          ) : null}
+        </CardHeader>
+
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+          <SearchInput
+            icon={<Search className="size-4" />}
+            placeholder={t('teams.searchPlaceholder')}
+            aria-label={t('teams.searchPlaceholder')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <DataState
+          isLoading={loading}
+          error={error || null}
+          onRetry={fetchTeams}
+          isEmpty={teams.length === 0}
+          loading={<TableSkeleton rows={4} cols={4} />}
+          empty={
+            search.trim() ? (
+              <EmptyState
+                icon={<Users className="size-5" />}
+                title={t('teams.noMatch')}
+                description={t('teams.noMatchHelp')}
+              />
+            ) : (
+              <EmptyState
+                icon={<Users className="size-5" />}
+                title={t('teams.empty')}
+                description={t('teams.emptyHelp')}
+                action={
+                  canManage ? (
+                    <Button variant="ghost" size="sm" onClick={openCreate}>
+                      <Plus />
+                      {t('teams.new')}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('teams.table.name')}</TH>
+                  <TH>{t('teams.table.leader')}</TH>
+                  <TH numeric>{t('teams.table.members')}</TH>
+                  <TH>{t('teams.table.createdAt')}</TH>
+                  {canManage ? (
+                    <TH className="w-11">
+                      <span className="sr-only">{t('teams.table.actions')}</span>
+                    </TH>
+                  ) : null}
+                </tr>
+              </THead>
+              <TBody>
+                {teams.map((team) => {
+                  const isSelected = selectedId === team.id;
+                  return (
+                    <TR
+                      key={team.id}
+                      onActivate={() => toggleTeam(team.id)}
+                      aria-pressed={isSelected}
+                      className={cn(isSelected && '[&>td]:bg-chalk')}
+                    >
+                      <TD className="font-medium">{team.name}</TD>
+                      <TD>
+                        {team.leader ? (
+                          displayName(team.leader)
+                        ) : (
+                          <span className="text-muted">{t('teams.noLeader')}</span>
+                        )}
+                      </TD>
+                      <TD numeric>{team.memberCount ?? 0}</TD>
+                      <TD className="tnum whitespace-nowrap text-muted">{formatDate(team.createdAt)}</TD>
+                      {canManage ? (
+                        <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="quiet"
+                                size="iconSm"
+                                aria-label={t('teams.rowActions', { name: team.name })}
+                              >
+                                <MoreHorizontal />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent>
+                              <DropdownMenuItem onSelect={() => openEdit(team)}>
+                                <Pencil />
+                                {t('teams.edit')}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-bad [&_svg]:text-bad"
+                                onSelect={() => {
+                                  void removeTeam(team);
+                                }}
+                              >
+                                <Trash2 />
+                                {t('teams.delete')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TD>
+                      ) : null}
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('teams.count', { count: teams.length })}</span>
+            <span>{t('teams.openHint')}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      {selectedId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {t('teams.membersOf', { name: detail?.name ?? selectedTeam?.name ?? '' })}
+              <CardCount>({memberRows.length})</CardCount>
+            </CardTitle>
+            <Button
+              variant="quiet"
+              size="sm"
+              onClick={() => {
+                setSelectedId(null);
+                setDetail(null);
+                setDetailError('');
+              }}
+            >
+              <X />
+              {t('common:actions.close')}
+            </Button>
+          </CardHeader>
+
+          <DataState
+            isLoading={detailLoading}
+            error={detailError || null}
+            onRetry={() => fetchDetail(selectedId)}
+            isEmpty={memberRows.length === 0}
+            loading={<TableSkeleton rows={3} cols={3} />}
+            empty={
+              <EmptyState
+                icon={<Users className="size-5" />}
+                title={t('teams.noMembers')}
+                description={canManage ? t('teams.noMembersHelp') : undefined}
+              />
+            }
+          >
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>{t('employees.table.name')}</TH>
+                    <TH>{t('employees.table.email')}</TH>
+                    <TH>{t('employees.table.role')}</TH>
+                    {canManage ? (
+                      <TH className="w-11">
+                        <span className="sr-only">{t('teams.removeMember')}</span>
+                      </TH>
+                    ) : null}
+                  </tr>
+                </THead>
+                <TBody>
+                  {memberRows.map((member) => (
+                    <TR key={member.userId}>
+                      <TD className="font-medium">{displayName(member.user)}</TD>
+                      <TD className="text-muted">{member.user.email}</TD>
+                      <TD>{member.user.role ? <RoleBadge role={member.user.role} /> : '—'}</TD>
+                      {canManage ? (
+                        <TD>
+                          <Button
+                            variant="quiet"
+                            size="iconSm"
+                            className="text-bad hover:bg-bad-bg"
+                            title={t('teams.removeMember')}
+                            aria-label={t('teams.removeMember')}
+                            onClick={() => removeMember(selectedId, member.userId)}
+                          >
+                            <UserMinus />
+                          </Button>
+                        </TD>
+                      ) : null}
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </TableWrap>
+          </DataState>
+
+          {canManage ? (
+            <div className="flex flex-wrap items-end gap-2.5 border-t border-line-soft p-3.5">
+              <Field className="min-w-[220px] flex-1" label={t('teams.addMember')} htmlFor="hr-add-member">
+                <Select
+                  id="hr-add-member"
+                  value={addMemberUserId}
+                  onChange={(e) => setAddMemberUserId(e.target.value)}
+                >
+                  <option value="">{t('teams.selectEmployee')}</option>
+                  {available.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {displayName(emp)} ({roleLabel(emp.role)})
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Button
+                onClick={() => addMember(selectedId)}
+                disabled={!addMemberUserId || addMemberPending}
+              >
+                <UserPlus />
+                {addMemberPending ? t('teams.adding') : t('common:actions.add')}
+              </Button>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {/* Create a team */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('teams.createTitle')}</DialogTitle>
+            <DialogDescription>{t('teams.createHelp')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('teams.name')} htmlFor="hr-team-name" required>
+              <Input
+                id="hr-team-name"
+                placeholder={t('teams.namePlaceholder')}
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+              />
+            </Field>
+            <Field label={t('teams.leader')} htmlFor="hr-team-leader">
+              <Select
+                id="hr-team-leader"
+                value={createForm.leaderId}
+                onChange={(e) => setCreateForm({ ...createForm, leaderId: e.target.value })}
+              >
+                <option value="">{t('teams.noLeader')}</option>
+                {pickerEmployees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {displayName(emp)} ({roleLabel(emp.role)})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {createError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {createError}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={createPending || !createForm.name.trim()}
+              onClick={submitCreate}
+            >
+              {createPending ? t('teams.creating') : t('teams.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename a team / change its leader */}
+      <Dialog
+        open={editTeam !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditTeam(null);
+        }}
+      >
+        <DialogContent>
+          {editTeam ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('teams.edit')}</DialogTitle>
+                <DialogDescription>{t('teams.editHelp')}</DialogDescription>
+              </DialogHeader>
+              <DialogBody>
+                <Field label={t('teams.name')} htmlFor="hr-team-edit-name">
+                  <Input
+                    id="hr-team-edit-name"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('teams.leader')} htmlFor="hr-team-edit-leader">
+                  <Select
+                    id="hr-team-edit-leader"
+                    value={editForm.leaderId}
+                    onChange={(e) => setEditForm({ ...editForm, leaderId: e.target.value })}
+                  >
+                    <option value="">{t('teams.noLeader')}</option>
+                    {pickerEmployees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {displayName(emp)} ({roleLabel(emp.role)})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {editError ? (
+                  <p role="alert" className="text-[13px] text-bad">
+                    {editError}
+                  </p>
+                ) : null}
+              </DialogBody>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setEditTeam(null)}>
+                  {t('common:actions.cancel')}
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={editPending}
+                  onClick={() => submitEdit(editTeam.id)}
+                >
+                  {editPending ? t('common:actions.saving') : t('common:actions.save')}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Collaborateurs (office-only tab)                                   */
+/* ------------------------------------------------------------------ */
+
+const ACTIVE_FILTERS = ['', 'true', 'false'] as const;
+type ActiveFilter = (typeof ACTIVE_FILTERS)[number];
+
+function EmployeesPanel() {
+  const { t } = useTranslation('hr');
+  const confirm = useConfirm();
+  const { role, id: currentUserId } = useCurrentUser();
+  // Creating, inviting, (de)activating an account and setting a role or a licence are
+  // the administrator's job (PRD §18.2); a project manager reads the directory.
+  const isAdmin = role === 'ADMIN';
+
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('');
+
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+
+  const [editing, setEditing] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({ role: '', hourlyRate: '', isActive: true });
+  const [editPending, setEditPending] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const [addOpen, setAddOpen] = useState(false);
   const [newEmp, setNewEmp] = useState<NewEmployeeForm>(EMPTY_EMPLOYEE);
-  const [addLoading, setAddLoading] = useState(false);
+  const [addPending, setAddPending] = useState(false);
   const [addError, setAddError] = useState('');
   const [seats, setSeats] = useState<SeatAvailability | null>(null);
   const [teamOptions, setTeamOptions] = useState<Team[]>([]);
 
-  /* Row actions: resend invitation, deactivate, reactivate */
-  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
-
-  /* Employees list is also used in team dropdowns */
-  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
-
-  /* ============ DATA FETCHING ============ */
-
-  const fetchTeams = useCallback(() => {
-    setTeamsLoading(true);
-    setTeamsError('');
-    const params = new URLSearchParams({ limit: '100' });
-    if (teamsSearch) params.set('search', teamsSearch);
-    apiGet<Team[]>(`/hr/teams?${params.toString()}`)
-      .then((list) => setTeams(list ?? []))
-      .catch((err) => setTeamsError(errorMessage(err, t('messages.loadTeamsFailed'))))
-      .finally(() => setTeamsLoading(false));
-  }, [teamsSearch]);
+  /* ---------- data ---------- */
 
   const fetchEmployees = useCallback(() => {
-    setEmployeesLoading(true);
-    setEmployeesError('');
+    setLoading(true);
+    setError('');
     const params = new URLSearchParams({ limit: '100' });
-    if (empSearch) params.set('search', empSearch);
+    if (search) params.set('search', search);
     if (roleFilter) params.set('role', roleFilter);
     if (activeFilter) params.set('isActive', activeFilter);
     apiGet<Employee[]>(`/hr/employees?${params.toString()}`)
       .then((list) => setEmployees(list ?? []))
-      .catch((err) => setEmployeesError(errorMessage(err, t('messages.loadEmployeesFailed'))))
-      .finally(() => setEmployeesLoading(false));
-  }, [empSearch, roleFilter, activeFilter]);
-
-  const fetchAllEmployees = useCallback(() => {
-    // Office roles only; a team leader gets 403 and the pickers stay empty.
-    apiGet<Employee[]>('/hr/employees?isActive=true&limit=200')
-      .then((list) => setAllEmployees(list ?? []))
-      .catch(() => {});
-  }, []);
-
-  const fetchTeamDetail = useCallback((teamId: string) => {
-    setTeamDetailLoading(true);
-    apiGet<TeamDetail>(`/hr/teams/${teamId}`)
-      .then((detail) => {
-        setTeamDetail(detail);
-        setEditTeamName(detail.name);
-        setEditTeamLeaderId(detail.leaderId ?? '');
-      })
-      .catch(() => setTeamDetail(null))
-      .finally(() => setTeamDetailLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === 'teams') {
-      fetchTeams();
-      if (isOffice) fetchAllEmployees();
-    }
-  }, [activeTab, fetchTeams, fetchAllEmployees, isOffice]);
-
-  useEffect(() => {
-    if (activeTab === 'employees') {
-      fetchEmployees();
-    }
-  }, [activeTab, fetchEmployees]);
-
-  /* ============ TEAM ACTIONS ============ */
-
-  const handleCreateTeam = () => {
-    if (!createName.trim()) return;
-    setCreateLoading(true);
-    setCreateError('');
-    const body: { name: string; leaderId?: string } = { name: createName.trim() };
-    if (createLeaderId) body.leaderId = createLeaderId;
-    apiPost('/hr/teams', body)
-      .then(() => {
-        setCreateName('');
-        setCreateLeaderId('');
-        setShowCreateForm(false);
-        fetchTeams();
-      })
-      .catch((err) => setCreateError(errorMessage(err, t('messages.createTeamFailed'))))
-      .finally(() => setCreateLoading(false));
-  };
-
-  const handleUpdateTeam = (teamId: string) => {
-    setEditTeamLoading(true);
-    // null removes the leader
-    const body: { name?: string; leaderId: string | null } = { leaderId: editTeamLeaderId || null };
-    if (editTeamName.trim()) body.name = editTeamName.trim();
-    apiPut(`/hr/teams/${teamId}`, body)
-      .then(() => {
-        fetchTeams();
-        fetchTeamDetail(teamId);
-      })
-      .catch((err) => alert(errorMessage(err, t('messages.updateTeamFailed'))))
-      .finally(() => setEditTeamLoading(false));
-  };
-
-  const handleDeleteTeam = (teamId: string) => {
-    if (!window.confirm(t('teams.confirmDelete'))) return;
-    apiDelete(`/hr/teams/${teamId}`)
-      .then(() => {
-        setExpandedTeamId(null);
-        setTeamDetail(null);
-        fetchTeams();
-      })
-      .catch((err) => alert(errorMessage(err, t('messages.deleteTeamFailed'))));
-  };
-
-  const handleAddMember = (teamId: string) => {
-    if (!addMemberUserId) return;
-    setAddMemberLoading(true);
-    apiPost(`/hr/teams/${teamId}/members`, { userId: addMemberUserId })
-      .then(() => {
-        setAddMemberUserId('');
-        fetchTeamDetail(teamId);
-        fetchTeams();
-      })
-      .catch((err) => alert(errorMessage(err, t('messages.addMemberFailed'))))
-      .finally(() => setAddMemberLoading(false));
-  };
-
-  const handleRemoveMember = (teamId: string, userId: string) => {
-    apiDelete(`/hr/teams/${teamId}/members/${userId}`)
-      .then(() => {
-        fetchTeamDetail(teamId);
-        fetchTeams();
-      })
-      .catch((err) => alert(errorMessage(err, t('messages.removeMemberFailed'))));
-  };
-
-  const handleExpandTeam = (teamId: string) => {
-    if (expandedTeamId === teamId) {
-      setExpandedTeamId(null);
-      setTeamDetail(null);
-    } else {
-      setExpandedTeamId(teamId);
-      fetchTeamDetail(teamId);
-    }
-  };
-
-  /* ============ EMPLOYEE ACTIONS ============ */
+      .catch((err) => setError(errorMessage(err, t('messages.loadEmployeesFailed'))))
+      .finally(() => setLoading(false));
+  }, [search, roleFilter, activeFilter, t]);
 
   const fetchSeats = useCallback(() => {
     apiGet<SeatAvailability>('/subscription/seats')
@@ -425,8 +818,14 @@ export default function HR() {
       .catch(() => setSeats(null));
   }, []);
 
-  const openAddEmployee = () => {
-    setShowAddEmployee(true);
+  useEffect(() => {
+    fetchEmployees();
+  }, [fetchEmployees]);
+
+  /* ---------- actions ---------- */
+
+  const openAdd = () => {
+    setAddOpen(true);
     setNewEmp(EMPTY_EMPLOYEE);
     setAddError('');
     fetchSeats();
@@ -438,13 +837,14 @@ export default function HR() {
   const setNewEmpField = (field: keyof NewEmployeeForm, value: string) =>
     setNewEmp((prev) => ({ ...prev, [field]: value }));
 
-  const handleCreateEmployee = () => {
+  const submitAdd = () => {
     if (!newEmp.firstName.trim() || !newEmp.lastName.trim() || !newEmp.email.trim()) {
       setAddError(t('messages.requiredFields'));
       return;
     }
     // CHF → integer centimes
-    const hourlyRateCents = newEmp.hourlyRate.trim() === '' ? undefined : Math.round(parseFloat(newEmp.hourlyRate) * 100);
+    const hourlyRateCents =
+      newEmp.hourlyRate.trim() === '' ? undefined : Math.round(parseFloat(newEmp.hourlyRate) * 100);
     if (hourlyRateCents !== undefined && (!Number.isFinite(hourlyRateCents) || hourlyRateCents < 0)) {
       setAddError(t('messages.invalidHourlyRate'));
       return;
@@ -463,73 +863,79 @@ export default function HR() {
     if (newEmp.hireDate) body.hireDate = newEmp.hireDate;
     if (newEmp.teamId) body.teamId = newEmp.teamId;
 
-    setAddLoading(true);
+    setAddPending(true);
     setAddError('');
     apiPost<Employee>('/hr/employees', body)
       .then(() => {
-        setShowAddEmployee(false);
+        setAddOpen(false);
         setNewEmp(EMPTY_EMPLOYEE);
         setNotice({ kind: 'success', text: t('messages.inviteSent', { email }) });
         fetchEmployees();
-        fetchAllEmployees();
       })
       .catch((err) => {
         setAddError(hrErrorMessage(err, t('messages.createEmployeeFailed')));
         fetchSeats();
       })
-      .finally(() => setAddLoading(false));
+      .finally(() => setAddPending(false));
   };
 
-  const runRowAction = (emp: Employee, action: 'invite' | 'deactivate' | 'reactivate') => {
-    if (action === 'deactivate' && !window.confirm(t('employees.confirmDeactivate', { name: displayName(emp) }))) return;
+  const runRowAction = async (emp: Employee, action: 'invite' | 'deactivate' | 'reactivate') => {
+    if (action === 'deactivate') {
+      const ok = await confirm({
+        title: t('employees.confirmDeactivateTitle'),
+        description: t('employees.confirmDeactivate', { name: displayName(emp) }),
+        confirmLabel: t('employees.deactivate'),
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
     setRowBusyId(emp.id);
     setNotice(null);
     apiPost<Employee>(`/hr/employees/${emp.id}/${action}`)
       .then(() => {
         const key = { invite: 'inviteSent', deactivate: 'deactivated', reactivate: 'reactivated' }[action];
-        setNotice({ kind: 'success', text: t(`messages.${key}`, { email: emp.email, name: displayName(emp) }) });
-        if (action !== 'invite') {
-          fetchEmployees();
-          fetchAllEmployees();
-        }
+        setNotice({
+          kind: 'success',
+          text: t(`messages.${key}`, { email: emp.email, name: displayName(emp) }),
+        });
+        if (action !== 'invite') fetchEmployees();
       })
-      .catch((err) => setNotice({ kind: 'error', text: hrErrorMessage(err, t(`messages.${action}Failed`)) }))
+      .catch((err) =>
+        setNotice({ kind: 'error', text: hrErrorMessage(err, t(`messages.${action}Failed`)) }),
+      )
       .finally(() => setRowBusyId(null));
   };
 
-  const startEditing = (emp: Employee) => {
-    setEditingId(emp.id);
-    setEditRole(emp.role);
+  const openEdit = (emp: Employee) => {
+    setEditing(emp);
     // Edited in CHF, stored in centimes
-    setEditHourlyRate(emp.hourlyRateCents != null ? (emp.hourlyRateCents / 100).toFixed(2) : '');
-    setEditIsActive(emp.isActive);
+    setEditForm({
+      role: emp.role,
+      hourlyRate: emp.hourlyRateCents != null ? (emp.hourlyRateCents / 100).toFixed(2) : '',
+      isActive: emp.isActive,
+    });
     setEditError('');
   };
 
-  const cancelEditing = () => {
-    setEditingId(null);
-    setEditError('');
-  };
-
-  const handleSaveEmployee = (userId: string) => {
+  const submitEdit = (userId: string) => {
     // CHF → integer centimes; empty clears the rate
-    const hourlyRateCents = editHourlyRate.trim() === '' ? null : Math.round(parseFloat(editHourlyRate) * 100);
+    const hourlyRateCents =
+      editForm.hourlyRate.trim() === '' ? null : Math.round(parseFloat(editForm.hourlyRate) * 100);
     if (hourlyRateCents != null && (!Number.isFinite(hourlyRateCents) || hourlyRateCents < 0)) {
       setEditError(t('messages.invalidHourlyRate'));
       return;
     }
-    setEditLoading(true);
+    setEditPending(true);
     setEditError('');
     const body: { hourlyRateCents: number | null; role: string; isActive: boolean } = {
       hourlyRateCents,
-      role: editRole,
-      isActive: editIsActive,
+      role: editForm.role,
+      isActive: editForm.isActive,
     };
     apiPut(`/hr/employees/${userId}`, body)
       .then(() => {
-        setEditingId(null);
+        setEditing(null);
         fetchEmployees();
-        fetchAllEmployees();
       })
       .catch((err) =>
         setEditError(
@@ -538,473 +944,71 @@ export default function HR() {
             : hrErrorMessage(err, t('messages.updateEmployeeFailed')),
         ),
       )
-      .finally(() => setEditLoading(false));
+      .finally(() => setEditPending(false));
   };
 
-  /* ============ RENDER ============ */
+  /* ---------- render ---------- */
 
-  const tabStyle = (tab: 'teams' | 'employees'): React.CSSProperties => ({
-    padding: '10px 24px',
-    fontSize: 15,
-    fontWeight: 600,
-    cursor: 'pointer',
-    border: 'none',
-    borderBottom: activeTab === tab ? '3px solid #2563eb' : '3px solid transparent',
-    background: 'none',
-    color: activeTab === tab ? '#2563eb' : '#6b7280',
-    transition: 'color 0.15s, border-color 0.15s',
-  });
+  const filtered = Boolean(search.trim() || roleFilter || activeFilter);
 
   return (
-    <div>
-      {/* Page header */}
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0, marginBottom: 16 }}>
-        {t('title')}
-      </h1>
-
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 24 }}>
-        <button style={tabStyle('teams')} onClick={() => setActiveTab('teams')}>
-          {t('tabs.teams')}
-        </button>
-        {isOffice && (
-          <button style={tabStyle('employees')} onClick={() => setActiveTab('employees')}>
-            {t('tabs.employees')}
-          </button>
-        )}
-      </div>
-
-      {/* ================= TEAMS TAB ================= */}
-      {activeTab === 'teams' && (
-        <div>
-          {/* Teams header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0 }}>{t('teams.title')}</h2>
-              <input
-                style={{ ...inputStyle, maxWidth: 260 }}
-                placeholder={t('teams.searchPlaceholder')}
-                value={teamsSearch}
-                onChange={(e) => setTeamsSearch(e.target.value)}
-              />
-            </div>
-            <button style={btnPrimary} onClick={() => setShowCreateForm(!showCreateForm)}>
-              {showCreateForm ? t('common:actions.cancel') : t('teams.new')}
-            </button>
-          </div>
-
-          {/* Create team form */}
-          {showCreateForm && (
-            <div
-              style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 20,
-                marginBottom: 20,
-              }}
-            >
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    {t('teams.nameRequired')}
-                  </label>
-                  <input
-                    style={inputStyle}
-                    placeholder={t('teams.namePlaceholder')}
-                    value={createName}
-                    onChange={(e) => setCreateName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    {t('teams.leader')}
-                  </label>
-                  <select
-                    style={inputStyle}
-                    value={createLeaderId}
-                    onChange={(e) => setCreateLeaderId(e.target.value)}
-                  >
-                    <option value="">{t('teams.noLeader')}</option>
-                    {allEmployees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {displayName(emp)} ({roleLabel(emp.role)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <button
-                  style={btnPrimary}
-                  onClick={handleCreateTeam}
-                  disabled={createLoading || !createName.trim()}
-                >
-                  {createLoading ? t('teams.creating') : t('teams.create')}
-                </button>
-                {createError && (
-                  <span style={{ color: '#ef4444', fontSize: 13 }}>{createError}</span>
-                )}
-              </div>
-            </div>
+    <div className="grid gap-5">
+      {notice ? (
+        <div
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2.5 rounded-card border border-line px-3.5 py-2.5 text-[13px]',
+            notice.kind === 'error' ? 'bg-bad-bg text-bad' : 'bg-ok-bg text-ok',
           )}
-
-          {/* Teams list */}
-          {teamsLoading ? (
-            <div style={{ color: '#6b7280', padding: 20 }}>{t('teams.loading')}</div>
-          ) : teamsError ? (
-            <div style={{ color: '#ef4444', padding: 20 }}>{teamsError}</div>
-          ) : teams.length === 0 ? (
-            <div style={{ color: '#9ca3af', padding: 40, textAlign: 'center' }}>
-              {t('teams.empty')}
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-              {teams.map((team) => (
-                <React.Fragment key={team.id}>
-                  {/* Team card */}
-                  <div
-                    onClick={() => handleExpandTeam(team.id)}
-                    style={{
-                      background: expandedTeamId === team.id ? '#eff6ff' : '#fff',
-                      border: expandedTeamId === team.id ? '2px solid #2563eb' : '1px solid #e5e7eb',
-                      borderRadius: 8,
-                      padding: 16,
-                      cursor: 'pointer',
-                      transition: 'border-color 0.15s, background 0.15s',
-                    }}
-                    onMouseOver={(e) => {
-                      if (expandedTeamId !== team.id) {
-                        (e.currentTarget as HTMLElement).style.borderColor = '#93c5fd';
-                      }
-                    }}
-                    onMouseOut={(e) => {
-                      if (expandedTeamId !== team.id) {
-                        (e.currentTarget as HTMLElement).style.borderColor = '#e5e7eb';
-                      }
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: 15, color: '#111827', marginBottom: 6 }}>
-                      {team.name}
-                    </div>
-                    <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
-                      {team.leader
-                        ? t('teams.leaderLabel', { name: displayName(team.leader) })
-                        : t('teams.noLeader')}
-                    </div>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 10px',
-                        borderRadius: 12,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        background: '#dbeafe',
-                        color: '#1e40af',
-                      }}
-                    >
-                      {t('teams.memberCount', { count: team.memberCount ?? 0 })}
-                    </span>
-                  </div>
-
-                  {/* Expanded detail */}
-                  {expandedTeamId === team.id && (
-                    <div
-                      style={{
-                        gridColumn: '1 / -1',
-                        background: '#f9fafb',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: 8,
-                        padding: 20,
-                      }}
-                    >
-                      {teamDetailLoading ? (
-                        <div style={{ color: '#6b7280' }}>{t('teams.loadingDetail')}</div>
-                      ) : teamDetail ? (
-                        <div>
-                          {/* Edit team name & leader */}
-                          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                                {t('teams.name')}
-                              </label>
-                              <input
-                                style={inputStyle}
-                                value={editTeamName}
-                                onChange={(e) => setEditTeamName(e.target.value)}
-                              />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                                {t('teams.leader')}
-                              </label>
-                              <select
-                                style={inputStyle}
-                                value={editTeamLeaderId}
-                                onChange={(e) => setEditTeamLeaderId(e.target.value)}
-                              >
-                                <option value="">{t('teams.noLeader')}</option>
-                                {allEmployees.map((emp) => (
-                                  <option key={emp.id} value={emp.id}>
-                                    {displayName(emp)}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <button
-                              style={btnPrimary}
-                              onClick={() => handleUpdateTeam(team.id)}
-                              disabled={editTeamLoading}
-                            >
-                              {editTeamLoading ? t('common:actions.saving') : t('common:actions.save')}
-                            </button>
-                            <button
-                              style={btnDanger}
-                              onClick={() => handleDeleteTeam(team.id)}
-                            >
-                              {t('teams.delete')}
-                            </button>
-                          </div>
-
-                          {/* Members list */}
-                          <h4 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 12 }}>
-                            {t('teams.members', { count: teamDetail.members?.length ?? 0 })}
-                          </h4>
-
-                          {(!teamDetail.members || teamDetail.members.length === 0) ? (
-                            <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 16 }}>
-                              {t('teams.noMembers')}
-                            </div>
-                          ) : (
-                            <div style={{ marginBottom: 16 }}>
-                              {teamDetail.members.map((m) => (
-                                <div
-                                  key={m.userId}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    padding: '8px 12px',
-                                    borderBottom: '1px solid #f3f4f6',
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                    <span style={{ fontWeight: 500, fontSize: 14, color: '#111827' }}>
-                                      {displayName(m.user)}
-                                    </span>
-                                    <span style={{ fontSize: 13, color: '#6b7280' }}>
-                                      {m.user.email}
-                                    </span>
-                                    {m.user.role && roleBadge(m.user.role)}
-                                  </div>
-                                  <button
-                                    style={{
-                                      background: 'none',
-                                      border: 'none',
-                                      color: '#ef4444',
-                                      cursor: 'pointer',
-                                      fontSize: 16,
-                                      fontWeight: 700,
-                                      padding: '4px 8px',
-                                      borderRadius: 4,
-                                    }}
-                                    title={t('teams.removeMember')}
-                                    aria-label={t('teams.removeMember')}
-                                    onClick={() => handleRemoveMember(team.id, m.userId)}
-                                  >
-                                    X
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Add member row */}
-                          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                            <select
-                              style={{ ...inputStyle, maxWidth: 300 }}
-                              value={addMemberUserId}
-                              onChange={(e) => setAddMemberUserId(e.target.value)}
-                            >
-                              <option value="">{t('teams.selectEmployee')}</option>
-                              {allEmployees
-                                .filter(
-                                  (emp) =>
-                                    !teamDetail.members?.some((m) => m.userId === emp.id),
-                                )
-                                .map((emp) => (
-                                  <option key={emp.id} value={emp.id}>
-                                    {displayName(emp)} ({roleLabel(emp.role)})
-                                  </option>
-                                ))}
-                            </select>
-                            <button
-                              style={btnOutline}
-                              onClick={() => handleAddMember(team.id)}
-                              disabled={!addMemberUserId || addMemberLoading}
-                            >
-                              {addMemberLoading ? t('teams.adding') : t('common:actions.add')}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ color: '#ef4444' }}>{t('teams.detailFailed')}</div>
-                      )}
-                    </div>
-                  )}
-                </React.Fragment>
-              ))}
-            </div>
-          )}
+        >
+          <span>{notice.text}</span>
+          <Button
+            variant="quiet"
+            size="iconSm"
+            className="text-current"
+            aria-label={t('common:actions.close')}
+            onClick={() => setNotice(null)}
+          >
+            <X />
+          </Button>
         </div>
-      )}
+      ) : null}
 
-      {/* ================= EMPLOYEES TAB ================= */}
-      {activeTab === 'employees' && (
-        <div>
-          {/* Employees header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0 }}>
-              {t('employees.title')}
-            </h2>
-            {isAdmin && (
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('employees.title')}
+            {employees.length > 0 ? <CardCount>({employees.length})</CardCount> : null}
+          </CardTitle>
+          {isAdmin ? (
+            <Button variant="primary" onClick={openAdd}>
+              <Plus />
+              {t('employees.add')}
+            </Button>
+          ) : null}
+        </CardHeader>
+
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+          <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('employees.statusFilter')}>
+            {ACTIVE_FILTERS.map((value) => (
               <button
-                style={showAddEmployee ? btnOutline : btnPrimary}
-                onClick={() => (showAddEmployee ? setShowAddEmployee(false) : openAddEmployee())}
-              >
-                {showAddEmployee ? t('common:actions.cancel') : t('employees.add')}
-              </button>
-            )}
-          </div>
-
-          {/* Add employee form (admin) */}
-          {isAdmin && showAddEmployee && (
-            <div
-              style={{
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: 20,
-                marginBottom: 20,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
-                <h3 style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: 0 }}>{t('employees.form.title')}</h3>
-                {seats && (
-                  <span style={{ fontSize: 13, color: seats.available > 0 ? '#6b7280' : '#b91c1c' }}>
-                    {t('employees.form.seats', { used: seats.used, total: seats.total })}
-                  </span>
+                key={value || 'all'}
+                type="button"
+                aria-pressed={activeFilter === value}
+                onClick={() => setActiveFilter(value)}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-ink',
+                  activeFilter === value && 'bg-chalk font-medium text-ink',
                 )}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
-                <div>
-                  <label htmlFor="new-emp-first" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.firstName')}</label>
-                  <input id="new-emp-first" style={inputStyle} autoComplete="off" value={newEmp.firstName} onChange={(e) => setNewEmpField('firstName', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-last" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.lastName')}</label>
-                  <input id="new-emp-last" style={inputStyle} autoComplete="off" value={newEmp.lastName} onChange={(e) => setNewEmpField('lastName', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-email" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.email')}</label>
-                  <input id="new-emp-email" style={inputStyle} type="email" autoComplete="off" placeholder={t('employees.form.emailPlaceholder')} value={newEmp.email} onChange={(e) => setNewEmpField('email', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-role" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.role')}</label>
-                  <select id="new-emp-role" style={inputStyle} value={newEmp.role} onChange={(e) => setNewEmpField('role', e.target.value)}>
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {roleLabel(r)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="new-emp-licence" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.licence')}</label>
-                  <select id="new-emp-licence" style={inputStyle} value={newEmp.licenceTier} onChange={(e) => setNewEmpField('licenceTier', e.target.value)}>
-                    <option value="">{t('employees.form.licenceAuto')}</option>
-                    {LICENCE_TIERS.map((tier) => (
-                      <option key={tier} value={tier}>
-                        {t(`common:licence.${tier}`)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="new-emp-rate" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.hourlyRate')}</label>
-                  <input id="new-emp-rate" style={inputStyle} type="number" min="0" step="0.05" value={newEmp.hourlyRate} onChange={(e) => setNewEmpField('hourlyRate', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-phone" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.phone')}</label>
-                  <input id="new-emp-phone" style={inputStyle} type="tel" value={newEmp.phone} onChange={(e) => setNewEmpField('phone', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-cct" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.cctCode')}</label>
-                  <input id="new-emp-cct" style={inputStyle} value={newEmp.cctCode} onChange={(e) => setNewEmpField('cctCode', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-hire" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.hireDate')}</label>
-                  <input id="new-emp-hire" style={inputStyle} type="date" value={newEmp.hireDate} onChange={(e) => setNewEmpField('hireDate', e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="new-emp-team" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.team')}</label>
-                  <select id="new-emp-team" style={inputStyle} value={newEmp.teamId} onChange={(e) => setNewEmpField('teamId', e.target.value)}>
-                    <option value="">{t('employees.form.noTeam')}</option>
-                    {teamOptions.map((team) => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 12px' }}>{t('employees.form.inviteHint')}</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <button style={btnPrimary} onClick={handleCreateEmployee} disabled={addLoading}>
-                  {addLoading ? t('employees.form.submitting') : t('employees.form.submit')}
-                </button>
-                {addError && <span role="alert" style={{ color: '#ef4444', fontSize: 13 }}>{addError}</span>}
-              </div>
-            </div>
-          )}
-
-          {/* Result of the last account action */}
-          {notice && (
-            <div
-              role={notice.kind === 'error' ? 'alert' : 'status'}
-              style={{
-                background: notice.kind === 'error' ? '#fee2e2' : '#dcfce7',
-                color: notice.kind === 'error' ? '#991b1b' : '#166534',
-                padding: '8px 16px',
-                borderRadius: 6,
-                marginBottom: 12,
-                fontSize: 13,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 12,
-              }}
-            >
-              <span>{notice.text}</span>
-              <button
-                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 13 }}
-                onClick={() => setNotice(null)}
               >
-                {t('common:actions.close')}
+                {value === '' ? t('common:actions.all') : t(value === 'true' ? 'active' : 'inactive')}
               </button>
-            </div>
-          )}
-
-          {/* Filters */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              style={{ ...inputStyle, maxWidth: 280 }}
-              placeholder={t('employees.searchPlaceholder')}
-              value={empSearch}
-              onChange={(e) => setEmpSearch(e.target.value)}
-            />
-            <select
-              style={{ ...inputStyle, maxWidth: 180 }}
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Select
+              className="w-auto min-w-[160px]"
+              aria-label={t('employees.roleFilter')}
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
             >
@@ -1014,253 +1018,381 @@ export default function HR() {
                   {roleLabel(r)}
                 </option>
               ))}
-            </select>
-            <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid #d1d5db' }}>
-              <button
-                style={{
-                  padding: '8px 14px',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: activeFilter === '' ? '#2563eb' : '#fff',
-                  color: activeFilter === '' ? '#fff' : '#374151',
-                }}
-                onClick={() => setActiveFilter('')}
-              >
-                {t('common:actions.all')}
-              </button>
-              <button
-                style={{
-                  padding: '8px 14px',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: 'none',
-                  borderLeft: '1px solid #d1d5db',
-                  cursor: 'pointer',
-                  background: activeFilter === 'true' ? '#16a34a' : '#fff',
-                  color: activeFilter === 'true' ? '#fff' : '#374151',
-                }}
-                onClick={() => setActiveFilter('true')}
-              >
-                {t('active')}
-              </button>
-              <button
-                style={{
-                  padding: '8px 14px',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  border: 'none',
-                  borderLeft: '1px solid #d1d5db',
-                  cursor: 'pointer',
-                  background: activeFilter === 'false' ? '#dc2626' : '#fff',
-                  color: activeFilter === 'false' ? '#fff' : '#374151',
-                }}
-                onClick={() => setActiveFilter('false')}
-              >
-                {t('inactive')}
-              </button>
-            </div>
+            </Select>
+            <SearchInput
+              icon={<Search className="size-4" />}
+              placeholder={t('employees.searchPlaceholder')}
+              aria-label={t('employees.searchPlaceholder')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-
-          {/* Edit error banner */}
-          {editError && (
-            <div
-              style={{
-                background: '#fee2e2',
-                color: '#991b1b',
-                padding: '8px 16px',
-                borderRadius: 6,
-                marginBottom: 12,
-                fontSize: 13,
-              }}
-            >
-              {editError}
-            </div>
-          )}
-
-          {/* Table */}
-          {employeesLoading ? (
-            <div style={{ color: '#6b7280', padding: 20 }}>{t('employees.loading')}</div>
-          ) : employeesError ? (
-            <div style={{ color: '#ef4444', padding: 20 }}>{employeesError}</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {['name', 'email', 'role', 'hourlyRate', 'cctCode', 'status', 'actions'].map(
-                    (h) => (
-                      <th key={h} style={thStyle}>
-                        {t(`employees.table.${h}`)}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {employees.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}
-                    >
-                      {t('employees.empty')}
-                    </td>
-                  </tr>
-                )}
-                {employees.map((emp) => {
-                  const isEditing = editingId === emp.id;
-
-                  return (
-                    <tr
-                      key={emp.id}
-                      style={{ background: isEditing ? '#fffbeb' : undefined }}
-                      onMouseOver={(e) => {
-                        if (!isEditing) (e.currentTarget as HTMLElement).style.background = '#f9fafb';
-                      }}
-                      onMouseOut={(e) => {
-                        if (!isEditing) (e.currentTarget as HTMLElement).style.background = '';
-                      }}
-                    >
-                      {/* Name */}
-                      <td style={{ ...tdStyle, fontWeight: 500 }}>
-                        {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '-'}
-                      </td>
-
-                      {/* Email */}
-                      <td style={{ ...tdStyle, color: '#6b7280' }}>
-                        {emp.email}
-                      </td>
-
-                      {/* Role */}
-                      <td style={tdStyle}>
-                        {isEditing ? (
-                          <select
-                            style={{ ...inputStyle, width: 'auto' }}
-                            value={editRole}
-                            onChange={(e) => setEditRole(e.target.value)}
-                          >
-                            {ROLES.map((r) => (
-                              <option key={r} value={r}>
-                                {roleLabel(r)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          roleBadge(emp.role)
-                        )}
-                      </td>
-
-                      {/* Hourly Rate */}
-                      <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums' }}>
-                        {isEditing ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ fontSize: 13, color: '#6b7280' }}>CHF</span>
-                            <input
-                              style={{ ...inputStyle, width: 100 }}
-                              type="number"
-                              min="0"
-                              step="0.05"
-                              value={editHourlyRate}
-                              onChange={(e) => setEditHourlyRate(e.target.value)}
-                            />
-                            <span style={{ fontSize: 11, color: '#9ca3af' }}>{t('employees.perHour')}</span>
-                          </div>
-                        ) : (
-                          emp.hourlyRateCents != null ? formatMoney(emp.hourlyRateCents) : '-'
-                        )}
-                      </td>
-
-                      {/* CCT Code */}
-                      <td style={{ ...tdStyle, color: '#6b7280' }}>
-                        {emp.cctCode ?? '-'}
-                      </td>
-
-                      {/* Status */}
-                      <td style={tdStyle}>
-                        {isEditing ? (
-                          <button
-                            style={{
-                              ...btnOutline,
-                              padding: '4px 12px',
-                              fontSize: 12,
-                              background: editIsActive ? '#dcfce7' : '#fee2e2',
-                              color: editIsActive ? '#166534' : '#991b1b',
-                              borderColor: editIsActive ? '#86efac' : '#fca5a5',
-                            }}
-                            onClick={() => setEditIsActive(!editIsActive)}
-                          >
-                            {editIsActive ? t('active') : t('inactive')}
-                          </button>
-                        ) : (
-                          activeBadge(emp.isActive)
-                        )}
-                      </td>
-
-                      {/* Actions */}
-                      <td style={tdStyle}>
-                        {isEditing ? (
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              style={{ ...btnPrimary, padding: '6px 12px', fontSize: 13 }}
-                              onClick={() => handleSaveEmployee(emp.id)}
-                              disabled={editLoading}
-                            >
-                              {editLoading ? t('common:actions.saving') : t('common:actions.save')}
-                            </button>
-                            <button
-                              style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                              onClick={cancelEditing}
-                            >
-                              {t('common:actions.cancel')}
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            <button
-                              style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                              onClick={() => startEditing(emp)}
-                            >
-                              {t('common:actions.edit')}
-                            </button>
-                            {isAdmin && emp.isActive && (
-                              <button
-                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                                onClick={() => runRowAction(emp, 'invite')}
-                                disabled={rowBusyId === emp.id}
-                              >
-                                {t('employees.resendInvite')}
-                              </button>
-                            )}
-                            {isAdmin && emp.isActive && emp.id !== currentUserId && (
-                              <button
-                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13, color: '#b91c1c' }}
-                                onClick={() => runRowAction(emp, 'deactivate')}
-                                disabled={rowBusyId === emp.id}
-                              >
-                                {t('employees.deactivate')}
-                              </button>
-                            )}
-                            {isAdmin && !emp.isActive && (
-                              <button
-                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13, color: '#166534' }}
-                                onClick={() => runRowAction(emp, 'reactivate')}
-                                disabled={rowBusyId === emp.id}
-                              >
-                                {t('employees.reactivate')}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
         </div>
-      )}
+
+        <DataState
+          isLoading={loading}
+          error={error || null}
+          onRetry={fetchEmployees}
+          isEmpty={employees.length === 0}
+          loading={<TableSkeleton rows={6} cols={6} />}
+          empty={
+            filtered ? (
+              <EmptyState
+                icon={<Users className="size-5" />}
+                title={t('employees.noMatch')}
+                description={t('employees.noMatchHelp')}
+              />
+            ) : (
+              <EmptyState
+                icon={<Users className="size-5" />}
+                title={t('employees.empty')}
+                description={t('employees.emptyHelp')}
+                action={
+                  isAdmin ? (
+                    <Button variant="ghost" size="sm" onClick={openAdd}>
+                      <Plus />
+                      {t('employees.add')}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('employees.table.name')}</TH>
+                  <TH>{t('employees.table.email')}</TH>
+                  <TH>{t('employees.table.role')}</TH>
+                  <TH numeric>{t('employees.table.hourlyRate')}</TH>
+                  <TH>{t('employees.table.cctCode')}</TH>
+                  <TH>{t('employees.table.status')}</TH>
+                  {isAdmin ? (
+                    <TH className="w-11">
+                      <span className="sr-only">{t('employees.table.actions')}</span>
+                    </TH>
+                  ) : null}
+                </tr>
+              </THead>
+              <TBody>
+                {employees.map((emp) => (
+                  <TR
+                    key={emp.id}
+                    onActivate={isAdmin ? () => openEdit(emp) : undefined}
+                    className={cn(editing?.id === emp.id && '[&>td]:bg-chalk')}
+                  >
+                    <TD className="font-medium">
+                      {[emp.firstName, emp.lastName].filter(Boolean).join(' ') || '—'}
+                    </TD>
+                    <TD className="text-muted">{emp.email}</TD>
+                    <TD>
+                      <RoleBadge role={emp.role} />
+                    </TD>
+                    <TD numeric>
+                      {emp.hourlyRateCents != null ? (
+                        formatMoney(emp.hourlyRateCents)
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </TD>
+                    <TD className="text-muted">{emp.cctCode ?? '—'}</TD>
+                    <TD>
+                      <AccountBadge isActive={emp.isActive} />
+                    </TD>
+                    {isAdmin ? (
+                      <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="quiet"
+                              size="iconSm"
+                              aria-label={t('employees.rowActions', { name: displayName(emp) })}
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem
+                              disabled={rowBusyId === emp.id}
+                              onSelect={() => openEdit(emp)}
+                            >
+                              <Pencil />
+                              {t('common:actions.edit')}
+                            </DropdownMenuItem>
+                            {emp.isActive ? (
+                              <DropdownMenuItem
+                                disabled={rowBusyId === emp.id}
+                                onSelect={() => {
+                                  void runRowAction(emp, 'invite');
+                                }}
+                              >
+                                <Send />
+                                {t('employees.resendInvite')}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {emp.isActive && emp.id !== currentUserId ? (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-bad [&_svg]:text-bad"
+                                  disabled={rowBusyId === emp.id}
+                                  onSelect={() => {
+                                    void runRowAction(emp, 'deactivate');
+                                  }}
+                                >
+                                  <UserMinus />
+                                  {t('employees.deactivate')}
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                            {!emp.isActive ? (
+                              <DropdownMenuItem
+                                disabled={rowBusyId === emp.id}
+                                onSelect={() => {
+                                  void runRowAction(emp, 'reactivate');
+                                }}
+                              >
+                                <UserCheck />
+                                {t('employees.reactivate')}
+                              </DropdownMenuItem>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TD>
+                    ) : null}
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('employees.count', { count: employees.length })}</span>
+            <span>{t('employees.footerHint')}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      {/* Role, hourly rate and account status — admin only in the API */}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+      >
+        <DialogContent>
+          {editing ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('employees.edit.title')}</DialogTitle>
+                <DialogDescription>
+                  {t('employees.edit.help', { name: displayName(editing) })}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogBody>
+                <Field label={t('employees.table.role')} htmlFor="hr-edit-role">
+                  <Select
+                    id="hr-edit-role"
+                    value={editForm.role}
+                    onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                  >
+                    {ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {roleLabel(r)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field
+                  label={t('employees.edit.hourlyRate')}
+                  htmlFor="hr-edit-rate"
+                  hint={t('employees.edit.hourlyRateHint')}
+                >
+                  <Input
+                    id="hr-edit-rate"
+                    type="number"
+                    min="0"
+                    step="0.05"
+                    inputMode="decimal"
+                    value={editForm.hourlyRate}
+                    onChange={(e) => setEditForm({ ...editForm, hourlyRate: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label={t('employees.edit.status')}
+                  htmlFor="hr-edit-active"
+                  hint={t('employees.edit.statusHint')}
+                >
+                  <Select
+                    id="hr-edit-active"
+                    value={editForm.isActive ? 'true' : 'false'}
+                    onChange={(e) => setEditForm({ ...editForm, isActive: e.target.value === 'true' })}
+                  >
+                    <option value="true">{t('active')}</option>
+                    <option value="false">{t('inactive')}</option>
+                  </Select>
+                </Field>
+                {editError ? (
+                  <p role="alert" className="text-[13px] text-bad">
+                    {editError}
+                  </p>
+                ) : null}
+              </DialogBody>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setEditing(null)}>
+                  {t('common:actions.cancel')}
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={editPending}
+                  onClick={() => submitEdit(editing.id)}
+                >
+                  {editPending ? t('common:actions.saving') : t('common:actions.save')}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create an account and send its invitation — admin only in the API */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('employees.form.title')}</DialogTitle>
+            <DialogDescription>{t('employees.form.inviteHint')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            {seats ? (
+              <p className={cn('text-[13px]', seats.available > 0 ? 'text-muted' : 'text-bad')}>
+                {t('employees.form.seats', { used: seats.used, total: seats.total })}
+              </p>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t('employees.form.firstName')} htmlFor="hr-new-first" required>
+                <Input
+                  id="hr-new-first"
+                  autoComplete="off"
+                  value={newEmp.firstName}
+                  onChange={(e) => setNewEmpField('firstName', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.lastName')} htmlFor="hr-new-last" required>
+                <Input
+                  id="hr-new-last"
+                  autoComplete="off"
+                  value={newEmp.lastName}
+                  onChange={(e) => setNewEmpField('lastName', e.target.value)}
+                />
+              </Field>
+              <Field
+                className="sm:col-span-2"
+                label={t('employees.form.email')}
+                htmlFor="hr-new-email"
+                required
+              >
+                <Input
+                  id="hr-new-email"
+                  type="email"
+                  autoComplete="off"
+                  placeholder={t('employees.form.emailPlaceholder')}
+                  value={newEmp.email}
+                  onChange={(e) => setNewEmpField('email', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.role')} htmlFor="hr-new-role" required>
+                <Select
+                  id="hr-new-role"
+                  value={newEmp.role}
+                  onChange={(e) => setNewEmpField('role', e.target.value)}
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={t('employees.form.licence')} htmlFor="hr-new-licence">
+                <Select
+                  id="hr-new-licence"
+                  value={newEmp.licenceTier}
+                  onChange={(e) => setNewEmpField('licenceTier', e.target.value)}
+                >
+                  <option value="">{t('employees.form.licenceAuto')}</option>
+                  {LICENCE_TIERS.map((tier) => (
+                    <option key={tier} value={tier}>
+                      {t(`common:licence.${tier}`)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={t('employees.form.hourlyRate')} htmlFor="hr-new-rate">
+                <Input
+                  id="hr-new-rate"
+                  type="number"
+                  min="0"
+                  step="0.05"
+                  inputMode="decimal"
+                  value={newEmp.hourlyRate}
+                  onChange={(e) => setNewEmpField('hourlyRate', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.phone')} htmlFor="hr-new-phone">
+                <Input
+                  id="hr-new-phone"
+                  type="tel"
+                  value={newEmp.phone}
+                  onChange={(e) => setNewEmpField('phone', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.cctCode')} htmlFor="hr-new-cct">
+                <Input
+                  id="hr-new-cct"
+                  value={newEmp.cctCode}
+                  onChange={(e) => setNewEmpField('cctCode', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.hireDate')} htmlFor="hr-new-hire">
+                <Input
+                  id="hr-new-hire"
+                  type="date"
+                  value={newEmp.hireDate}
+                  onChange={(e) => setNewEmpField('hireDate', e.target.value)}
+                />
+              </Field>
+              <Field label={t('employees.form.team')} htmlFor="hr-new-team">
+                <Select
+                  id="hr-new-team"
+                  value={newEmp.teamId}
+                  onChange={(e) => setNewEmpField('teamId', e.target.value)}
+                >
+                  <option value="">{t('employees.form.noTeam')}</option>
+                  {teamOptions.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            {addError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {addError}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button variant="primary" disabled={addPending} onClick={submitAdd}>
+              {addPending ? t('employees.form.submitting') : t('employees.form.submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

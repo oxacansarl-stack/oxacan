@@ -18,12 +18,15 @@
   "actions": {
     "exportAll": "Exporter toutes mes données",
     "preparing": "Préparation de l'export…",
-    "downloadJson": "Télécharger en JSON",
-    "dismiss": "Masquer"
+    "downloadJson": "Télécharger en JSON"
   },
   "preview": {
     "title": "Aperçu de l'export",
-    "truncated": "… (tronqué — téléchargez le fichier complet ci-dessus)"
+    "truncated": "… (tronqué — téléchargez le fichier complet ci-dessus)",
+    "characters_one": "{{chars}} caractère",
+    "characters_other": "{{chars}} caractères",
+    "empty": "Aucun export préparé",
+    "emptyHelp": "Lancez l'export pour générer le fichier : l'aperçu s'affiche ici et le JSON complet reste téléchargeable."
   },
   "privacy": "<strong>Protection des données :</strong> vos données exportées sont générées à la demande et ne sont pas conservées sur nos serveurs après le téléchargement. Le fichier JSON contient toutes les données associées au compte de votre entreprise. Pour demander la suppression de vos données, veuillez contacter votre administrateur système ou écrire à <email>{{email}}</email>.",
   "messages": {

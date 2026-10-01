@@ -1,30 +1,49 @@
 {
   "title": "Dépenses",
-  "subtitle": "Suivez et gérez les dépenses des projets",
   "tabs": {
     "all": "Toutes"
   },
   "actions": {
-    "new": "+ Nouvelle dépense",
+    "new": "Nouvelle dépense",
     "create": "Créer la dépense",
     "creating": "Création…",
     "submit": "Soumettre ({{count}})",
     "approve": "Approuver ({{count}})",
-    "reject": "Refuser ({{count}})"
+    "reject": "Refuser ({{count}})",
+    "rowActions": "Actions de la ligne"
   },
   "form": {
     "title": "Nouvelle dépense",
+    "help": "La dépense est enregistrée en brouillon : soumettez-la ensuite pour approbation.",
     "project": "Projet (facultatif)",
     "noProject": "Aucun projet",
     "date": "Date",
     "category": "Catégorie",
     "amount": "Montant (CHF)",
+    "amountHint": "Montant TTC réellement payé.",
     "description": "Description",
     "descriptionPlaceholder": "Décrivez la dépense…",
     "billable": "Refacturable au client"
   },
+  "reject": {
+    "title_one": "Refuser {{count}} dépense",
+    "title_other": "Refuser {{count}} dépenses",
+    "help": "Le motif est transmis à l'auteur de la dépense.",
+    "reason": "Motif du refus",
+    "reasonPlaceholder": "Expliquez ce qui doit être corrigé…",
+    "reasonRequired": "Indiquez un motif de refus.",
+    "confirm": "Refuser",
+    "rejecting": "Refus…"
+  },
+  "bulk": {
+    "selected_one": "{{count}} dépense sélectionnée",
+    "selected_other": "{{count}} dépenses sélectionnées",
+    "clear": "Tout désélectionner"
+  },
   "filters": {
-    "allCategories": "Toutes les catégories"
+    "allCategories": "Toutes les catégories",
+    "status": "Statut",
+    "category": "Catégorie"
   },
   "table": {
     "date": "Date",
@@ -34,11 +53,23 @@
     "amount": "Montant",
     "billable": "Refacturable",
     "status": "Statut",
-    "reason": "Motif : {{reason}}"
+    "actions": "Actions",
+    "reason": "Motif : {{reason}}",
+    "selectAll": "Tout sélectionner",
+    "selectRow": "Sélectionner la dépense « {{description}} »"
+  },
+  "summary": {
+    "byCategory": "Par catégorie",
+    "count_one": "{{count}} dépense",
+    "count_other": "{{count}} dépenses",
+    "total": "Total : {{amount}}",
+    "sortedBy": "Triées par date, la plus récente d'abord"
   },
   "empty": "Aucune dépense trouvée",
+  "emptyHelp": "Enregistrez une dépense de chantier pour la faire approuver puis refacturer.",
+  "noMatch": "Aucune dépense ne correspond",
+  "noMatchHelp": "Choisissez un autre statut ou une autre catégorie.",
   "prompts": {
-    "rejectionReason": "Motif du refus :",
     "confirmDelete": "Supprimer cette dépense ?"
   },
   "messages": {

@@ -2,27 +2,30 @@
   "title": "Véhicules",
   "count_one": "{{count}} véhicule",
   "count_other": "{{count}} véhicules",
-  "actions": {
-    "add": "+ Ajouter un véhicule",
-    "update": "Mettre à jour",
-    "deleting": "…"
+  "card": {
+    "title": "Parc de véhicules"
   },
-  "form": {
-    "editTitle": "Modifier le véhicule",
-    "newTitle": "Nouveau véhicule",
-    "registration": "Immatriculation *",
-    "registrationPlaceholder": "p. ex. VS 12345",
-    "make": "Marque",
-    "makePlaceholder": "p. ex. Mercedes",
-    "model": "Modèle",
-    "modelPlaceholder": "p. ex. Sprinter 314",
-    "assignedTeam": "Équipe affectée",
-    "assignedProject": "Projet affecté",
-    "none": "-- Aucun --",
-    "odometer": "Kilométrage (km)",
-    "odometerPlaceholder": "p. ex. 45230",
-    "nextServiceDate": "Date du prochain service",
-    "insuranceExpiry": "Échéance de l'assurance"
+  "actions": {
+    "new": "Nouveau véhicule",
+    "create": "Créer le véhicule",
+    "creating": "Création…",
+    "update": "Mettre à jour",
+    "updating": "Enregistrement…",
+    "rowActions": "Actions du véhicule"
+  },
+  "table": {
+    "registration": "Immatriculation",
+    "vehicle": "Marque et modèle",
+    "team": "Équipe",
+    "project": "Projet",
+    "odometer": "Kilométrage",
+    "odometerValue": "{{value}} km",
+    "service": "Service",
+    "insurance": "Assurance",
+    "createdAt": "Ajouté le",
+    "actions": "Actions",
+    "unassigned": "Non affecté",
+    "noProject": "Aucun projet"
   },
   "badges": {
     "serviceOverdue": "Service en retard",
@@ -32,25 +35,37 @@
     "insuranceExpiring": "Assurance bientôt échue",
     "insured": "Assuré"
   },
-  "card": {
-    "team": "Équipe :",
-    "unassigned": "Non affecté",
-    "project": "Projet :",
+  "form": {
+    "newTitle": "Nouveau véhicule",
+    "editTitle": "Modifier le véhicule",
+    "newHelp": "Le kilométrage et les échéances se saisissent après la création du véhicule.",
+    "editHelp": "Immatriculation, affectation, kilométrage et échéances du véhicule.",
+    "registration": "Immatriculation",
+    "registrationPlaceholder": "p. ex. VS 12345",
+    "make": "Marque",
+    "makePlaceholder": "p. ex. Mercedes",
+    "model": "Modèle",
+    "modelPlaceholder": "p. ex. Sprinter 314",
+    "assignedTeam": "Équipe affectée",
+    "noTeam": "Aucune équipe",
+    "assignedProject": "Projet affecté",
     "noProject": "Aucun projet",
-    "odometer": "Kilométrage :",
-    "odometerValue": "{{value}} km",
-    "added": "Ajouté le {{date}}",
-    "deleteConfirm": "Supprimer ce véhicule ?"
+    "odometer": "Kilométrage (km)",
+    "odometerPlaceholder": "p. ex. 45230",
+    "nextServiceDate": "Date du prochain service",
+    "insuranceExpiry": "Échéance de l'assurance"
   },
-  "state": {
-    "loading": "Chargement des véhicules…"
+  "summary": {
+    "count_one": "{{count}} véhicule sur {{total}}",
+    "count_other": "{{count}} véhicules sur {{total}}",
+    "sortedBy": "Triés par date d'ajout"
   },
   "empty": {
     "title": "Aucun véhicule pour l'instant",
     "text": "Ajoutez votre premier véhicule pour commencer le suivi de votre parc."
   },
-  "pagination": {
-    "page": "Page {{page}}"
+  "prompts": {
+    "deleteTitle": "Supprimer le véhicule {{registration}} ?"
   },
   "messages": {
     "loadFailed": "Impossible de charger les véhicules",

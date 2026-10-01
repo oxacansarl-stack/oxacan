@@ -3,15 +3,31 @@
   "searchPlaceholder": "Rechercher par nom, référence, chef de projet…",
   "allStatuses": "Tous les statuts",
   "loginRequired": "Connexion requise",
+  "filters": {
+    "all": "Tous",
+    "status": "Filtrer par statut"
+  },
   "table": {
     "reference": "Référence",
     "name": "Nom",
     "client": "Client",
     "status": "Statut",
     "progress": "Avancement",
+    "progressValue": "{{percent}} %",
     "budget": "Budget HT (CHF)",
     "manager": "Chef de projet",
     "startDate": "Date de début"
   },
-  "empty": "Aucun projet trouvé"
+  "summary": {
+    "active_one": "{{count}} projet en cours",
+    "active_other": "{{count}} projets en cours",
+    "count_one": "{{count}} projet sur {{total}}",
+    "count_other": "{{count}} projets sur {{total}}",
+    "sortedBy": "Triés du plus récent au plus ancien"
+  },
+  "empty": "Aucun projet trouvé",
+  "emptyHelp": "Un projet est créé depuis un contrat signé ; il apparaîtra ici automatiquement.",
+  "noMatch": "Aucun projet ne correspond",
+  "noMatchHelp": "Modifiez la recherche ou choisissez un autre statut.",
+  "loadFailed": "Impossible de charger les projets."
 }

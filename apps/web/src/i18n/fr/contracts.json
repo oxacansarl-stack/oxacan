@@ -1,17 +1,30 @@
 {
   "title": "Contrats",
   "loginRequired": "Connexion requise",
+  "loadFailed": "Impossible de charger les contrats.",
+  "createFailed": "Impossible de créer le contrat.",
+  "empty": "Aucun contrat",
+  "emptyHelp": "Un contrat se crée depuis une offre acceptée.",
+  "emptyFiltered": "Aucun contrat avec ce statut",
+  "emptyFilteredHelp": "Choisissez un autre statut ou affichez tous les contrats.",
   "actions": {
-    "createFromOffer": "+ Créer depuis une offre",
+    "createFromOffer": "Créer depuis une offre",
     "create": "Créer le contrat",
     "creating": "Création…"
   },
   "form": {
-    "selectLabel": "Sélectionnez une offre acceptée à partir de laquelle créer le contrat",
-    "selectOffer": "Sélectionner une offre *"
+    "title": "Nouveau contrat",
+    "help": "Sélectionnez une offre acceptée à partir de laquelle créer le contrat.",
+    "offer": "Offre acceptée",
+    "selectOffer": "Sélectionner une offre",
+    "offerOption": "{{reference}} — {{client}} · {{total}}",
+    "noOffers": "Aucune offre acceptée n'est disponible pour l'instant.",
+    "offersLoadFailed": "Impossible de charger les offres acceptées."
   },
   "filters": {
-    "allStatuses": "Tous les statuts"
+    "all": "Tous",
+    "status": "Filtrer par statut",
+    "showAll": "Afficher tous les contrats"
   },
   "table": {
     "reference": "Référence",
@@ -22,36 +35,58 @@
     "signedAt": "Date de signature",
     "createdAt": "Créé le"
   },
-  "empty": "Aucun contrat trouvé",
+  "summary": {
+    "count_one": "{{count}} contrat",
+    "count_other": "{{count}} contrats",
+    "sortedBy": "Triés par date de création"
+  },
   "detail": {
     "back": "Retour aux contrats",
     "fallbackTitle": "Contrat",
+    "moreActions": "Autres actions",
     "sign": "Signer le contrat",
     "signing": "Signature…",
+    "signFailed": "Impossible de signer le contrat.",
+    "loadFailed": "Impossible de charger le contrat.",
+    "notFound": "Contrat introuvable",
+    "notFoundHelp": "Ce contrat n'existe plus ou ne vous est pas accessible.",
     "viewOffer": "Voir l'offre",
     "viewProject": "Voir le projet",
     "summary": {
+      "title": "Résumé",
       "totalTtc": "Total TTC",
       "retentionRate": "Retenue de garantie",
+      "percent": "{{value}} %",
       "esignature": "Signature électronique",
       "signedAt": "Date de signature",
       "notSigned": "Non signé"
     }
   },
   "amendments": {
-    "title": "Avenants ({{count}})",
-    "add": "+ Ajouter un avenant",
+    "title": "Avenants",
+    "add": "Ajouter un avenant",
     "submit": "Ajouter l'avenant",
     "adding": "Ajout…",
+    "addFailed": "Impossible d'ajouter l'avenant.",
     "empty": "Aucun avenant",
+    "emptyHelp": "Un avenant enregistre une variation de montant convenue sur ce contrat.",
+    "count_one": "{{count}} avenant",
+    "count_other": "{{count}} avenants",
+    "delta": {
+      "positive": "+{{amount}}",
+      "negative": "-{{amount}}"
+    },
     "form": {
-      "description": "Description *",
-      "amountDelta": "Variation de montant (CHF)"
+      "title": "Nouvel avenant",
+      "help": "Le montant est exprimé en CHF ; une valeur négative réduit le montant du contrat.",
+      "description": "Description",
+      "amountDelta": "Variation de montant (CHF)",
+      "amountDeltaHint": "Négatif pour une réduction, par exemple -1500.00"
     },
     "table": {
       "number": "N°",
       "description": "Description",
-      "amountDelta": "Variation de montant (CHF)",
+      "amountDelta": "Variation (CHF)",
       "status": "Statut",
       "createdAt": "Créé le"
     }
@@ -60,6 +95,10 @@
     "title": "Notes",
     "edit": "Modifier les notes",
     "save": "Enregistrer les notes",
-    "empty": "Aucune note"
+    "saveFailed": "Impossible d'enregistrer les notes.",
+    "empty": "Aucune note",
+    "dialogTitle": "Notes du contrat",
+    "label": "Notes",
+    "hint": "Visibles uniquement en interne."
   }
 }

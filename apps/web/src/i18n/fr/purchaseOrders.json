@@ -1,33 +1,42 @@
 {
   "title": "Commandes",
   "actions": {
-    "new": "+ Nouvelle commande",
+    "new": "Nouvelle commande",
     "create": "Créer la commande",
     "creating": "Création…",
-    "addLine": "+ Ajouter une ligne",
+    "addLine": "Ajouter une ligne",
+    "adding": "Ajout…",
     "removeLine": "Retirer la ligne",
     "deleteLine": "Supprimer la ligne",
     "recordDelivery": "Enregistrer la livraison",
     "send": "Envoyer",
     "confirm": "Confirmer",
     "markDelivered": "Marquer comme livrée",
-    "cancelOrder": "Annuler la commande"
+    "cancelOrder": "Annuler la commande",
+    "orderActions": "Autres actions sur la commande",
+    "dismissAlert": "Masquer le message"
   },
   "tabs": {
     "all": "Toutes"
   },
+  "filters": {
+    "status": "Filtrer par statut"
+  },
   "form": {
     "title": "Nouvelle commande",
-    "supplier": "Fournisseur *",
-    "selectSupplier": "Sélectionner un fournisseur…",
-    "project": "Projet (facultatif)",
+    "help": "Un fournisseur et au moins une ligne sont nécessaires ; le projet reste facultatif.",
+    "supplier": "Fournisseur",
+    "selectSupplier": "Sélectionner un fournisseur",
+    "project": "Projet",
+    "projectHint": "Laissez vide pour une commande sans projet.",
     "noProject": "Aucun projet",
     "lines": "Lignes",
+    "line": "Ligne {{index}}",
     "description": "Description",
     "quantity": "Qté",
     "unit": "Unité",
     "unitPriceChf": "Prix unitaire (CHF)",
-    "total": "Total",
+    "lineTotal": "Total : {{amount}}",
     "totalHt": "Total HT : {{amount}}"
   },
   "table": {
@@ -37,16 +46,18 @@
     "status": "Statut",
     "totalHt": "Total HT",
     "expectedDelivery": "Livraison prévue",
-    "created": "Créée le"
+    "created": "Créée le",
+    "expand": "Détail de la commande"
   },
   "detail": {
-    "loading": "Chargement des détails…",
     "reference": "Référence",
     "supplier": "Fournisseur",
     "project": "Projet",
     "status": "Statut",
-    "noLines": "Aucune ligne sur cette commande.",
-    "addLine": "Ajouter une ligne",
+    "noLines": "Aucune ligne sur cette commande",
+    "noLinesHelp": "Ajoutez une ligne pour détailler ce qui est commandé.",
+    "addLineTitle": "Ajouter une ligne",
+    "addLineHelp": "La ligne est ajoutée à la commande {{reference}}.",
     "priceChf": "Prix (CHF)"
   },
   "lines": {
@@ -54,15 +65,39 @@
     "qtyOrdered": "Qté commandée",
     "qtyDelivered": "Qté livrée",
     "progress": "Avancement",
+    "progressValue": "{{percent}} %",
     "unitPrice": "Prix unitaire",
     "total": "Total",
-    "actions": "Actions"
+    "actions": "Actions",
+    "deliveryFor": "Quantité livrée pour « {{description}} »"
   },
-  "state": {
-    "loading": "Chargement des commandes…"
+  "units": {
+    "pce": "pce",
+    "m": "m",
+    "m2": "m²",
+    "m3": "m³",
+    "kg": "kg",
+    "l": "l",
+    "h": "h",
+    "fft": "fft"
+  },
+  "summary": {
+    "count_one": "{{count}} commande",
+    "count_other": "{{count}} commandes",
+    "total": "Total HT : {{amount}}"
   },
   "empty": {
-    "none": "Aucune commande trouvée."
+    "none": "Aucune commande trouvée",
+    "noneHelp": "Créez une commande pour suivre un achat fournisseur.",
+    "filtered": "Aucune commande dans ce statut",
+    "filteredHelp": "Choisissez un autre statut pour voir les autres commandes."
+  },
+  "prompts": {
+    "deleteLineTitle": "Supprimer cette ligne ?",
+    "deleteLineHelp": "La ligne « {{description}} » sera retirée de la commande.",
+    "cancelOrderTitle": "Annuler cette commande ?",
+    "cancelOrderHelp": "La commande {{reference}} passera au statut « Annulée ». Les lignes et les livraisons déjà enregistrées sont conservées.",
+    "keepOrder": "Garder la commande"
   },
   "messages": {
     "loadFailed": "Impossible de charger les commandes",
@@ -71,6 +106,9 @@
     "statusFailed": "Impossible de modifier le statut",
     "addLineFailed": "Impossible d'ajouter la ligne",
     "deleteLineFailed": "Impossible de supprimer la ligne",
-    "deliveryFailed": "Impossible d'enregistrer la livraison"
+    "deliveryFailed": "Impossible d'enregistrer la livraison",
+    "noValidLines": "Ajoutez au moins une ligne avec une description et une quantité supérieure à zéro.",
+    "descriptionRequired": "La description est obligatoire.",
+    "invalidQuantity": "Indiquez une quantité valide (0 ou plus)."
   }
 }

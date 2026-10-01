@@ -1,16 +1,39 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiList, apiPost } from '../lib/api';
+import { ArrowLeftRight, Package, Plus, TriangleAlert, Warehouse } from 'lucide-react';
+import { apiGet, apiList, apiPost, ApiError, type PageMeta } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { enumLabel, formatDate } from '../lib/format';
 import type { PageProps } from '../lib/page-props';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select } from '@/components/ui/input';
+import { Badge, Tag } from '@/components/ui/badge';
+import { DataState, EmptyState, Skeleton } from '@/components/states';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
+
+type LocationType = 'warehouse' | 'vehicle' | 'site';
+type MovementType = 'in' | 'out' | 'transfer' | 'adjustment';
 
 interface StockLocation {
   id: string;
   name: string;
-  type: 'warehouse' | 'vehicle' | 'site';
+  type: LocationType;
   address?: string;
   createdAt: string;
 }
@@ -30,7 +53,7 @@ interface StockMovement {
   id: string;
   stockItemId: string;
   stockItem?: { canonicalArticle?: { description?: string }; location?: { name: string } };
-  type: 'in' | 'out' | 'transfer' | 'adjustment';
+  type: MovementType;
   quantity: number;
   projectId?: string;
   project?: { name: string };
@@ -39,638 +62,865 @@ interface StockMovement {
   createdAt: string;
 }
 
-type Tab = 'Locations' | 'Items' | 'Movements';
+type StockTab = 'locations' | 'items' | 'movements';
 
-/* ── Style constants ───────────────────────────────────────────────── */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6,
-  fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px', borderRadius: 6, border: 'none',
-  background: '#2563eb', color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px', borderRadius: 6, border: '1px solid #d1d5db',
-  background: '#fff', color: '#374151', fontSize: 14, fontWeight: 500, cursor: 'pointer',
-};
-
-const typeBadgeColors: Record<string, { bg: string; color: string }> = {
-  warehouse: { bg: '#dbeafe', color: '#1d4ed8' },
-  vehicle:   { bg: '#fef3c7', color: '#92400e' },
-  site:      { bg: '#dcfce7', color: '#166534' },
-};
-
-const movementBadgeColors: Record<string, { bg: string; color: string }> = {
-  in:         { bg: '#dcfce7', color: '#166534' },
-  out:        { bg: '#fee2e2', color: '#991b1b' },
-  transfer:   { bg: '#dbeafe', color: '#1d4ed8' },
-  adjustment: { bg: '#fef3c7', color: '#92400e' },
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '10px 12px', fontSize: 12, fontWeight: 600,
-  color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em',
-  borderBottom: '2px solid #e5e7eb',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px', fontSize: 14, color: '#111827',
-  borderBottom: '1px solid #f3f4f6',
-};
+/** DB CHECK constraints; the labels come from the `enum.*` tables in common.json. */
+const LOCATION_TYPES: LocationType[] = ['warehouse', 'vehicle', 'site'];
+const MOVEMENT_TYPES: MovementType[] = ['in', 'out', 'transfer', 'adjustment'];
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
-const tabLabelKeys = { Locations: 'tabs.locations', Items: 'tabs.items', Movements: 'tabs.movements' } as const;
+/** An item is low when it has fallen to its threshold (no threshold means "never low"). */
+const isBelowThreshold = (item: StockItem) => item.quantity <= (item.minThreshold ?? 0);
 
-/* ── Sub-components ────────────────────────────────────────────────── */
-
-function Badge({ label, bg, color }: { label: string; bg: string; color: string }) {
-  return (
-    <span style={{
-      display: 'inline-block', padding: '2px 10px', borderRadius: 12,
-      fontSize: 12, fontWeight: 600, background: bg, color,
-    }}>
-      {label}
-    </span>
-  );
+/** Signed quantity: a sortie removes, an entrée adds, an ajustement keeps its own sign. */
+function movementQuantity(movement: StockMovement): string {
+  if (movement.type === 'out') return `- ${movement.quantity}`;
+  if (movement.type === 'in') return `+ ${movement.quantity}`;
+  if (movement.type === 'adjustment') {
+    return movement.quantity >= 0 ? `+ ${movement.quantity}` : `${movement.quantity}`;
+  }
+  return String(movement.quantity);
 }
 
-function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+/** The emplacement list, as the article and mouvement forms need it (unpaginated shape). */
+function useLocationOptions() {
+  return useQuery<StockLocation[], ApiError>({
+    queryKey: ['stock', 'locations', 'options'],
+    queryFn: () => apiGet<StockLocation[]>('/stock/locations?page=1&limit=100'),
+    retry: false,
+  });
+}
+
+/** Skeleton shaped like the card grid the emplacements tab loads into. */
+function CardGridSkeleton() {
   return (
-    <div style={{
-      padding: '10px 16px', marginBottom: 16, background: '#fee2e2', color: '#991b1b',
-      borderRadius: 6, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    }}>
-      <span>{message}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontWeight: 600 }}
-      >
-        &times;
-      </button>
+    <div className="grid gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton key={i} className="h-[88px]" />
+      ))}
     </div>
   );
 }
 
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div style={{
-      textAlign: 'center', padding: '48px 16px', color: '#6b7280', fontSize: 14,
-    }}>
-      {message}
-    </div>
-  );
-}
-
-function LoadingState() {
-  const { t } = useTranslation();
-  return (
-    <div style={{
-      textAlign: 'center', padding: '48px 16px', color: '#6b7280', fontSize: 14,
-    }}>
-      {t('state.loading')}
-    </div>
-  );
-}
-
-/* ── Locations Tab ─────────────────────────────────────────────────── */
+/* ── Emplacements ──────────────────────────────────────────────────── */
 
 function LocationsTab() {
   const { t } = useTranslation('stock');
-  const [locations, setLocations] = useState<StockLocation[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const queryClient = useQueryClient();
+
+  const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
-  const [type, setType] = useState<'warehouse' | 'vehicle' | 'site'>('warehouse');
+  const [type, setType] = useState<LocationType>('warehouse');
   const [address, setAddress] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { items, meta } = await apiList<StockLocation>('/stock/locations?page=1&limit=100');
-      setLocations(items);
-      setTotal(meta?.total ?? items.length);
-    } catch (err) {
-      setError(errorMessage(err, t('messages.loadLocationsFailed')));
-    }
-    setLoading(false);
-  }, [t]);
+  const locations = useQuery<{ items: StockLocation[]; meta?: PageMeta }, ApiError>({
+    queryKey: ['stock', 'locations', 'page'],
+    queryFn: () => apiList<StockLocation>('/stock/locations?page=1&limit=100'),
+    retry: false,
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const create = useMutation<unknown, ApiError, void>({
+    mutationFn: () =>
+      apiPost('/stock/locations', {
+        name: name.trim(),
+        type,
+        address: address.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setName('');
+      setAddress('');
+      setFormOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['stock', 'locations'] });
+    },
+  });
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      await apiPost('/stock/locations', { name: name.trim(), type, address: address.trim() || undefined });
-      setName(''); setAddress(''); setShowForm(false);
-      await load();
-    } catch (err) {
-      setError(errorMessage(err, t('messages.createLocationFailed')));
-    }
-    setSaving(false);
+  const rows = locations.data?.items ?? [];
+  const total = locations.data?.meta?.total ?? rows.length;
+  const nameValid = name.trim().length > 0;
+
+  const openForm = () => {
+    create.reset();
+    setFormOpen(true);
   };
 
-  if (loading) return <LoadingState />;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!nameValid || create.isPending) return;
+    create.mutate();
+  };
+
+  const newButton = (
+    <Button variant="primary" size="sm" onClick={openForm}>
+      <Plus />
+      {t('locations.new')}
+    </Button>
+  );
+
+  // The card header already carries the screen's primary action; the empty state only echoes it.
+  const emptyAction = (
+    <Button variant="ghost" size="sm" onClick={openForm}>
+      <Plus />
+      {t('locations.new')}
+    </Button>
+  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          {t('locations.heading', { count: total })}
-        </h3>
-        <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? t('common:actions.cancel') : t('locations.new')}
-        </button>
-      </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <Warehouse aria-hidden className="size-4 text-muted" />
+            {t('locations.title')}
+            {locations.isSuccess ? <CardCount>({total})</CardCount> : null}
+          </CardTitle>
+          {newButton}
+        </CardHeader>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-
-      {showForm && (
-        <form onSubmit={handleCreate} style={{
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-          padding: 20, marginBottom: 20,
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('locations.formTitle')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.name')}</label>
-              <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder={t('locations.namePlaceholder')} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.type')}</label>
-              <select style={inputStyle} value={type} onChange={e => setType(e.target.value as 'warehouse' | 'vehicle' | 'site')}>
-                <option value="warehouse">{enumLabel('stockLocationType', 'warehouse')}</option>
-                <option value="vehicle">{enumLabel('stockLocationType', 'vehicle')}</option>
-                <option value="site">{enumLabel('stockLocationType', 'site')}</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('locations.address')}</label>
-              <input style={inputStyle} value={address} onChange={e => setAddress(e.target.value)} placeholder={t('locations.optional')} />
-            </div>
-          </div>
-          <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? t('locations.creating') : t('locations.create')}
-          </button>
-        </form>
-      )}
-
-      {locations.length === 0 ? (
-        <EmptyState message={t('locations.empty')} />
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {locations.map(loc => {
-            const badge = typeBadgeColors[loc.type] ?? typeBadgeColors.warehouse;
-            return (
-              <div key={loc.id} style={{
-                background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-                padding: 16,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>{loc.name}</span>
-                  <Badge label={enumLabel('stockLocationType', loc.type)} bg={badge.bg} color={badge.color} />
+        <DataState
+          isLoading={locations.isPending}
+          error={
+            locations.isError
+              ? errorMessage(locations.error, t('messages.loadLocationsFailed'))
+              : null
+          }
+          onRetry={() => locations.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<CardGridSkeleton />}
+          empty={
+            <EmptyState
+              icon={<Warehouse className="size-5" />}
+              title={t('locations.empty')}
+              description={t('locations.emptyHelp')}
+              action={emptyAction}
+            />
+          }
+        >
+          <ul className="grid gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+            {rows.map((location) => (
+              <li
+                key={location.id}
+                className="grid content-start gap-1.5 rounded-md border border-line bg-paper-2 p-3.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 font-medium text-ink">{location.name}</span>
+                  <Tag>{enumLabel('stockLocationType', location.type)}</Tag>
                 </div>
-                {loc.address && (
-                  <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 4 }}>{loc.address}</div>
-                )}
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>{t('locations.created', { date: formatDate(loc.createdAt) })}</div>
+                {location.address ? (
+                  <p className="text-[13px] text-muted">{location.address}</p>
+                ) : null}
+                <p className="text-xs text-muted">
+                  {t('locations.created', { date: formatDate(location.createdAt) })}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </DataState>
+      </Card>
+
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent>
+          <form onSubmit={submit}>
+            <DialogHeader>
+              <DialogTitle>{t('locations.formTitle')}</DialogTitle>
+              <DialogDescription>{t('locations.formHelp')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field label={t('locations.name')} htmlFor="stock-location-name" required>
+                <Input
+                  id="stock-location-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t('locations.namePlaceholder')}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('locations.type')} htmlFor="stock-location-type" required>
+                  <Select
+                    id="stock-location-type"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as LocationType)}
+                  >
+                    {LOCATION_TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {enumLabel('stockLocationType', value)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('locations.address')} htmlFor="stock-location-address">
+                  <Input
+                    id="stock-location-address"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder={t('locations.optional')}
+                  />
+                </Field>
               </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              {create.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(create.error, t('messages.createLocationFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setFormOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={create.isPending}
+                blockedReason={nameValid ? undefined : t('locations.nameRequired')}
+              >
+                {create.isPending ? t('locations.creating') : t('locations.create')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-/* ── Items Tab ─────────────────────────────────────────────────────── */
+/* ── Articles ──────────────────────────────────────────────────────── */
 
 function ItemsTab() {
   const { t } = useTranslation('stock');
-  const [items, setItems] = useState<StockItem[]>([]);
-  const [locations, setLocations] = useState<StockLocation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const queryClient = useQueryClient();
+
   const [filterLocation, setFilterLocation] = useState('');
   const [belowOnly, setBelowOnly] = useState(false);
 
-  const [newArticleId, setNewArticleId] = useState('');
-  const [newLocationId, setNewLocationId] = useState('');
-  const [newQuantity, setNewQuantity] = useState('');
-  const [newThreshold, setNewThreshold] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [articleId, setArticleId] = useState('');
+  const [locationId, setLocationId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [threshold, setThreshold] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  // Paginated: the footer and the header count report the server's total, not the loaded page.
+  const items = useQuery<{ items: StockItem[]; meta?: PageMeta }, ApiError>({
+    queryKey: ['stock', 'items', { locationId: filterLocation, belowThreshold: belowOnly }],
+    queryFn: () => {
       const params = new URLSearchParams({ page: '1' });
       if (filterLocation) params.set('locationId', filterLocation);
       if (belowOnly) params.set('belowThreshold', 'true');
-      const [itemsRes, locsRes] = await Promise.all([
-        apiGet<StockItem[]>(`/stock/items?${params}`),
-        apiGet<StockLocation[]>('/stock/locations?page=1&limit=100'),
-      ]);
-      setItems(itemsRes ?? []);
-      setLocations(locsRes ?? []);
-    } catch (err) {
-      setError(errorMessage(err, t('messages.loadItemsFailed')));
-    }
-    setLoading(false);
-  }, [filterLocation, belowOnly, t]);
+      return apiList<StockItem>(`/stock/items?${params}`);
+    },
+    retry: false,
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const locations = useLocationOptions();
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newArticleId.trim() || !newLocationId) return;
-    setSaving(true);
-    try {
-      await apiPost('/stock/items', {
-        canonicalArticleId: newArticleId.trim(),
-        locationId: newLocationId,
-        quantity: newQuantity ? Number(newQuantity) : undefined,
-        minThreshold: newThreshold ? Number(newThreshold) : undefined,
-      });
-      setNewArticleId(''); setNewLocationId(''); setNewQuantity(''); setNewThreshold('');
-      setShowForm(false);
-      await load();
-    } catch (err) {
-      setError(errorMessage(err, t('messages.addItemFailed')));
-    }
-    setSaving(false);
+  const create = useMutation<unknown, ApiError, void>({
+    mutationFn: () =>
+      apiPost('/stock/items', {
+        canonicalArticleId: articleId.trim(),
+        locationId,
+        quantity: quantity ? Number(quantity) : undefined,
+        minThreshold: threshold ? Number(threshold) : undefined,
+      }),
+    onSuccess: () => {
+      setArticleId('');
+      setLocationId('');
+      setQuantity('');
+      setThreshold('');
+      setFormOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['stock', 'items'] });
+    },
+  });
+
+  const rows = items.data?.items ?? [];
+  const total = items.data?.meta?.total ?? rows.length;
+  const locationRows = locations.data ?? [];
+  const filtersActive = Boolean(filterLocation) || belowOnly;
+  const formValid = articleId.trim().length > 0 && locationId.length > 0;
+
+  // The two requests were loaded together before, so either failure is the view's failure:
+  // a broken emplacement list must not leave the article list looking merely empty.
+  const loadError = items.isError
+    ? errorMessage(items.error, t('messages.loadItemsFailed'))
+    : locations.isError
+      ? errorMessage(locations.error, t('messages.loadLocationsFailed'))
+      : null;
+
+  const reload = () => {
+    items.refetch();
+    locations.refetch();
   };
 
-  if (loading) return <LoadingState />;
+  const openForm = () => {
+    create.reset();
+    setFormOpen(true);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!formValid || create.isPending) return;
+    create.mutate();
+  };
+
+  const newButton = (
+    <Button variant="primary" size="sm" onClick={openForm}>
+      <Plus />
+      {t('items.new')}
+    </Button>
+  );
+
+  const emptyAction = (
+    <Button variant="ghost" size="sm" onClick={openForm}>
+      <Plus />
+      {t('items.new')}
+    </Button>
+  );
 
   return (
-    <div>
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ flex: '0 0 220px' }}>
-          <select style={inputStyle} value={filterLocation} onChange={e => setFilterLocation(e.target.value)}>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <Package aria-hidden className="size-4 text-muted" />
+            {t('items.title')}
+            {items.isSuccess ? <CardCount>({total})</CardCount> : null}
+          </CardTitle>
+          {newButton}
+        </CardHeader>
+
+        <div className="flex flex-wrap items-center gap-2.5 border-b border-line-soft p-3">
+          <Select
+            className="w-auto min-w-[200px] max-w-full"
+            aria-label={t('items.filterLocation')}
+            value={filterLocation}
+            onChange={(e) => setFilterLocation(e.target.value)}
+          >
             <option value="">{t('items.allLocations')}</option>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
+            {locationRows.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
+            ))}
+          </Select>
+          <Button
+            variant="ghost"
+            aria-pressed={belowOnly}
+            onClick={() => setBelowOnly((value) => !value)}
+            className={cn(
+              belowOnly && 'border-warn bg-warn-bg text-warn hover:border-warn hover:bg-warn-bg',
+            )}
+          >
+            <TriangleAlert />
+            {t('items.belowThresholdOnly')}
+          </Button>
         </div>
-        <button
-          style={{
-            ...btnOutline,
-            background: belowOnly ? '#fef3c7' : '#fff',
-            borderColor: belowOnly ? '#f59e0b' : '#d1d5db',
-            color: belowOnly ? '#92400e' : '#374151',
-          }}
-          onClick={() => setBelowOnly(v => !v)}
+
+        <DataState
+          isLoading={items.isPending || locations.isPending}
+          error={loadError}
+          onRetry={reload}
+          isEmpty={rows.length === 0}
+          empty={
+            filtersActive ? (
+              <EmptyState title={t('items.noMatch')} description={t('items.noMatchHelp')} />
+            ) : (
+              <EmptyState
+                icon={<Package className="size-5" />}
+                title={t('items.empty')}
+                description={t('items.emptyHelp')}
+                action={emptyAction}
+              />
+            )
+          }
         >
-          {belowOnly ? t('items.belowThresholdActive') : t('items.belowThresholdOnly')}
-        </button>
-        <div style={{ flex: 1 }} />
-        <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? t('common:actions.cancel') : t('items.new')}
-        </button>
-      </div>
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('items.table.article')}</TH>
+                  <TH>{t('items.table.location')}</TH>
+                  <TH numeric>{t('items.table.quantity')}</TH>
+                  <TH numeric>{t('items.table.minThreshold')}</TH>
+                  <TH>{t('items.table.status')}</TH>
+                  <TH>{t('items.table.created')}</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((item) => {
+                  const low = isBelowThreshold(item);
+                  return (
+                    <TR key={item.id} className={cn(low && '[&>td]:bg-warn-bg/40')}>
+                      <TD>
+                        <div className="font-medium">
+                          {item.canonicalArticle?.description ?? item.canonicalArticleId ?? '—'}
+                        </div>
+                        {item.canonicalArticle?.unit ? (
+                          <div className="text-xs text-muted">{item.canonicalArticle.unit}</div>
+                        ) : null}
+                      </TD>
+                      <TD>{item.location?.name ?? '—'}</TD>
+                      <TD numeric className={cn(low && 'font-medium text-warn')}>
+                        {item.quantity}
+                      </TD>
+                      <TD numeric className="text-muted">
+                        {item.minThreshold ?? 0}
+                      </TD>
+                      <TD>
+                        {low ? (
+                          <Badge tone="bad">{t('items.lowStock')}</Badge>
+                        ) : (
+                          <Badge tone="ok">{t('items.ok')}</Badge>
+                        )}
+                      </TD>
+                      <TD className="tnum whitespace-nowrap text-muted">
+                        {formatDate(item.createdAt)}
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('items.count', { count: rows.length, total })}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-
-      {showForm && (
-        <form onSubmit={handleCreate} style={{
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-          padding: 20, marginBottom: 20,
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('items.formTitle')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.articleId')}</label>
-              <input style={inputStyle} value={newArticleId} onChange={e => setNewArticleId(e.target.value)} placeholder={t('items.articleIdPlaceholder')} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.location')}</label>
-              <select style={inputStyle} value={newLocationId} onChange={e => setNewLocationId(e.target.value)}>
-                <option value="">{t('items.selectLocation')}</option>
-                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.quantity')}</label>
-              <input style={inputStyle} type="number" min={0} value={newQuantity} onChange={e => setNewQuantity(e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('items.minThreshold')}</label>
-              <input style={inputStyle} type="number" min={0} value={newThreshold} onChange={e => setNewThreshold(e.target.value)} placeholder="0" />
-            </div>
-          </div>
-          <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? t('items.adding') : t('items.add')}
-          </button>
-        </form>
-      )}
-
-      {items.length === 0 ? (
-        <EmptyState message={t('items.empty')} />
-      ) : (
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={thStyle}>{t('items.table.article')}</th>
-                <th style={thStyle}>{t('items.table.location')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('items.table.quantity')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('items.table.minThreshold')}</th>
-                <th style={thStyle}>{t('items.table.status')}</th>
-                <th style={thStyle}>{t('items.table.created')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(item => {
-                const isLow = item.quantity <= (item.minThreshold ?? 0);
-                return (
-                  <tr key={item.id} style={{
-                    borderLeft: isLow ? '3px solid #f59e0b' : '3px solid transparent',
-                    background: isLow ? '#fffbeb' : undefined,
-                  }}>
-                    <td style={tdStyle}>
-                      <div style={{ fontWeight: 500 }}>
-                        {item.canonicalArticle?.description ?? item.canonicalArticleId ?? '-'}
-                      </div>
-                      {item.canonicalArticle?.unit && (
-                        <div style={{ fontSize: 12, color: '#6b7280' }}>{item.canonicalArticle.unit}</div>
-                      )}
-                    </td>
-                    <td style={tdStyle}>{item.location?.name ?? '-'}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {item.quantity}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {item.minThreshold ?? 0}
-                    </td>
-                    <td style={tdStyle}>
-                      {isLow
-                        ? <Badge label={t('items.lowStock')} bg="#fee2e2" color="#991b1b" />
-                        : <Badge label={t('items.ok')} bg="#dcfce7" color="#166534" />
-                      }
-                    </td>
-                    <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>
-                      {formatDate(item.createdAt)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent>
+          <form onSubmit={submit}>
+            <DialogHeader>
+              <DialogTitle>{t('items.formTitle')}</DialogTitle>
+              <DialogDescription>{t('items.formHelp')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field
+                label={t('items.articleId')}
+                htmlFor="stock-item-article"
+                hint={t('items.articleIdHint')}
+                required
+              >
+                <Input
+                  id="stock-item-article"
+                  value={articleId}
+                  onChange={(e) => setArticleId(e.target.value)}
+                  placeholder={t('items.articleIdPlaceholder')}
+                />
+              </Field>
+              <Field label={t('items.location')} htmlFor="stock-item-location" required>
+                <Select
+                  id="stock-item-location"
+                  value={locationId}
+                  onChange={(e) => setLocationId(e.target.value)}
+                >
+                  <option value="">{t('items.selectLocation')}</option>
+                  {locationRows.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('items.quantity')} htmlFor="stock-item-quantity">
+                  <Input
+                    id="stock-item-quantity"
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    placeholder="0"
+                  />
+                </Field>
+                <Field label={t('items.minThreshold')} htmlFor="stock-item-threshold">
+                  <Input
+                    id="stock-item-threshold"
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    placeholder="0"
+                  />
+                </Field>
+              </div>
+              {create.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(create.error, t('messages.addItemFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setFormOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={create.isPending}
+                blockedReason={formValid ? undefined : t('items.requiredFields')}
+              >
+                {create.isPending ? t('items.adding') : t('items.add')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-/* ── Movements Tab ─────────────────────────────────────────────────── */
+/* ── Mouvements ────────────────────────────────────────────────────── */
 
 function MovementsTab() {
   const { t } = useTranslation('stock');
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [total, setTotal] = useState(0);
-  const [items, setItems] = useState<StockItem[]>([]);
-  const [locations, setLocations] = useState<StockLocation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const queryClient = useQueryClient();
 
-  const [newItemId, setNewItemId] = useState('');
-  const [newType, setNewType] = useState<'in' | 'out' | 'transfer' | 'adjustment'>('in');
-  const [newQty, setNewQty] = useState('');
-  const [newRef, setNewRef] = useState('');
-  const [newProjectId, setNewProjectId] = useState('');
-  const [newToLocationId, setNewToLocationId] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [stockItemId, setStockItemId] = useState('');
+  const [type, setType] = useState<MovementType>('in');
+  const [quantity, setQuantity] = useState('');
+  const [reference, setReference] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [toLocationId, setToLocationId] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [movRes, itemsRes, locsRes] = await Promise.all([
-        apiList<StockMovement>('/stock/movements?page=1'),
-        apiGet<StockItem[]>('/stock/items?page=1&limit=100'),
-        apiGet<StockLocation[]>('/stock/locations?page=1&limit=100'),
-      ]);
-      setMovements(movRes.items);
-      setTotal(movRes.meta?.total ?? movRes.items.length);
-      setItems(itemsRes ?? []);
-      setLocations(locsRes ?? []);
-    } catch (err) {
-      setError(errorMessage(err, t('messages.loadMovementsFailed')));
-    }
-    setLoading(false);
-  }, [t]);
+  const movements = useQuery<{ items: StockMovement[]; meta?: PageMeta }, ApiError>({
+    queryKey: ['stock', 'movements', 'page'],
+    queryFn: () => apiList<StockMovement>('/stock/movements?page=1'),
+    retry: false,
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const items = useQuery<StockItem[], ApiError>({
+    queryKey: ['stock', 'items', 'options'],
+    queryFn: () => apiGet<StockItem[]>('/stock/items?page=1&limit=100'),
+    retry: false,
+  });
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newItemId || !newQty) return;
-    const isTransfer = newType === 'transfer';
-    if (isTransfer && !newToLocationId) return;
-    const sourceItem = items.find(it => it.id === newItemId);
-    setSaving(true);
-    try {
-      await apiPost('/stock/movements', {
-        stockItemId: newItemId,
-        type: newType,
-        quantity: Number(newQty),
-        fromLocationId: isTransfer ? sourceItem?.locationId : undefined,
-        toLocationId: isTransfer ? newToLocationId : undefined,
-        reference: newRef.trim() || undefined,
-        projectId: newProjectId.trim() || undefined,
-      });
-      setNewItemId(''); setNewQty(''); setNewRef(''); setNewProjectId(''); setNewToLocationId('');
-      setShowForm(false);
-      await load();
-    } catch (err) {
-      setError(errorMessage(err, t('messages.recordMovementFailed')));
-    }
-    setSaving(false);
+  const locations = useLocationOptions();
+
+  const itemRows = items.data ?? [];
+  const locationRows = locations.data ?? [];
+  const rows = movements.data?.items ?? [];
+  const total = movements.data?.meta?.total ?? rows.length;
+
+  const isTransfer = type === 'transfer';
+  const sourceLocationId = itemRows.find((item) => item.id === stockItemId)?.locationId;
+  const formValid = Boolean(stockItemId) && Boolean(quantity) && (!isTransfer || Boolean(toLocationId));
+
+  const create = useMutation<unknown, ApiError, void>({
+    // A transfert moves the line out of the article's own emplacement into the chosen one.
+    mutationFn: () =>
+      apiPost('/stock/movements', {
+        stockItemId,
+        type,
+        quantity: Number(quantity),
+        fromLocationId: isTransfer ? sourceLocationId : undefined,
+        toLocationId: isTransfer ? toLocationId : undefined,
+        reference: reference.trim() || undefined,
+        projectId: projectId.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setStockItemId('');
+      setQuantity('');
+      setReference('');
+      setProjectId('');
+      setToLocationId('');
+      setFormOpen(false);
+      // A mouvement changes the quantities the articles tab shows, so the whole tree reloads.
+      queryClient.invalidateQueries({ queryKey: ['stock'] });
+    },
+  });
+
+  // The three requests were loaded together before: any failure is the view's failure.
+  const loadError = movements.isError
+    ? errorMessage(movements.error, t('messages.loadMovementsFailed'))
+    : items.isError
+      ? errorMessage(items.error, t('messages.loadItemsFailed'))
+      : locations.isError
+        ? errorMessage(locations.error, t('messages.loadLocationsFailed'))
+        : null;
+
+  const reload = () => {
+    movements.refetch();
+    items.refetch();
+    locations.refetch();
   };
 
-  function formatQty(mov: StockMovement): string {
-    if (mov.type === 'out') return `- ${mov.quantity}`;
-    if (mov.type === 'in') return `+ ${mov.quantity}`;
-    if (mov.type === 'adjustment') return mov.quantity >= 0 ? `+ ${mov.quantity}` : `${mov.quantity}`;
-    return String(mov.quantity);
-  }
+  const openForm = () => {
+    create.reset();
+    setFormOpen(true);
+  };
 
-  if (loading) return <LoadingState />;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!formValid || create.isPending) return;
+    create.mutate();
+  };
+
+  const blockedReason = !stockItemId || !quantity
+    ? t('movements.requiredFields')
+    : isTransfer && !toLocationId
+      ? t('movements.requiredToLocation')
+      : undefined;
+
+  const newButton = (
+    <Button variant="primary" size="sm" onClick={openForm}>
+      <Plus />
+      {t('movements.new')}
+    </Button>
+  );
+
+  const emptyAction = (
+    <Button variant="ghost" size="sm" onClick={openForm}>
+      <Plus />
+      {t('movements.new')}
+    </Button>
+  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: '#111827' }}>
-          {t('movements.heading', { count: total })}
-        </h3>
-        <button style={btnOutline} onClick={() => setShowForm(v => !v)}>
-          {showForm ? t('common:actions.cancel') : t('movements.new')}
-        </button>
-      </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <ArrowLeftRight aria-hidden className="size-4 text-muted" />
+            {t('movements.title')}
+            {movements.isSuccess ? <CardCount>({total})</CardCount> : null}
+          </CardTitle>
+          {newButton}
+        </CardHeader>
 
-      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
-
-      {showForm && (
-        <form onSubmit={handleCreate} style={{
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-          padding: 20, marginBottom: 20,
-        }}>
-          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12, color: '#111827' }}>{t('movements.formTitle')}</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.stockItem')}</label>
-              <select style={inputStyle} value={newItemId} onChange={e => setNewItemId(e.target.value)}>
-                <option value="">{t('movements.selectItem')}</option>
-                {items.map(it => (
-                  <option key={it.id} value={it.id}>
-                    {it.canonicalArticle?.description ?? it.canonicalArticleId ?? it.id}
-                    {it.location?.name ? ` (${it.location.name})` : ''}
-                  </option>
+        <DataState
+          isLoading={movements.isPending || items.isPending || locations.isPending}
+          error={loadError}
+          onRetry={reload}
+          isEmpty={rows.length === 0}
+          empty={
+            <EmptyState
+              icon={<ArrowLeftRight className="size-5" />}
+              title={t('movements.empty')}
+              description={t('movements.emptyHelp')}
+              action={emptyAction}
+            />
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('movements.table.date')}</TH>
+                  <TH>{t('movements.table.article')}</TH>
+                  <TH>{t('movements.table.location')}</TH>
+                  <TH>{t('movements.table.type')}</TH>
+                  <TH numeric>{t('movements.table.quantity')}</TH>
+                  <TH>{t('movements.table.project')}</TH>
+                  <TH>{t('movements.table.reference')}</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((movement) => (
+                  <TR key={movement.id}>
+                    <TD className="tnum whitespace-nowrap text-muted">
+                      {formatDate(movement.createdAt)}
+                    </TD>
+                    <TD className="font-medium">
+                      {movement.stockItem?.canonicalArticle?.description ?? '—'}
+                    </TD>
+                    <TD>{movement.stockItem?.location?.name ?? '—'}</TD>
+                    <TD>
+                      <Tag>{enumLabel('stockMovementType', movement.type)}</Tag>
+                    </TD>
+                    <TD
+                      numeric
+                      className={cn(
+                        'font-medium',
+                        movement.type === 'out' ? 'text-bad' : 'text-ok',
+                      )}
+                    >
+                      {movementQuantity(movement)}
+                    </TD>
+                    <TD className="text-muted">
+                      {movement.project?.name ?? movement.projectId ?? '—'}
+                    </TD>
+                    <TD>
+                      {movement.reference ? (
+                        <Ref>{movement.reference}</Ref>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </TD>
+                  </TR>
                 ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.type')}</label>
-              <select style={inputStyle} value={newType} onChange={e => setNewType(e.target.value as 'in' | 'out' | 'transfer' | 'adjustment')}>
-                <option value="in">{enumLabel('stockMovementType', 'in')}</option>
-                <option value="out">{enumLabel('stockMovementType', 'out')}</option>
-                <option value="transfer">{enumLabel('stockMovementType', 'transfer')}</option>
-                <option value="adjustment">{enumLabel('stockMovementType', 'adjustment')}</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.quantity')}</label>
-              <input style={inputStyle} type="number" min={0} value={newQty} onChange={e => setNewQty(e.target.value)} placeholder="0" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.reference')}</label>
-              <input style={inputStyle} value={newRef} onChange={e => setNewRef(e.target.value)} placeholder="BL-2024-001" />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.projectId')}</label>
-              <input style={inputStyle} value={newProjectId} onChange={e => setNewProjectId(e.target.value)} placeholder={t('movements.optional')} />
-            </div>
-            {newType === 'transfer' && (
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('movements.toLocation')}</label>
-                <select style={inputStyle} value={newToLocationId} onChange={e => setNewToLocationId(e.target.value)}>
-                  <option value="">{t('movements.selectLocation')}</option>
-                  {locations
-                    .filter(l => l.id !== items.find(it => it.id === newItemId)?.locationId)
-                    .map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-          <button type="submit" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-            {saving ? t('movements.recording') : t('movements.record')}
-          </button>
-        </form>
-      )}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('movements.count', { count: rows.length, total })}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
 
-      {movements.length === 0 ? (
-        <EmptyState message={t('movements.empty')} />
-      ) : (
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={thStyle}>{t('movements.table.date')}</th>
-                <th style={thStyle}>{t('movements.table.article')}</th>
-                <th style={thStyle}>{t('movements.table.location')}</th>
-                <th style={thStyle}>{t('movements.table.type')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('movements.table.quantity')}</th>
-                <th style={thStyle}>{t('movements.table.project')}</th>
-                <th style={thStyle}>{t('movements.table.reference')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movements.map(mov => {
-                const badge = movementBadgeColors[mov.type] ?? movementBadgeColors.in;
-                return (
-                  <tr key={mov.id}>
-                    <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13, whiteSpace: 'nowrap' }}>
-                      {formatDate(mov.createdAt)}
-                    </td>
-                    <td style={tdStyle}>
-                      {mov.stockItem?.canonicalArticle?.description ?? '-'}
-                    </td>
-                    <td style={tdStyle}>
-                      {mov.stockItem?.location?.name ?? '-'}
-                    </td>
-                    <td style={tdStyle}>
-                      <Badge label={enumLabel('stockMovementType', mov.type)} bg={badge.bg} color={badge.color} />
-                    </td>
-                    <td style={{
-                      ...tdStyle, textAlign: 'right', fontWeight: 600,
-                      fontVariantNumeric: 'tabular-nums',
-                      color: mov.type === 'out' ? '#991b1b' : '#166534',
-                    }}>
-                      {formatQty(mov)}
-                    </td>
-                    <td style={{ ...tdStyle, color: '#6b7280' }}>
-                      {mov.project?.name ?? mov.projectId ?? '-'}
-                    </td>
-                    <td style={{ ...tdStyle, color: '#6b7280', fontSize: 13 }}>
-                      {mov.reference ?? '-'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent>
+          <form onSubmit={submit}>
+            <DialogHeader>
+              <DialogTitle>{t('movements.formTitle')}</DialogTitle>
+              <DialogDescription>{t('movements.formHelp')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field label={t('movements.stockItem')} htmlFor="stock-movement-item" required>
+                <Select
+                  id="stock-movement-item"
+                  value={stockItemId}
+                  onChange={(e) => setStockItemId(e.target.value)}
+                >
+                  <option value="">{t('movements.selectItem')}</option>
+                  {itemRows.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.canonicalArticle?.description ?? item.canonicalArticleId ?? item.id}
+                      {item.location?.name ? ` (${item.location.name})` : ''}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('movements.type')} htmlFor="stock-movement-type" required>
+                  <Select
+                    id="stock-movement-type"
+                    value={type}
+                    onChange={(e) => setType(e.target.value as MovementType)}
+                  >
+                    {MOVEMENT_TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {enumLabel('stockMovementType', value)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('movements.quantity')} htmlFor="stock-movement-quantity" required>
+                  <Input
+                    id="stock-movement-quantity"
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    placeholder="0"
+                  />
+                </Field>
+              </div>
+              {isTransfer ? (
+                <Field
+                  label={t('movements.toLocation')}
+                  htmlFor="stock-movement-to-location"
+                  required
+                >
+                  <Select
+                    id="stock-movement-to-location"
+                    value={toLocationId}
+                    onChange={(e) => setToLocationId(e.target.value)}
+                  >
+                    <option value="">{t('movements.selectLocation')}</option>
+                    {locationRows
+                      .filter((location) => location.id !== sourceLocationId)
+                      .map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name}
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('movements.reference')} htmlFor="stock-movement-reference">
+                  <Input
+                    id="stock-movement-reference"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value)}
+                    placeholder={t('movements.referencePlaceholder')}
+                  />
+                </Field>
+                <Field label={t('movements.projectId')} htmlFor="stock-movement-project">
+                  <Input
+                    id="stock-movement-project"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    placeholder={t('movements.optional')}
+                  />
+                </Field>
+              </div>
+              {create.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(create.error, t('messages.recordMovementFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setFormOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={create.isPending}
+                blockedReason={blockedReason}
+              >
+                {create.isPending ? t('movements.recording') : t('movements.record')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-/* ── Main Stock Page ───────────────────────────────────────────────── */
+/* ── Page ──────────────────────────────────────────────────────────── */
 
-const tabs: Tab[] = ['Locations', 'Items', 'Movements'];
-
+/**
+ * Stock: emplacements, articles and mouvements. Rendered as the first tab of
+ * Stock & matériel (`StockMaterial`), so it draws no header of its own when embedded.
+ * The sub-tab stays in local state: the host page owns `?tab=`.
+ */
 export default function Stock({ embedded = false }: PageProps) {
   const { t } = useTranslation('stock');
-  const [activeTab, setActiveTab] = useState<Tab>('Locations');
+  const [tab, setTab] = useState<StockTab>('locations');
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 4 }}>
-        {t('title')}
-      </h2>
-      <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 20, marginTop: 0 }}>
-        {t('subtitle')}
-      </p>
+    <PageBody>
+      {embedded ? null : (
+        <PageHeader
+          title={t('title')}
+          kicker={t('common:navGroup.procurement')}
+          meta={t('subtitle')}
+        />
+      )}
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {tabs.map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
-            padding: '6px 16px', borderRadius: 6, border: '1px solid #e5e7eb',
-            background: activeTab === tab ? '#2563eb' : '#fff',
-            color: activeTab === tab ? '#fff' : '#4b5563',
-            fontSize: 13, fontWeight: 500, cursor: 'pointer',
-          }}>{t(tabLabelKeys[tab])}</button>
-        ))}
-      </div>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as StockTab)} className="grid gap-5">
+        <TabsList aria-label={t('tabs.label')}>
+          <TabsTrigger value="locations">
+            <Warehouse />
+            {t('tabs.locations')}
+          </TabsTrigger>
+          <TabsTrigger value="items">
+            <Package />
+            {t('tabs.items')}
+          </TabsTrigger>
+          <TabsTrigger value="movements">
+            <ArrowLeftRight />
+            {t('tabs.movements')}
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Tab content */}
-      <div style={{ background: '#f8f9fa', borderRadius: 8, padding: 20 }}>
-        {activeTab === 'Locations' && <LocationsTab />}
-        {activeTab === 'Items' && <ItemsTab />}
-        {activeTab === 'Movements' && <MovementsTab />}
-      </div>
-    </div>
+        <TabsContent value="locations">
+          <LocationsTab />
+        </TabsContent>
+        <TabsContent value="items">
+          <ItemsTab />
+        </TabsContent>
+        <TabsContent value="movements">
+          <MovementsTab />
+        </TabsContent>
+      </Tabs>
+    </PageBody>
   );
 }

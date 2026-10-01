@@ -1,9 +1,34 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, type FormEvent, type SyntheticEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiList, apiPost, apiPut, apiDelete } from '../lib/api';
+import { MoreHorizontal, Pencil, Plus, Trash2, Truck } from 'lucide-react';
+import { apiDelete, apiGet, apiList, apiPost, apiPut, ApiError, type PageMeta } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { formatDate, formatNumber } from '../lib/format';
 import type { PageProps } from '../lib/page-props';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Field, Input, Select } from '@/components/ui/input';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
 
 interface Vehicle {
   id: string;
@@ -42,48 +67,7 @@ interface VehicleForm {
   insuranceExpiry: string;
 }
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = { ...btnPrimary, background: '#dc2626' };
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-function daysUntil(dateStr?: string): number | null {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  const now = new Date();
-  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-const emptyForm: VehicleForm = {
+const EMPTY_FORM: VehicleForm = {
   registration: '',
   make: '',
   model: '',
@@ -94,569 +78,444 @@ const emptyForm: VehicleForm = {
   insuranceExpiry: '',
 };
 
+/** A service or insurance date within 30 days is a warning, a past one a failure. */
+const SOON_DAYS = 30;
+
+function daysUntil(dateStr?: string): number | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  const now = new Date();
+  return Math.ceil((d.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * The API's DTO: optional fields are omitted when blank rather than sent empty, and the three
+ * maintenance fields are accepted on update only — a new vehicle carries its identity alone.
+ */
+function toPayload(form: VehicleForm, editing: boolean): Record<string, unknown> {
+  const body: Record<string, unknown> = { registration: form.registration.trim() };
+  if (form.make.trim()) body.make = form.make.trim();
+  if (form.model.trim()) body.model = form.model.trim();
+  if (form.assignedTeamId) body.assignedTeamId = form.assignedTeamId;
+  if (form.assignedProjectId) body.assignedProjectId = form.assignedProjectId;
+  if (editing) {
+    if (form.odometerKm.trim()) body.odometerKm = Math.round(Number(form.odometerKm));
+    if (form.nextServiceDate) body.nextServiceDate = form.nextServiceDate;
+    if (form.insuranceExpiry) body.insuranceExpiry = form.insuranceExpiry;
+  }
+  return body;
+}
+
+/** The row opens the vehicle; the overflow menu must not re-trigger it. */
+const stopRowActivation = (event: SyntheticEvent) => event.stopPropagation();
+
+const DASH = <span className="text-muted">—</span>;
+
 export default function Vehicles({ embedded = false }: PageProps) {
   const { t } = useTranslation('vehicles');
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<VehicleForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
-
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
 
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<VehicleForm>(EMPTY_FORM);
 
-  const fetchVehicles = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const { items, meta } = await apiList<Vehicle>(`/vehicles?page=${page}`);
-      setVehicles(items);
-      setTotal(meta?.total ?? items.length);
-      setTotalPages(Math.max(1, meta?.totalPages ?? 1));
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.loadFailed')));
-    } finally {
-      setLoading(false);
-    }
-  }, [page, t]);
+  const vehicles = useQuery<{ items: Vehicle[]; meta: PageMeta }, ApiError>({
+    queryKey: ['vehicles', page],
+    queryFn: () => apiList<Vehicle>(`/vehicles?page=${page}`),
+    retry: false,
+  });
 
-  const fetchDropdowns = useCallback(async () => {
-    try {
-      const [teamsRes, projectsRes] = await Promise.all([
-        apiGet<Team[]>('/hr/teams'),
-        apiGet<Project[]>('/projects'),
-      ]);
-      setTeams(teamsRes ?? []);
-      setProjects(projectsRes ?? []);
-    } catch {
-      // Dropdowns are non-critical; silently ignore
-    }
-  }, []);
+  // The two dropdowns are non-critical: a failure leaves the lists empty instead of blocking.
+  const teams = useQuery<Team[], ApiError>({
+    queryKey: ['teams-list'],
+    queryFn: () => apiGet<Team[]>('/hr/teams'),
+    retry: false,
+  });
 
-  useEffect(() => {
-    fetchVehicles();
-  }, [fetchVehicles]);
+  const projects = useQuery<Project[], ApiError>({
+    queryKey: ['projects-list'],
+    queryFn: () => apiGet<Project[]>('/projects'),
+    retry: false,
+  });
 
-  useEffect(() => {
-    fetchDropdowns();
-  }, [fetchDropdowns]);
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['vehicles'] });
+
+  const save = useMutation<unknown, ApiError, { id: string | null; form: VehicleForm }>({
+    mutationFn: ({ id, form: values }) =>
+      id ? apiPut(`/vehicles/${id}`, toPayload(values, true)) : apiPost('/vehicles', toPayload(values, false)),
+    onSuccess: () => {
+      invalidate();
+      closeForm();
+    },
+  });
+
+  const remove = useMutation<unknown, ApiError, string>({
+    mutationFn: (id) => apiDelete(`/vehicles/${id}`),
+    onSuccess: () => invalidate(),
+  });
+
+  const rows = vehicles.data?.items ?? [];
+  const meta = vehicles.data?.meta;
+  const total = meta?.total ?? rows.length;
+  const totalPages = Math.max(1, meta?.totalPages ?? 1);
 
   const openCreate = () => {
     setEditingId(null);
-    setForm(emptyForm);
-    setShowForm(true);
+    setForm(EMPTY_FORM);
+    save.reset();
+    setFormOpen(true);
   };
 
-  const openEdit = (v: Vehicle) => {
-    setEditingId(v.id);
+  const openEdit = (vehicle: Vehicle) => {
+    setEditingId(vehicle.id);
     setForm({
-      registration: v.registration,
-      make: v.make ?? '',
-      model: v.model ?? '',
-      assignedTeamId: v.assignedTeamId ?? '',
-      assignedProjectId: v.assignedProjectId ?? '',
-      odometerKm: v.odometerKm != null ? String(v.odometerKm) : '',
-      nextServiceDate: v.nextServiceDate ? v.nextServiceDate.slice(0, 10) : '',
-      insuranceExpiry: v.insuranceExpiry ? v.insuranceExpiry.slice(0, 10) : '',
+      registration: vehicle.registration,
+      make: vehicle.make ?? '',
+      model: vehicle.model ?? '',
+      assignedTeamId: vehicle.assignedTeamId ?? '',
+      assignedProjectId: vehicle.assignedProjectId ?? '',
+      odometerKm: vehicle.odometerKm != null ? String(vehicle.odometerKm) : '',
+      nextServiceDate: vehicle.nextServiceDate ? vehicle.nextServiceDate.slice(0, 10) : '',
+      insuranceExpiry: vehicle.insuranceExpiry ? vehicle.insuranceExpiry.slice(0, 10) : '',
     });
-    setShowForm(true);
+    save.reset();
+    setFormOpen(true);
   };
 
-  const closeForm = () => {
-    setShowForm(false);
+  function closeForm() {
+    setFormOpen(false);
     setEditingId(null);
-    setForm(emptyForm);
+    setForm(EMPTY_FORM);
+  }
+
+  const formValid = form.registration.trim().length > 0;
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!formValid || save.isPending) return;
+    save.mutate({ id: editingId, form });
   };
 
-  const handleChange = (field: keyof VehicleForm, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  const handleDelete = async (vehicle: Vehicle) => {
+    if (
+      !(await confirm({
+        title: t('prompts.deleteTitle', { registration: vehicle.registration }),
+        description: t('common:confirm.irreversible'),
+      }))
+    ) {
+      return;
+    }
+    remove.mutate(vehicle.id);
   };
 
-  const handleSubmit = async () => {
-    if (!form.registration.trim()) return;
-    setSaving(true);
-    try {
-      const body: Record<string, any> = {
-        registration: form.registration.trim(),
-      };
-      if (form.make.trim()) body.make = form.make.trim();
-      if (form.model.trim()) body.model = form.model.trim();
-      if (form.assignedTeamId) body.assignedTeamId = form.assignedTeamId;
-      if (form.assignedProjectId) body.assignedProjectId = form.assignedProjectId;
-
-      if (editingId) {
-        if (form.odometerKm.trim()) body.odometerKm = Math.round(Number(form.odometerKm));
-        if (form.nextServiceDate) body.nextServiceDate = form.nextServiceDate;
-        if (form.insuranceExpiry) body.insuranceExpiry = form.insuranceExpiry;
-        await apiPut(`/vehicles/${editingId}`, body);
-      } else {
-        await apiPost('/vehicles', body);
-      }
-      closeForm();
-      await fetchVehicles();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.saveFailed')));
-    } finally {
-      setSaving(false);
-    }
+  /** Due-date pill: overdue, due within a month, or in order. */
+  const dueBadge = (date: string | undefined, labels: { overdue: string; soon: string; ok: string }) => {
+    const days = daysUntil(date);
+    if (days === null) return DASH;
+    if (days < 0) return <Badge tone="bad">{t(labels.overdue)}</Badge>;
+    if (days <= SOON_DAYS) return <Badge tone="warn">{t(labels.soon)}</Badge>;
+    return <Badge tone="ok">{t(labels.ok)}</Badge>;
   };
 
-  const handleDelete = async (id: string) => {
-    setDeleting(true);
-    try {
-      await apiDelete(`/vehicles/${id}`);
-      setDeleteConfirmId(null);
-      await fetchVehicles();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.deleteFailed')));
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const renderServiceBadge = (v: Vehicle) => {
-    const days = daysUntil(v.nextServiceDate);
-    if (days === null) return null;
-    if (days < 0) {
-      return (
-        <span style={{ ...badgeBase, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-          {t('badges.serviceOverdue')}
-        </span>
-      );
-    }
-    if (days <= 30) {
-      return (
-        <span style={{ ...badgeBase, background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' }}>
-          {t('badges.serviceSoon')}
-        </span>
-      );
-    }
-    return (
-      <span style={{ ...badgeBase, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-        {t('badges.serviceOk')}
-      </span>
-    );
-  };
-
-  const renderInsuranceBadge = (v: Vehicle) => {
-    const days = daysUntil(v.insuranceExpiry);
-    if (days === null) return null;
-    if (days < 0) {
-      return (
-        <span style={{ ...badgeBase, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-          {t('badges.insuranceExpired')}
-        </span>
-      );
-    }
-    if (days <= 30) {
-      return (
-        <span style={{ ...badgeBase, background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' }}>
-          {t('badges.insuranceExpiring')}
-        </span>
-      );
-    }
-    return (
-      <span style={{ ...badgeBase, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
-        {t('badges.insured')}
-      </span>
-    );
-  };
+  const newButton = (
+    <Button variant="primary" onClick={openCreate}>
+      <Plus />
+      {t('actions.new')}
+    </Button>
+  );
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
-          <span style={{ fontSize: 14, color: '#6b7280' }}>
-            {t('count', { count: total })}
-          </span>
-        </div>
-        <button style={btnPrimary} onClick={openCreate}>
-          {t('actions.add')}
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div
-          style={{
-            padding: '12px 16px',
-            marginBottom: 16,
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: 8,
-            color: '#dc2626',
-            fontSize: 14,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span>{error}</span>
-          <button
-            onClick={() => setError(null)}
-            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16 }}
-          >
-            x
-          </button>
-        </div>
+    <PageBody>
+      {embedded ? null : (
+        <PageHeader
+          title={t('title')}
+          kicker={t('common:navGroup.procurement')}
+          meta={total > 0 ? <span>{t('count', { count: total })}</span> : undefined}
+          actions={newButton}
+        />
       )}
 
-      {/* Create / Edit form */}
-      {showForm && (
-        <div
-          style={{
-            marginBottom: 24,
-            padding: 20,
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 10,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-          }}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('card.title')}
+            {vehicles.isPending ? null : <CardCount>{total}</CardCount>}
+          </CardTitle>
+          {embedded ? newButton : null}
+        </CardHeader>
+
+        {remove.isError ? (
+          <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+            {errorMessage(remove.error, t('messages.deleteFailed'))}
+          </p>
+        ) : null}
+
+        <DataState
+          isLoading={vehicles.isPending}
+          error={vehicles.isError ? errorMessage(vehicles.error, t('messages.loadFailed')) : null}
+          onRetry={() => vehicles.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<TableSkeleton rows={5} cols={7} />}
+          empty={
+            <EmptyState
+              icon={<Truck className="size-5" />}
+              title={t('empty.title')}
+              description={t('empty.text')}
+              action={
+                <Button variant="ghost" size="sm" onClick={openCreate}>
+                  <Plus />
+                  {t('actions.new')}
+                </Button>
+              }
+            />
+          }
         >
-          <h2 style={{ margin: '0 0 16px 0', fontSize: 18, fontWeight: 600, color: '#111827' }}>
-            {editingId ? t('form.editTitle') : t('form.newTitle')}
-          </h2>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
-            {/* Registration */}
-            <div>
-              <label style={labelStyle}>{t('form.registration')}</label>
-              <input
-                style={inputStyle}
-                value={form.registration}
-                onChange={(e) => handleChange('registration', e.target.value)}
-                placeholder={t('form.registrationPlaceholder')}
-              />
-            </div>
-
-            {/* Make */}
-            <div>
-              <label style={labelStyle}>{t('form.make')}</label>
-              <input
-                style={inputStyle}
-                value={form.make}
-                onChange={(e) => handleChange('make', e.target.value)}
-                placeholder={t('form.makePlaceholder')}
-              />
-            </div>
-
-            {/* Model */}
-            <div>
-              <label style={labelStyle}>{t('form.model')}</label>
-              <input
-                style={inputStyle}
-                value={form.model}
-                onChange={(e) => handleChange('model', e.target.value)}
-                placeholder={t('form.modelPlaceholder')}
-              />
-            </div>
-
-            {/* Assigned Team */}
-            <div>
-              <label style={labelStyle}>{t('form.assignedTeam')}</label>
-              <select
-                style={inputStyle}
-                value={form.assignedTeamId}
-                onChange={(e) => handleChange('assignedTeamId', e.target.value)}
-              >
-                <option value="">{t('form.none')}</option>
-                {teams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Assigned Project */}
-            <div>
-              <label style={labelStyle}>{t('form.assignedProject')}</label>
-              <select
-                style={inputStyle}
-                value={form.assignedProjectId}
-                onChange={(e) => handleChange('assignedProjectId', e.target.value)}
-              >
-                <option value="">{t('form.none')}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.reference ? `${p.reference} - ${p.name}` : p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Edit-only fields */}
-            {editingId && (
-              <>
-                <div>
-                  <label style={labelStyle}>{t('form.odometer')}</label>
-                  <input
-                    style={inputStyle}
-                    type="number"
-                    value={form.odometerKm}
-                    onChange={(e) => handleChange('odometerKm', e.target.value)}
-                    placeholder={t('form.odometerPlaceholder')}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>{t('form.nextServiceDate')}</label>
-                  <input
-                    style={inputStyle}
-                    type="date"
-                    value={form.nextServiceDate}
-                    onChange={(e) => handleChange('nextServiceDate', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={labelStyle}>{t('form.insuranceExpiry')}</label>
-                  <input
-                    style={inputStyle}
-                    type="date"
-                    value={form.insuranceExpiry}
-                    onChange={(e) => handleChange('insuranceExpiry', e.target.value)}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
-            <button style={btnPrimary} onClick={handleSubmit} disabled={saving}>
-              {saving ? t('common:actions.saving') : editingId ? t('actions.update') : t('common:actions.create')}
-            </button>
-            <button style={btnOutline} onClick={closeForm} disabled={saving}>
-              {t('common:actions.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Loading state */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 15 }}>
-          {t('state.loading')}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && vehicles.length === 0 && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: 48,
-            background: '#f8f9fa',
-            borderRadius: 10,
-            border: '1px dashed #d1d5db',
-          }}
-        >
-          <div style={{ fontSize: 36, marginBottom: 8 }}>&#128666;</div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 4 }}>{t('empty.title')}</div>
-          <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>
-            {t('empty.text')}
-          </div>
-          <button style={btnPrimary} onClick={openCreate}>
-            {t('actions.add')}
-          </button>
-        </div>
-      )}
-
-      {/* Vehicle grid */}
-      {!loading && vehicles.length > 0 && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-            gap: 20,
-          }}
-        >
-          {vehicles.map((v) => (
-            <div
-              key={v.id}
-              style={{
-                background: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: 10,
-                overflow: 'hidden',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              {/* License plate header */}
-              <div
-                style={{
-                  background: '#111827',
-                  color: '#fff',
-                  padding: '14px 16px',
-                  textAlign: 'center',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: '6px 20px',
-                    border: '2px solid #fff',
-                    borderRadius: 6,
-                    fontSize: 20,
-                    fontWeight: 700,
-                    letterSpacing: 2,
-                    fontFamily: 'monospace',
-                  }}
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('table.registration')}</TH>
+                  <TH>{t('table.vehicle')}</TH>
+                  <TH>{t('table.team')}</TH>
+                  <TH>{t('table.project')}</TH>
+                  <TH numeric>{t('table.odometer')}</TH>
+                  <TH>{t('table.service')}</TH>
+                  <TH>{t('table.insurance')}</TH>
+                  <TH>{t('table.createdAt')}</TH>
+                  <TH className="w-11">
+                    <span className="sr-only">{t('table.actions')}</span>
+                  </TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((vehicle) => {
+                  const name = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
+                  return (
+                    <TR key={vehicle.id} onActivate={() => openEdit(vehicle)}>
+                      <TD>
+                        <Ref className="text-[13px] text-ink">{vehicle.registration}</Ref>
+                      </TD>
+                      <TD className="font-medium">{name || DASH}</TD>
+                      <TD>
+                        {vehicle.assignedTeam?.name ?? (
+                          <span className="text-muted">{t('table.unassigned')}</span>
+                        )}
+                      </TD>
+                      <TD>
+                        {vehicle.assignedProject?.name ?? (
+                          <span className="text-muted">{t('table.noProject')}</span>
+                        )}
+                      </TD>
+                      <TD numeric>
+                        {vehicle.odometerKm != null
+                          ? t('table.odometerValue', { value: formatNumber(vehicle.odometerKm) })
+                          : '—'}
+                      </TD>
+                      <TD>
+                        {dueBadge(vehicle.nextServiceDate, {
+                          overdue: 'badges.serviceOverdue',
+                          soon: 'badges.serviceSoon',
+                          ok: 'badges.serviceOk',
+                        })}
+                      </TD>
+                      <TD>
+                        {dueBadge(vehicle.insuranceExpiry, {
+                          overdue: 'badges.insuranceExpired',
+                          soon: 'badges.insuranceExpiring',
+                          ok: 'badges.insured',
+                        })}
+                      </TD>
+                      <TD className="tnum text-muted">{formatDate(vehicle.createdAt)}</TD>
+                      <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="quiet" size="iconSm" aria-label={t('actions.rowActions')}>
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onSelect={() => openEdit(vehicle)}>
+                              <Pencil />
+                              {t('common:actions.edit')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-bad"
+                              disabled={remove.isPending}
+                              onSelect={() => {
+                                void handleDelete(vehicle);
+                              }}
+                            >
+                              <Trash2 />
+                              {t('common:actions.delete')}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: rows.length, total })}</span>
+            {totalPages > 1 ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  {v.registration}
-                </div>
-                {v.make || v.model ? (
-                  <div style={{ marginTop: 6, fontSize: 13, color: '#9ca3af' }}>
-                    {[v.make, v.model].filter(Boolean).join(' ')}
-                  </div>
-                ) : null}
+                  {t('common:actions.previous')}
+                </Button>
+                <span className="tnum">{t('common:state.page', { page, total: totalPages })}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  {t('common:actions.next')}
+                </Button>
+              </div>
+            ) : (
+              <span>{t('summary.sortedBy')}</span>
+            )}
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      <Dialog
+        open={formOpen}
+        onOpenChange={(open) => {
+          if (!open) closeForm();
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={handleSubmit}>
+            <DialogHeader>
+              <DialogTitle>{editingId ? t('form.editTitle') : t('form.newTitle')}</DialogTitle>
+              <DialogDescription>{editingId ? t('form.editHelp') : t('form.newHelp')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field label={t('form.registration')} htmlFor="vehicle-registration" required>
+                <Input
+                  id="vehicle-registration"
+                  value={form.registration}
+                  placeholder={t('form.registrationPlaceholder')}
+                  onChange={(e) => setForm({ ...form, registration: e.target.value })}
+                  required
+                />
+              </Field>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t('form.make')} htmlFor="vehicle-make">
+                  <Input
+                    id="vehicle-make"
+                    value={form.make}
+                    placeholder={t('form.makePlaceholder')}
+                    onChange={(e) => setForm({ ...form, make: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('form.model')} htmlFor="vehicle-model">
+                  <Input
+                    id="vehicle-model"
+                    value={form.model}
+                    placeholder={t('form.modelPlaceholder')}
+                    onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  />
+                </Field>
+                <Field label={t('form.assignedTeam')} htmlFor="vehicle-team">
+                  <Select
+                    id="vehicle-team"
+                    value={form.assignedTeamId}
+                    onChange={(e) => setForm({ ...form, assignedTeamId: e.target.value })}
+                  >
+                    <option value="">{t('form.noTeam')}</option>
+                    {(teams.data ?? []).map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('form.assignedProject')} htmlFor="vehicle-project">
+                  <Select
+                    id="vehicle-project"
+                    value={form.assignedProjectId}
+                    onChange={(e) => setForm({ ...form, assignedProjectId: e.target.value })}
+                  >
+                    <option value="">{t('form.noProject')}</option>
+                    {(projects.data ?? []).map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.reference ? `${project.reference} — ` : ''}
+                        {project.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               </div>
 
-              {/* Card body */}
-              <div style={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Team */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                  <span style={{ color: '#6b7280', minWidth: 60 }}>{t('card.team')}</span>
-                  <span style={{ color: v.assignedTeam ? '#111827' : '#9ca3af', fontWeight: v.assignedTeam ? 500 : 400 }}>
-                    {v.assignedTeam?.name ?? t('card.unassigned')}
-                  </span>
+              {/* The API accepts the maintenance fields on update only. */}
+              {editingId ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label={t('form.odometer')} htmlFor="vehicle-odometer">
+                    <Input
+                      id="vehicle-odometer"
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      value={form.odometerKm}
+                      placeholder={t('form.odometerPlaceholder')}
+                      onChange={(e) => setForm({ ...form, odometerKm: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('form.nextServiceDate')} htmlFor="vehicle-service">
+                    <Input
+                      id="vehicle-service"
+                      type="date"
+                      value={form.nextServiceDate}
+                      onChange={(e) => setForm({ ...form, nextServiceDate: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('form.insuranceExpiry')} htmlFor="vehicle-insurance">
+                    <Input
+                      id="vehicle-insurance"
+                      type="date"
+                      value={form.insuranceExpiry}
+                      onChange={(e) => setForm({ ...form, insuranceExpiry: e.target.value })}
+                    />
+                  </Field>
                 </div>
+              ) : null}
 
-                {/* Project */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                  <span style={{ color: '#6b7280', minWidth: 60 }}>{t('card.project')}</span>
-                  <span style={{ color: v.assignedProject ? '#111827' : '#9ca3af', fontWeight: v.assignedProject ? 500 : 400 }}>
-                    {v.assignedProject?.name ?? t('card.noProject')}
-                  </span>
-                </div>
-
-                {/* Odometer */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-                  <span style={{ color: '#6b7280', minWidth: 60 }}>{t('card.odometer')}</span>
-                  <span style={{ color: '#111827', fontWeight: 500 }}>
-                    {v.odometerKm != null ? t('card.odometerValue', { value: formatNumber(v.odometerKm) }) : '-'}
-                  </span>
-                </div>
-
-                {/* Badges */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
-                  {renderServiceBadge(v)}
-                  {renderInsuranceBadge(v)}
-                </div>
-
-                {/* Created at */}
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 'auto', paddingTop: 8 }}>
-                  {t('card.added', { date: formatDate(v.createdAt) })}
-                </div>
-              </div>
-
-              {/* Card actions */}
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  padding: '12px 16px',
-                  borderTop: '1px solid #f3f4f6',
-                  background: '#fafafa',
-                }}
-              >
-                {deleteConfirmId === v.id ? (
-                  <>
-                    <span style={{ fontSize: 13, color: '#dc2626', alignSelf: 'center', flex: 1 }}>
-                      {t('card.deleteConfirm')}
-                    </span>
-                    <button
-                      style={btnDanger}
-                      onClick={() => handleDelete(v.id)}
-                      disabled={deleting}
-                    >
-                      {deleting ? t('actions.deleting') : t('common:actions.yes')}
-                    </button>
-                    <button
-                      style={btnOutline}
-                      onClick={() => setDeleteConfirmId(null)}
-                      disabled={deleting}
-                    >
-                      {t('common:actions.no')}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button style={btnOutline} onClick={() => openEdit(v)}>
-                      {t('common:actions.edit')}
-                    </button>
-                    <button
-                      style={{ ...btnOutline, color: '#dc2626', borderColor: '#fecaca' }}
-                      onClick={() => setDeleteConfirmId(v.id)}
-                    >
-                      {t('common:actions.delete')}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {!loading && vehicles.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 24 }}>
-          <button
-            style={{ ...btnOutline, opacity: page <= 1 ? 0.5 : 1 }}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1}
-          >
-            {t('common:actions.previous')}
-          </button>
-          <span
-            style={{
-              padding: '8px 16px',
-              fontSize: 14,
-              color: '#6b7280',
-              alignSelf: 'center',
-            }}
-          >
-            {t('pagination.page', { page })}
-          </span>
-          <button
-            style={{ ...btnOutline, opacity: page >= totalPages ? 0.5 : 1 }}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-          >
-            {t('common:actions.next')}
-          </button>
-        </div>
-      )}
-    </div>
+              {save.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(save.error, t('messages.saveFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={closeForm}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button type="submit" variant="primary" disabled={!formValid || save.isPending}>
+                {save.isPending
+                  ? editingId
+                    ? t('actions.updating')
+                    : t('actions.creating')
+                  : editingId
+                    ? t('actions.update')
+                    : t('actions.create')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 13,
-  fontWeight: 500,
-  color: '#374151',
-  marginBottom: 4,
-};
-
-const badgeBase: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '3px 10px',
-  borderRadius: 12,
-  fontSize: 12,
-  fontWeight: 600,
-};
