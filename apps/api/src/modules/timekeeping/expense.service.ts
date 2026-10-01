@@ -1,9 +1,12 @@
+import { NotificationsService } from '../notifications/notifications.service';
+import { notifyOwners } from './approval-notifications';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Repository, EntityManager } from 'typeorm';
 import { Expense } from './entities/expense.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { assertProjectExists } from '../../common/util/assert-project';
 import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
 
 interface ExpenseFilters {
@@ -23,6 +26,7 @@ export class ExpenseService {
     @InjectRepository(Expense)
     private readonly expenseRepo: Repository<Expense>,
     private readonly scope: AccessScopeService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Expenses with user/project reduced to non-sensitive columns. */
@@ -210,10 +214,12 @@ export class ExpenseService {
    * Enforces the approval scope before anything changes: TEAM_LEADER → 403 unless every
    * id is a team member's expense (never their own); office roles → 404 on unknown ids.
    */
-  private async loadForApproval(approver: ScopeUser, expenseIds: string[]): Promise<Expense[]> {
+  private async loadForApproval(approver: ScopeUser, expenseIds: string[], m: EntityManager): Promise<Expense[]> {
     const ids = [...new Set(expenseIds)];
-    const expenses = await this.expenseRepo.find({
+    // Row locks: a concurrent approve / reject of the same rows waits here, then sees the new status.
+    const expenses = await m.find(Expense, {
       where: { companyId: approver.companyId, id: In(ids) },
+      lock: { mode: 'pessimistic_write' },
     });
 
     await this.scope.assertCanApprove(approver, expenses.map((e) => e.userId), ids.length);
@@ -234,35 +240,46 @@ export class ExpenseService {
   }
 
   async approveExpenses(approver: ScopeUser, expenseIds: string[]) {
-    const expenses = await this.loadForApproval(approver, expenseIds);
+    return this.expenseRepo.manager.transaction(async (m) => {
+      const expenses = await this.loadForApproval(approver, expenseIds, m);
 
-    const now = new Date();
-    for (const expense of expenses) {
-      expense.status = 'approved';
-      expense.approvedBy = approver.id;
-      expense.approvedAt = now;
-    }
+      const now = new Date();
+      for (const expense of expenses) {
+        expense.status = 'approved';
+        expense.approvedBy = approver.id;
+        expense.approvedAt = now;
+      }
 
-    return this.expenseRepo.save(expenses);
+      const saved = await m.save(expenses);
+      await notifyOwners(this.notifications, m, approver, saved, 'expense_approved', (n) =>
+        n === 1 ? 'Votre frais a été approuvé' : `${n} de vos frais ont été approuvés`);
+      return saved;
+    });
   }
 
   async rejectExpenses(approver: ScopeUser, expenseIds: string[], reason: string) {
-    const expenses = await this.loadForApproval(approver, expenseIds);
+    return this.expenseRepo.manager.transaction(async (m) => {
+      const expenses = await this.loadForApproval(approver, expenseIds, m);
 
-    const now = new Date();
-    for (const expense of expenses) {
-      expense.status = 'rejected';
-      expense.rejectionReason = reason;
-      expense.rejectedBy = approver.id;
-      expense.rejectedAt = now;
-    }
+      const now = new Date();
+      for (const expense of expenses) {
+        expense.status = 'rejected';
+        expense.rejectionReason = reason;
+        expense.rejectedBy = approver.id;
+        expense.rejectedAt = now;
+      }
 
-    return this.expenseRepo.save(expenses);
+      const saved = await m.save(expenses);
+      await notifyOwners(this.notifications, m, approver, saved, 'expense_rejected', (n) =>
+        n === 1 ? 'Votre frais a été refusé' : `${n} de vos frais ont été refusés`, reason);
+      return saved;
+    });
   }
 
   /* ───────────── Project Summary ───────────── */
 
   async getProjectExpenseSummary(companyId: string, projectId: string) {
+    await assertProjectExists(this.expenseRepo.manager, companyId, projectId);
     const results = await this.expenseRepo
       .createQueryBuilder('exp')
       .select('exp.category', 'category')

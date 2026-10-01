@@ -19,7 +19,7 @@ import {
   UpdateContractDto,
   UpdateContractStatusDto,
 } from './dto/contract.dto';
-import { AddContractAmendmentDto } from './dto/contract-amendment.dto';
+import { AddContractAmendmentDto, UpdateContractAmendmentStatusDto } from './dto/contract-amendment.dto';
 
 /** Parses a positive integer query param; falls back on missing/invalid values and clamps to max. */
 function positiveInt(value: string | undefined, max?: number): number | undefined {
@@ -100,5 +100,16 @@ export class ContractsController {
     @Body() body: AddContractAmendmentDto,
   ) {
     return this.contractsService.addAmendment(companyId, id, body);
+  }
+
+  @Patch(':id/amendments/:amendmentId/status')
+  @Roles(...OFFICE_ROLES)
+  async updateAmendmentStatus(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('amendmentId', ParseUUIDPipe) amendmentId: string,
+    @Body() body: UpdateContractAmendmentStatusDto,
+  ) {
+    return this.contractsService.updateAmendmentStatus(companyId, id, amendmentId, body.status);
   }
 }

@@ -138,10 +138,11 @@ export class InvoicingController {
   @Roles(...OFFICE_ROLES)
   async updateStatus(
     @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateInvoiceStatusDto,
   ) {
-    return this.service.updateStatus(companyId, id, body.status);
+    return this.service.updateStatus(companyId, user.id, id, body.status);
   }
 
   @Post(':id/credit-note')

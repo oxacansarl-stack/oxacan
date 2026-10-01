@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TimeEntry } from './entities/time-entry.entity';
@@ -18,6 +19,7 @@ import { DailyReportController } from './daily-report.controller';
 
 @Module({
   imports: [
+    NotificationsModule,
     TypeOrmModule.forFeature([
       TimeEntry,
       Expense,

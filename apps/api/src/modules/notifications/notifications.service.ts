@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { EntityManager, Repository, LessThan } from 'typeorm';
 import { Notification } from './entities/notification.entity';
 import { PushDevice } from './entities/push-device.entity';
 import { NotFoundError } from '@oxacan/shared-types';
@@ -102,11 +102,14 @@ export class NotificationsService {
 
   /* ───────────── Create (internal use) ───────────── */
 
+  /** Pass the caller's transaction manager so the notification commits (or rolls back) with the change. */
   async createNotification(
     companyId: string,
     dto: CreateNotificationDto,
+    manager?: EntityManager,
   ): Promise<Notification> {
-    const notification = this.notificationRepo.create({
+    const repo = manager ? manager.getRepository(Notification) : this.notificationRepo;
+    const notification = repo.create({
       companyId,
       userId: dto.userId,
       type: dto.type,
@@ -117,7 +120,7 @@ export class NotificationsService {
       isRead: false,
     });
 
-    return this.notificationRepo.save(notification);
+    return repo.save(notification);
   }
 
   /* ───────────── Delete Old Notifications ───────────── */

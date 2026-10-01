@@ -216,6 +216,7 @@ export class ProjectsService {
     return this.projectRepo.save(project);
   }
 
+  /** Recomputes progress (share of tasks done) and actual cost from approved hours and expenses. */
   async updateProgress(companyId: string, id: string): Promise<Project> {
     const project = await this.findById(companyId, id);
 
@@ -231,6 +232,16 @@ export class ProjectsService {
         (completedCount / tasks.length) * 100,
       );
     }
+
+    // Actual cost = approved hours (cost frozen at the worker's rate when entered) + approved expenses.
+    const [{ cost }] = await this.projectRepo.query(
+      `SELECT (COALESCE((SELECT SUM(cost_cents) FROM time_entry
+                          WHERE project_id = $1 AND company_id = $2 AND status = 'approved'), 0)
+             + COALESCE((SELECT SUM(amount_cents) FROM expense
+                          WHERE project_id = $1 AND company_id = $2 AND status = 'approved'), 0))::bigint AS cost`,
+      [id, companyId],
+    );
+    project.actualCostCents = Number(cost);
 
     return this.projectRepo.save(project);
   }

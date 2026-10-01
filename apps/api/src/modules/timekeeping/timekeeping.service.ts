@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, In } from 'typeorm';
+import { Repository, IsNull, In, EntityManager } from 'typeorm';
 import { TimeEntry } from './entities/time-entry.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
 import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { notifyOwners } from './approval-notifications';
 import { ClockInDto, UpdateTimeEntryDto } from './dto/time-entry.dto';
 
 interface TimeEntryFilters {
@@ -69,6 +71,7 @@ export class TimekeepingService {
     @InjectRepository(AppUser)
     private readonly userRepo: Repository<AppUser>,
     private readonly scope: AccessScopeService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Entries with their user/project reduced to non-sensitive columns (no rates, no budgets). */
@@ -417,10 +420,12 @@ export class TimekeepingService {
    * TEAM_LEADER → 403 unless every id is a team member's entry (never their own);
    * office roles → 404 when an id does not exist in the company.
    */
-  private async loadForApproval(approver: ScopeUser, entryIds: string[]): Promise<TimeEntry[]> {
+  private async loadForApproval(approver: ScopeUser, entryIds: string[], m: EntityManager): Promise<TimeEntry[]> {
     const ids = [...new Set(entryIds)];
-    const entries = await this.timeEntryRepo.find({
+    // Row locks: a concurrent approve / reject of the same rows waits here, then sees the new status.
+    const entries = await m.find(TimeEntry, {
       where: { companyId: approver.companyId, id: In(ids) },
+      lock: { mode: 'pessimistic_write' },
     });
 
     await this.scope.assertCanApprove(approver, entries.map((e) => e.userId), ids.length);
@@ -441,30 +446,40 @@ export class TimekeepingService {
   }
 
   async approveEntries(approver: ScopeUser, entryIds: string[]) {
-    const entries = await this.loadForApproval(approver, entryIds);
+    return this.timeEntryRepo.manager.transaction(async (m) => {
+      const entries = await this.loadForApproval(approver, entryIds, m);
 
-    const now = new Date();
-    for (const entry of entries) {
-      entry.status = 'approved';
-      entry.approvedBy = approver.id;
-      entry.approvedAt = now;
-    }
+      const now = new Date();
+      for (const entry of entries) {
+        entry.status = 'approved';
+        entry.approvedBy = approver.id;
+        entry.approvedAt = now;
+      }
 
-    return this.timeEntryRepo.save(entries);
+      const saved = await m.save(entries);
+      await notifyOwners(this.notifications, m, approver, saved, 'time_approved', (n) =>
+        n === 1 ? 'Vos heures ont été approuvées' : `${n} de vos saisies d'heures ont été approuvées`);
+      return saved;
+    });
   }
 
   async rejectEntries(approver: ScopeUser, entryIds: string[], reason: string) {
-    const entries = await this.loadForApproval(approver, entryIds);
+    return this.timeEntryRepo.manager.transaction(async (m) => {
+      const entries = await this.loadForApproval(approver, entryIds, m);
 
-    const now = new Date();
-    for (const entry of entries) {
-      entry.status = 'rejected';
-      entry.rejectionReason = reason;
-      entry.rejectedBy = approver.id;
-      entry.rejectedAt = now;
-    }
+      const now = new Date();
+      for (const entry of entries) {
+        entry.status = 'rejected';
+        entry.rejectionReason = reason;
+        entry.rejectedBy = approver.id;
+        entry.rejectedAt = now;
+      }
 
-    return this.timeEntryRepo.save(entries);
+      const saved = await m.save(entries);
+      await notifyOwners(this.notifications, m, approver, saved, 'time_rejected', (n) =>
+        n === 1 ? 'Vos heures ont été refusées' : `${n} de vos saisies d'heures ont été refusées`, reason);
+      return saved;
+    });
   }
 
   /* ───────────── Weekly Summary ───────────── */

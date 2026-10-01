@@ -10,7 +10,7 @@ export class AddContractAmendmentDto {
   @MaxLength(2000)
   description!: string;
 
-  /** Signed: an amendment can add or remove work. */
+  /** HT, signed: an amendment can add or remove work. Applied to the contract once signed. */
   @IsOptional()
   @IsSignedCents()
   amountDeltaCents?: number;
@@ -18,4 +18,9 @@ export class AddContractAmendmentDto {
   @IsOptional()
   @IsIn(AMENDMENT_STATUSES)
   status?: string;
+}
+
+export class UpdateContractAmendmentStatusDto {
+  @IsIn(AMENDMENT_STATUSES)
+  status!: (typeof AMENDMENT_STATUSES)[number];
 }

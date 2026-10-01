@@ -133,6 +133,29 @@ describe('Invoicing', () => {
     expect((await admin.post(`/invoices/${issued.id}/credit-note`)).error?.details?.rule).toBe('CREDIT_NOTE_EXISTS');
   });
 
+  it('deducts each issued acompte from exactly one situation, and holds no retention on acomptes', async () => {
+    const pid = await createProject(admin, 'Acompte rules');
+    const cid = (await ok(admin.get(`/projects/${pid}`))).clientId;
+    const invoice = (type: string, unitPriceCents: number) =>
+      ok(admin.post('/invoices', { projectId: pid, clientId: cid, type, lines: [{ description: type, unit: 'u', quantity: 1, unitPriceCents }] }));
+    const send = (id: string) => ok(admin.patch(`/invoices/${id}/status`, { status: 'sent' }));
+
+    const acompte = await invoice('acompte', 10_000);
+    await send(acompte.id);
+    await invoice('acompte', 5_000); // still a draft: not deducted
+    const credited = await invoice('acompte', 7_000);
+    await send(credited.id);
+    await ok(admin.post(`/invoices/${credited.id}/credit-note`)); // credited: not deducted
+
+    const first = await invoice('situation', 100_000);
+    const second = await invoice('situation', 50_000);
+    expect({
+      acompteRetention: Number(acompte.retentionAmountCents),
+      firstDeducts: Number(first.priorAcomptesCents),
+      secondDeducts: Number(second.priorAcomptesCents),
+    }).toEqual({ acompteRetention: 0, firstDeducts: Number(acompte.totalTtcCents), secondDeducts: 0 });
+  });
+
   it('rejects situation lines whose cumulative quantity went backwards', async () => {
     const res = await admin.post('/invoices', {
       projectId,

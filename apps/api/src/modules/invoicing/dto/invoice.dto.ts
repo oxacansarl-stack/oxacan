@@ -105,12 +105,19 @@ export class CreateInvoiceDto {
   @Max(RATE_MAX_BPS)
   retentionRate?: number;
 
+  /** May be empty when the invoice only bills plus-values; the service requires at least one of the two. */
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(1000)
   @ValidateNested({ each: true })
   @Type(() => InvoiceLineDto)
   lines!: InvoiceLineDto[];
+
+  /** Approved plus-values of this project to bill on this invoice (each one exactly once). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('all', { each: true })
+  plusValueIds?: string[];
 
   @IsOptional()
   @IsString()
@@ -160,7 +167,8 @@ export class CreatePlusValueDto {
 }
 
 export class UpdatePlusValueStatusDto {
-  @IsIn(PLUS_VALUE_STATUSES)
+  /** 'invoiced' comes only from billing the plus-value on an invoice. */
+  @IsIn(PLUS_VALUE_STATUSES.filter((st) => st !== 'invoiced'))
   status!: string;
 
   @IsOptional()

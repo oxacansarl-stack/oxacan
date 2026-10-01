@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SiteMeeting } from './entities/site-meeting.entity';
 import { MeetingAttendee } from './entities/meeting-attendee.entity';
 import { MeetingAction } from './entities/meeting-action.entity';
@@ -24,6 +25,8 @@ interface MeetingFilters {
   status?: string;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class MeetingsService {
   constructor(
@@ -35,7 +38,33 @@ export class MeetingsService {
     private readonly actionRepo: Repository<MeetingAction>,
     @InjectRepository(Project)
     private readonly projectRepo: Repository<Project>,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /**
+   * `responsible` is free text (a name or a trade); when it is the id of a user of the company,
+   * that user is told about the action.
+   */
+  private async notifyResponsible(manager: EntityManager, companyId: string, action: MeetingAction) {
+    if (!UUID_RE.test(action.responsible)) return;
+    const [user] = await manager.query(
+      'SELECT id FROM app_user WHERE id = $1 AND company_id = $2 AND deactivated_at IS NULL',
+      [action.responsible, companyId],
+    );
+    if (!user) return;
+    await this.notifications.createNotification(
+      companyId,
+      {
+        userId: user.id,
+        type: 'meeting_action_assigned',
+        title: 'Une action de réunion de chantier vous a été attribuée',
+        body: action.description,
+        referenceType: 'meeting',
+        referenceId: action.meetingId,
+      },
+      manager,
+    );
+  }
 
   /* ───────────── List ───────────── */
 
@@ -209,7 +238,11 @@ export class MeetingsService {
       status: 'open',
     });
 
-    return this.actionRepo.save(action);
+    return this.actionRepo.manager.transaction(async (m) => {
+      const saved = await m.save(action);
+      await this.notifyResponsible(m, companyId, saved);
+      return saved;
+    });
   }
 
   /* ───────────── Actions: Update ───────────── */
@@ -227,12 +260,17 @@ export class MeetingsService {
     });
     if (!action) throw new NotFoundError('MeetingAction', actionId);
 
+    const reassigned = dto.responsible !== undefined && dto.responsible !== action.responsible;
     if (dto.description !== undefined) action.description = dto.description;
     if (dto.responsible !== undefined) action.responsible = dto.responsible;
     if (dto.dueDate !== undefined) action.dueDate = dto.dueDate ? (dto.dueDate as any) : null;
     if (dto.status !== undefined) action.status = dto.status;
 
-    return this.actionRepo.save(action);
+    return this.actionRepo.manager.transaction(async (m) => {
+      const saved = await m.save(action);
+      if (reassigned) await this.notifyResponsible(m, companyId, saved);
+      return saved;
+    });
   }
 
   /* ───────────── Complete Meeting ───────────── */

@@ -1,11 +1,12 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, Not, Repository } from 'typeorm';
 import { Contract } from './entities/contract.entity';
 import { ContractAmendment } from './entities/contract-amendment.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { Company } from '../company/entities/company.entity';
-import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { NotFoundError, BusinessRuleError, DEFAULT_VAT_RATE } from '@oxacan/shared-types';
+import { ttcFromHt } from '../../common/util/money';
 import { ProjectsService } from '../projects/projects.service';
 import type { UpdateContractDto } from './dto/contract.dto';
 import type { AddContractAmendmentDto as AddAmendmentDto } from './dto/contract-amendment.dto';
@@ -25,6 +26,12 @@ const CONTRACT_TRANSITIONS: Record<string, string[]> = {
   active: ['completed', 'terminated'],
   completed: [],
   terminated: [],
+};
+
+const AMENDMENT_TRANSITIONS: Record<string, string[]> = {
+  draft: ['sent', 'signed'],
+  sent: ['draft', 'signed'],
+  signed: [],
 };
 
 @Injectable()
@@ -199,29 +206,86 @@ export class ContractsService {
     contractId: string,
     dto: AddAmendmentDto,
   ): Promise<ContractAmendment> {
-    // Ensure contract exists
     await this.findById(companyId, contractId);
 
-    // Auto-increment amendmentNumber
-    const maxNum = await this.amendmentRepo
-      .createQueryBuilder('amendment')
-      .select('COALESCE(MAX(amendment.amendment_number), 0)', 'maxNum')
-      .where('amendment.contract_id = :contractId', { contractId })
-      .andWhere('amendment.company_id = :companyId', { companyId })
-      .getRawOne();
+    return this.dataSource.transaction(async (manager) => {
+      // Serialise numbering per contract so two concurrent amendments can't share a number.
+      await manager.query('SELECT id FROM contract WHERE id = $1 AND company_id = $2 FOR UPDATE', [contractId, companyId]);
+      const [{ maxNum }] = await manager.query(
+        'SELECT COALESCE(MAX(amendment_number), 0)::int AS "maxNum" FROM contract_amendment WHERE contract_id = $1 AND company_id = $2',
+        [contractId, companyId],
+      );
 
-    const amendmentNumber = (maxNum?.maxNum ?? 0) + 1;
-
-    const amendment = this.amendmentRepo.create({
-      contractId,
-      companyId,
-      amendmentNumber,
-      description: dto.description,
-      amountDeltaCents: dto.amountDeltaCents ?? 0,
-      status: dto.status ?? 'draft',
+      const amendment = await manager.save(
+        manager.create(ContractAmendment, {
+          contractId,
+          companyId,
+          amendmentNumber: maxNum + 1,
+          description: dto.description,
+          amountDeltaCents: dto.amountDeltaCents ?? 0,
+          status: dto.status === 'signed' ? 'sent' : dto.status ?? 'draft',
+        }),
+      );
+      if (dto.status === 'signed') return this.signAmendment(manager, companyId, amendment.id);
+      return amendment;
     });
+  }
 
-    return this.amendmentRepo.save(amendment);
+  async updateAmendmentStatus(
+    companyId: string,
+    contractId: string,
+    amendmentId: string,
+    status: string,
+  ): Promise<ContractAmendment> {
+    return this.dataSource.transaction(async (manager) => {
+      const amendment = await manager.findOne(ContractAmendment, {
+        where: { id: amendmentId, contractId, companyId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!amendment) throw new NotFoundError('ContractAmendment', amendmentId);
+      if (amendment.status === status) return amendment;
+      if (!AMENDMENT_TRANSITIONS[amendment.status]?.includes(status)) {
+        throw new BusinessRuleError(
+          'INVALID_STATUS_TRANSITION',
+          `Cannot change an amendment from '${amendment.status}' to '${status}'`,
+        );
+      }
+      if (status === 'signed') return this.signAmendment(manager, companyId, amendmentId);
+      amendment.status = status;
+      return manager.save(amendment);
+    });
+  }
+
+  /**
+   * A signed amendment changes what was agreed: its HT delta goes onto the project budget and
+   * its TTC equivalent (at the offer's VAT rate) onto the contract total. Only the transition
+   * into 'signed' applies it, so it can never be counted twice.
+   */
+  private async signAmendment(manager: EntityManager, companyId: string, amendmentId: string): Promise<ContractAmendment> {
+    const signed: ContractAmendment[] = await manager.query(
+      `UPDATE contract_amendment SET status = 'signed', signed_at = now()
+        WHERE id = $1 AND company_id = $2 AND status <> 'signed'
+        RETURNING contract_id AS "contractId", amount_delta_cents::bigint AS "amountDeltaCents"`,
+      [amendmentId, companyId],
+    ).then(([rows]) => rows);
+    if (signed.length) {
+      const { contractId, amountDeltaCents } = signed[0];
+      const deltaHt = Number(amountDeltaCents);
+      const [{ vatRate }] = await manager.query(
+        `SELECT COALESCE(o.vat_rate, $3) AS "vatRate" FROM contract c LEFT JOIN offer o ON o.id = c.offer_id
+          WHERE c.id = $1 AND c.company_id = $2`,
+        [contractId, companyId, DEFAULT_VAT_RATE],
+      );
+      await manager.query(
+        'UPDATE contract SET total_ttc_cents = total_ttc_cents + $3, updated_at = now() WHERE id = $1 AND company_id = $2',
+        [contractId, companyId, ttcFromHt(deltaHt, Number(vatRate))],
+      );
+      await manager.query(
+        'UPDATE project SET budget_ht_cents = COALESCE(budget_ht_cents, 0) + $3, updated_at = now() WHERE contract_id = $1 AND company_id = $2',
+        [contractId, companyId, deltaHt],
+      );
+    }
+    return manager.findOneOrFail(ContractAmendment, { where: { id: amendmentId, companyId } });
   }
 
   async update(

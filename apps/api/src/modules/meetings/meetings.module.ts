@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SiteMeeting } from './entities/site-meeting.entity';
@@ -9,6 +10,7 @@ import { MeetingsController } from './meetings.controller';
 
 @Module({
   imports: [
+    NotificationsModule,
     TypeOrmModule.forFeature([SiteMeeting, MeetingAttendee, MeetingAction, Project]),
   ],
   providers: [MeetingsService],

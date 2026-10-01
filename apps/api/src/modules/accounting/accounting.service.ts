@@ -170,6 +170,7 @@ export class AccountingService {
       { accountNumber: '1020', name: 'Bank', type: 'asset' },
       { accountNumber: '1100', name: 'Accounts Receivable', type: 'asset' },
       { accountNumber: '2000', name: 'Accounts Payable', type: 'liability' },
+      { accountNumber: '2030', name: 'Customer Advances', type: 'liability' },
       { accountNumber: '2200', name: 'VAT Payable', type: 'liability' },
       { accountNumber: '3000', name: 'Revenue', type: 'revenue' },
       { accountNumber: '3200', name: 'Work in Progress', type: 'revenue' },
@@ -537,8 +538,13 @@ function formatAmount(cents: number): string {
   return `${sign}${whole}.${frac}`;
 }
 
+/**
+ * Text cell for the fiduciary CSV. Text that a spreadsheet would read as a formula (=, +, -, @,
+ * tab, CR) gets a leading apostrophe so Excel shows it instead of running it (OWASP CSV injection).
+ */
 function escapeCsvField(value: string): string {
-  if (value.includes(';') || value.includes('"') || value.includes('\n')) {
+  if (/^[=+\-@\t\r]/.test(value)) value = `'${value}`;
+  if (value.includes(';') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;

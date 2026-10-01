@@ -2,14 +2,11 @@ import {
   Controller,
   Get,
   Post,
-  Put,
-  Body,
   Query,
 } from '@nestjs/common';
 import { CompanyId } from '../../common/decorators/current-user.decorator';
 import { ADMIN_ONLY, Roles } from '../../common/decorators/roles.decorator';
 import { SubscriptionService } from './subscription.service';
-import { CreateSubscriptionDto, UpdateSubscriptionDto } from './dto/subscription.dto';
 
 function toPositiveInt(value: string | undefined, max?: number): number | undefined {
   if (value === undefined) return undefined;
@@ -18,6 +15,8 @@ function toPositiveInt(value: string | undefined, max?: number): number | undefi
   return max ? Math.min(n, max) : n;
 }
 
+// Tier, seats, status and billing dates come from billing (Stripe webhook, not built yet) or the
+// operators, never from the tenant: there is deliberately no create/update route here.
 @Controller('subscription')
 @Roles(...ADMIN_ONLY)
 export class SubscriptionController {
@@ -26,22 +25,6 @@ export class SubscriptionController {
   @Get()
   async findByCompany(@CompanyId() companyId: string) {
     return this.service.findCurrent(companyId);
-  }
-
-  @Post()
-  async create(
-    @CompanyId() companyId: string,
-    @Body() body: CreateSubscriptionDto,
-  ) {
-    return this.service.create(companyId, body);
-  }
-
-  @Put()
-  async update(
-    @CompanyId() companyId: string,
-    @Body() body: UpdateSubscriptionDto,
-  ) {
-    return this.service.update(companyId, body);
   }
 
   @Post('cancel')
