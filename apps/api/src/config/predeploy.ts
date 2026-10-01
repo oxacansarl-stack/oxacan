@@ -1,17 +1,23 @@
 import './pg-types';
 import dataSource from './data-source';
+import { syncContextKey } from './context-key';
+import { contextSecret } from '../common/tenant/context-signature';
 
 /**
  * Runs before each release (Railway preDeployCommand), connected as the schema owner:
- * 1. applies pending migrations;
+ * 1. applies pending migrations and stores the RLS context signing key (RLS_CONTEXT_SECRET);
  * 2. creates/updates the non-superuser role the API runs as, so RLS applies;
  * 3. on Supabase, removes the default grants that expose public tables via the REST API.
  */
 async function main() {
+  // Fail before migrating: once SignedTenantContext is applied, a release without the key would
+  // leave the running API's unsigned context invalid and every tenant table empty.
+  contextSecret();
   await dataSource.initialize();
 
   const applied = await dataSource.runMigrations({ transaction: 'each' });
   console.log(applied.length ? `applied ${applied.map((m) => m.name).join(', ')}` : 'no pending migrations');
+  await syncContextKey(dataSource);
 
   // With Supabase's pooler the login is "<role>.<project-ref>"; the database role is the first part.
   const appRole = (process.env.DB_USERNAME ?? '').split('.')[0];

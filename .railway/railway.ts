@@ -29,6 +29,7 @@ export default defineRailway(() => {
       SUPABASE_URL: "https://vxldcsgbgfnknlmuxvdw.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: preserve(),
       JWT_SECRET: preserve(),
+      RLS_CONTEXT_SECRET: preserve(),
       JWT_EXPIRATION: "3600",
       SENTRY_DSN: preserve(),
       WEB_URL: "https://${{web.RAILWAY_PUBLIC_DOMAIN}}",

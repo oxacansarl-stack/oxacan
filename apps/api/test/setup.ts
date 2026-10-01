@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { config } from 'dotenv';
@@ -5,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import { Client } from 'pg';
 
 config({ path: join(__dirname, '../../../.env') });
+// Shared by migrations (key sync), the spawned API and direct DB checks in the tests.
+process.env.RLS_CONTEXT_SECRET ??= 'oxacan-test-rls-context-signing-secret-000';
 
 export const MOCK_SUPABASE_PORT = 3199;
 export const MOCK_SUPABASE_URL = `http://localhost:${MOCK_SUPABASE_PORT}`;
@@ -86,6 +89,16 @@ export async function createProject(api: ReturnType<typeof apiClient>, name: str
   await must(api.patch(`/contracts/${contract.id}/status`, { status: 'signed' }));
   const projects: any[] = await must(api.get('/projects?limit=100'));
   return projects.find((p) => p.contractId === contract.id).id;
+}
+
+/** Sets a correctly signed RLS context on a direct connection, like the API's connection hook. */
+export async function setSignedContext(c: Client, companyId = '', userId = '', bypass: 'on' | 'off' = 'off') {
+  const sig = createHmac('sha256', process.env.RLS_CONTEXT_SECRET!).update(`${companyId}|${userId}|${bypass}`).digest('hex');
+  await c.query(
+    `SELECT set_config('app.company_id', $1, false), set_config('app.user_id', $2, false),
+            set_config('app.rls_bypass', $3, false), set_config('app.context_sig', $4, false)`,
+    [companyId, userId, bypass, sig],
+  );
 }
 
 /** Connects to the test DB as the non-superuser app role, so RLS policies apply. */

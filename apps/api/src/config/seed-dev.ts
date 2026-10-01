@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sign } from 'jsonwebtoken';
 import dataSource from './data-source';
+import { SET_LOCAL_CONTEXT_SQL, contextSecret, signedContext } from '../common/tenant/context-signature';
 
 const COMPANY_ID = 'd0000000-0000-4000-8000-000000000001';
 const CREDENTIALS_FILE = join(__dirname, '../../../../.demo-credentials');
@@ -58,7 +59,7 @@ async function main() {
 
   await dataSource.initialize();
   await dataSource.transaction(async (m) => {
-    await m.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
+    await m.query(SET_LOCAL_CONTEXT_SQL, signedContext(contextSecret(), '', '', 'on'));
     await m.query(
       `INSERT INTO company (id, name, legal_name, city, canton, vat_number)
        VALUES ($1, 'Demo Bau AG', 'Demo Bau AG', 'Lausanne', 'VD', 'CHE-000.000.000 TVA')

@@ -2,10 +2,7 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import type { Pool, PoolClient } from 'pg';
 import { tenantStorage, TenantStore } from './tenant-context';
-
-const SET_CONTEXT_SQL = `SELECT set_config('app.company_id', $1, false),
-       set_config('app.user_id', $2, false),
-       set_config('app.rls_bypass', $3, false)`;
+import { SET_CONTEXT_SQL, contextSecret, signedContext } from './context-signature';
 
 /**
  * Applies the RLS session variables on every pool checkout. The store is captured when
@@ -17,6 +14,7 @@ export class TenantConnectionHook implements OnModuleInit {
   constructor(private readonly dataSource: DataSource) {}
 
   onModuleInit() {
+    const secret = contextSecret();
     const pool = (this.dataSource.driver as unknown as { master: Pool }).master;
     const originalConnect = pool.connect.bind(pool) as (
       cb: (err: Error | undefined, client: PoolClient, done: (release?: unknown) => void) => void,
@@ -26,29 +24,41 @@ export class TenantConnectionHook implements OnModuleInit {
       const store = tenantStorage.getStore();
       if (callback) {
         originalConnect((err, client, done) => {
-          if (!err) applyContext(client, store);
-          callback(err, client, done);
+          if (err) return callback(err, client, done);
+          applyContext(client, store, secret).then(
+            () => callback(undefined, client, done),
+            (e) => {
+              done(e);
+              callback(e, undefined, () => undefined);
+            },
+          );
         });
         return undefined;
       }
       return new Promise<PoolClient>((resolve, reject) => {
         originalConnect((err, client) => {
           if (err) return reject(err);
-          applyContext(client, store);
-          resolve(client);
+          applyContext(client, store, secret).then(
+            () => resolve(client),
+            (e) => {
+              client.release(e);
+              reject(e);
+            },
+          );
         });
       });
     };
   }
 }
 
-function applyContext(client: PoolClient, store: TenantStore | undefined) {
-  // Queued on the client ahead of the caller's first query; pg runs a client's queries in order.
-  client
-    .query(SET_CONTEXT_SQL, [
-      store?.companyId ?? '',
-      store?.userId ?? '',
-      store?.system ? 'on' : 'off',
-    ])
-    .catch(() => undefined);
+/**
+ * The settings are session-level, so a pooled client still carries the previous checkout's
+ * (validly signed) context. If setting the new one fails the client is destroyed, never reused.
+ * Values travel as bind parameters, so neither they nor the signature show in pg_stat_activity.
+ */
+async function applyContext(client: PoolClient, store: TenantStore | undefined, secret: string) {
+  await client.query(
+    SET_CONTEXT_SQL,
+    signedContext(secret, store?.companyId ?? '', store?.userId ?? '', store?.system ? 'on' : 'off'),
+  );
 }

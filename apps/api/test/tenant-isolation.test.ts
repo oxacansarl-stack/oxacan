@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Client } from 'pg';
-import { apiClient, appRoleClient, tokenFor, USER_A, USER_B, COMPANY_A, COMPANY_B } from './setup';
+import { apiClient, appRoleClient, tokenFor, USER_A, USER_B, COMPANY_A, COMPANY_B, setSignedContext } from './setup';
 
 const a = apiClient(tokenFor(USER_A.authId));
 const b = apiClient(tokenFor(USER_B.authId));
@@ -97,7 +97,7 @@ describe('Tenant isolation in the database (RLS as the app role)', () => {
   });
 
   it('without a tenant context no rows are visible', async () => {
-    await db.query(`SELECT set_config('app.company_id', '', false), set_config('app.rls_bypass', 'off', false)`);
+    await setSignedContext(db);
     for (const table of [...tenantTables, 'company']) {
       const { rows } = await db.query(`SELECT count(*)::int AS n FROM "${table}"`);
       expect({ table, n: rows[0].n }).toEqual({ table, n: 0 });
@@ -105,7 +105,9 @@ describe('Tenant isolation in the database (RLS as the app role)', () => {
   });
 
   it('with tenant B context no tenant A row is visible in any table', async () => {
-    await db.query(`SELECT set_config('app.company_id', $1, false)`, [COMPANY_B]);
+    await setSignedContext(db, COMPANY_B);
+    // The context is live (B sees itself), so the empty result below is isolation, not a dead context.
+    expect((await db.query('SELECT count(*)::int AS n FROM company')).rows[0].n).toBe(1);
     for (const table of tenantTables) {
       const { rows } = await db.query(
         `SELECT count(*)::int AS n FROM "${table}" WHERE company_id = $1`,
@@ -116,9 +118,27 @@ describe('Tenant isolation in the database (RLS as the app role)', () => {
   });
 
   it('with tenant B context writing a tenant A row is rejected', async () => {
-    await db.query(`SELECT set_config('app.company_id', $1, false)`, [COMPANY_B]);
+    await setSignedContext(db, COMPANY_B);
     await expect(
       db.query(`INSERT INTO client (company_id, name) VALUES ($1, 'cross-tenant write')`, [COMPANY_A]),
     ).rejects.toThrow(/row-level security/);
+  });
+
+  it('a context set without a valid signature (e.g. via SQL injection) is ignored', async () => {
+    // Forge company A and the bypass without the signing secret.
+    await db.query(
+      `SELECT set_config('app.company_id', $1, false), set_config('app.rls_bypass', 'on', false),
+              set_config('app.context_sig', 'forged', false)`,
+      [COMPANY_A],
+    );
+    for (const table of ['company', 'client', 'app_user', 'invoice']) {
+      const { rows } = await db.query(`SELECT count(*)::int AS n FROM "${table}"`);
+      expect({ table, n: rows[0].n }).toEqual({ table, n: 0 });
+    }
+    await expect(
+      db.query(`INSERT INTO client (company_id, name) VALUES ($1, 'forged write')`, [COMPANY_A]),
+    ).rejects.toThrow(/row-level security/);
+    // …and the app role cannot read the signing key.
+    await expect(db.query('SELECT secret FROM app_private.context_key')).rejects.toThrow(/permission denied/);
   });
 });
