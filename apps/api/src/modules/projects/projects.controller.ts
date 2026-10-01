@@ -29,6 +29,13 @@ import {
   UpdateProjectDto,
 } from './dto/project.dto';
 import { AddDependencyDto, CreateTaskDto, UpdateTaskDto } from './dto/task.dto';
+import { ExecutedQuantitiesService } from './executed-quantities.service';
+import {
+  CorrectExecutedQuantityDto,
+  RecordExecutedQuantityDto,
+  ValidateExecutedQuantitiesDto,
+} from './dto/executed-quantity.dto';
+import type { ScopeUser } from '../timekeeping/access-scope.service';
 
 interface RequestUser {
   id: string;
@@ -50,6 +57,7 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly tasksService: TasksService,
+    private readonly executedQuantities: ExecutedQuantitiesService,
   ) {}
 
   /* ───────────── Projects ───────────── */
@@ -235,5 +243,69 @@ export class ProjectsController {
   ) {
     await this.tasksService.removeDependency(companyId, id, taskId, successorId);
     return { deleted: true };
+  }
+
+  /* ───────────── Executed quantities (PRD §10, §15.2) ───────────── */
+  // Team leaders only on projects they are assigned to (ExecutedQuantitiesService).
+
+  /** Cumulative executed quantity per offer position: recorded, validated (billable), pending. */
+  @Get(':id/executed-quantities/positions')
+  @Roles(...SITE_LEAD_ROLES)
+  async getExecutedPositions(
+    @CurrentUser() user: ScopeUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.executedQuantities.getPositions(user, id);
+  }
+
+  @Get(':id/executed-quantities')
+  @Roles(...SITE_LEAD_ROLES)
+  async listExecutedQuantities(
+    @CurrentUser() user: ScopeUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('offerLineId', new ParseUUIDPipe({ optional: true })) offerLineId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.executedQuantities.listEntries(user, id, {
+      page: toPositiveInt(page),
+      limit: toPositiveInt(limit, MAX_PAGE_SIZE),
+      offerLineId,
+      status,
+    });
+  }
+
+  @Post(':id/executed-quantities')
+  @Roles(...SITE_LEAD_ROLES)
+  async recordExecutedQuantity(
+    @CurrentUser() user: ScopeUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: RecordExecutedQuantityDto,
+  ) {
+    return this.executedQuantities.record(user, id, body);
+  }
+
+  /** Corrections are new entries; the corrected entry is never edited. */
+  @Post(':id/executed-quantities/:entryId/corrections')
+  @Roles(...SITE_LEAD_ROLES)
+  async correctExecutedQuantity(
+    @CurrentUser() user: ScopeUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('entryId', ParseUUIDPipe) entryId: string,
+    @Body() body: CorrectExecutedQuantityDto,
+  ) {
+    return this.executedQuantities.correct(user, id, entryId, body);
+  }
+
+  /** The project manager's sign-off: validated entries become billable by situations. */
+  @Post(':id/executed-quantities/validate')
+  @Roles(...OFFICE_ROLES)
+  async validateExecutedQuantities(
+    @CurrentUser() user: ScopeUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ValidateExecutedQuantitiesDto,
+  ) {
+    return this.executedQuantities.validate(user, id, body);
   }
 }

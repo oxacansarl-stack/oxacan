@@ -9,6 +9,7 @@ import { Contract } from '../contracts/entities/contract.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { OfferLine } from '../offers/entities/offer-line.entity';
 import { NotFoundError } from '@oxacan/shared-types';
+import { projectActualCostSql } from './project-cost';
 import {
   AddLotDto,
   AddMilestoneDto,
@@ -235,12 +236,9 @@ export class ProjectsService {
       );
     }
 
-    // Actual cost = approved hours (cost frozen at the worker's rate when entered) + approved expenses.
+    // Actual cost HT = approved hours + approved expenses (HT) + delivered purchase-order goods.
     const [{ cost }] = await this.projectRepo.query(
-      `SELECT (COALESCE((SELECT SUM(cost_cents) FROM time_entry
-                          WHERE project_id = $1 AND company_id = $2 AND status = 'approved'), 0)
-             + COALESCE((SELECT SUM(amount_cents) FROM expense
-                          WHERE project_id = $1 AND company_id = $2 AND status = 'approved'), 0))::bigint AS cost`,
+      `SELECT ${projectActualCostSql('$1', '$2')} AS cost`,
       [id, companyId],
     );
     project.actualCostCents = Number(cost);
