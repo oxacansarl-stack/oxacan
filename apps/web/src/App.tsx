@@ -29,7 +29,8 @@ import Login from './pages/Login';
 import { CurrentUser, CurrentUserContext, Role } from './lib/current-user';
 import { useTranslation } from 'react-i18next';
 import { apiGet, ApiError } from './lib/api';
-import { getAccessToken, onSignedOut, signOut, UNAUTHORIZED_EVENT } from './lib/auth';
+import { authLinkError, getAccessToken, needsPasswordSetup, onSignedOut, signOut, UNAUTHORIZED_EVENT } from './lib/auth';
+import SetPassword from './pages/SetPassword';
 
 const SIDEBAR_WIDTH = 240;
 
@@ -78,7 +79,11 @@ function NoAccess() {
   return <div style={{ color: '#6b7280', fontSize: 14 }}>{t('auth.noAccess')}</div>;
 }
 
-type AuthState = { status: 'loading' } | { status: 'signed-out'; notice?: string } | { status: 'ready'; me: Me };
+type AuthState =
+  | { status: 'loading' }
+  | { status: 'signed-out'; notice?: string }
+  | { status: 'set-password' }
+  | { status: 'ready'; me: Me };
 
 export default function App() {
   const { t } = useTranslation();
@@ -105,7 +110,9 @@ export default function App() {
 
   useEffect(() => {
     if (isPortalView) return;
-    loadProfile();
+    if (authLinkError) setAuth({ status: 'signed-out', notice: t('auth.linkInvalid') });
+    else if (needsPasswordSetup()) setAuth({ status: 'set-password' });
+    else loadProfile();
     const expired = () => setAuth({ status: 'signed-out', notice: t('auth.sessionExpired') });
     window.addEventListener(UNAUTHORIZED_EVENT, expired);
     const unsubscribe = onSignedOut(() => setAuth({ status: 'signed-out' }));
@@ -132,6 +139,7 @@ export default function App() {
 
   if (auth.status === 'loading') return null;
   if (auth.status === 'signed-out') return <Login notice={auth.notice} onSignedIn={loadProfile} />;
+  if (auth.status === 'set-password') return <SetPassword onDone={loadProfile} />;
 
   const { me } = auth;
   const visibleNav = navItems.filter((item) => item.roles.includes(me.role));

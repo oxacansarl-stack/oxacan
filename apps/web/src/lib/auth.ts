@@ -3,6 +3,14 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const DEV_TOKEN_KEY = 'oxacan_token';
 export const UNAUTHORIZED_EVENT = 'oxacan:unauthorized';
 
+// Invite and password-reset links land here with the link type (or an error) in the URL hash.
+// Read it before supabase-js consumes the hash and turns the link into a session.
+const linkParams = new URLSearchParams(window.location.hash.slice(1));
+let passwordSetupPending = ['invite', 'recovery'].includes(linkParams.get('type') ?? '');
+/** Set when the invite / reset link was expired or already used. */
+export const authLinkError = linkParams.get('error_code') ?? linkParams.get('error');
+if (authLinkError) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
 const configuredUrl = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // Optionally reached through our own origin (Vite proxy in dev, Caddy in production) so networks
@@ -65,4 +73,16 @@ export function onSignedOut(cb: () => void): () => void {
     if (event === 'SIGNED_OUT') cb();
   });
   return () => data.subscription.unsubscribe();
+}
+
+/** True after following an invite or password-reset link, until the person has chosen a password. */
+export function needsPasswordSetup(): boolean {
+  return passwordSetupPending;
+}
+
+export async function setPassword(password: string): Promise<void> {
+  if (!supabase) throw new Error('Sign-in is not configured (missing SUPABASE_URL / SUPABASE_ANON_KEY).');
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+  passwordSetupPending = false;
 }

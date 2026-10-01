@@ -42,7 +42,17 @@
     "accountNotSetUp": "Votre compte n'est pas encore configuré dans OXACAN, ou votre session a expiré. Contactez votre administrateur si le problème persiste.",
     "serverUnreachable": "Impossible de joindre le serveur. Réessayez.",
     "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
-    "noAccess": "Vous n'avez pas accès à cette page."
+    "noAccess": "Vous n'avez pas accès à cette page.",
+    "linkInvalid": "Ce lien d'invitation ou de réinitialisation a expiré ou a déjà été utilisé. Demandez un nouveau lien à votre administrateur.",
+    "setPasswordTitle": "Choisissez votre mot de passe",
+    "setPasswordHelp": "Bienvenue sur OXACAN. Choisissez le mot de passe que vous utiliserez pour vous connecter.",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmez le mot de passe",
+    "passwordTooShort": "Le mot de passe doit contenir au moins {{min}} caractères.",
+    "passwordsDontMatch": "Les deux mots de passe ne correspondent pas.",
+    "setPasswordFailed": "Impossible d'enregistrer le mot de passe. Réessayez ou demandez un nouveau lien.",
+    "savePassword": "Enregistrer et continuer",
+    "saving": "Enregistrement…"
   },
   "actions": {
     "save": "Enregistrer",
