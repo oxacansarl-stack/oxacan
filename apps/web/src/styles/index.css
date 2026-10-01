@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+/* Self-hosted so the app never calls a font CDN (LPD/RGPD, §24.2). */
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/ibm-plex-sans';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+/*
+ * OXACAN design tokens — brand "Le Nœud" (graphite, chalk, copper; volt as the single accent).
+ * Space Grotesk carries the wordmark and page titles, IBM Plex Sans the interface and amounts,
+ * IBM Plex Mono only reference codes (OFF-2026-0001). The product ships one light theme.
+ */
+@theme {
+  --color-graphite: #1d1f22;
+  --color-graphite-2: #282b30;
+  --color-graphite-3: #363a40;
+  --color-side-fg: #b9bcc2;
+  --color-side-dim: #7f838a;
+
+  --color-chalk: #f4f3ef;
+  --color-paper: #ffffff;
+  --color-paper-2: #f9f8f5;
+
+  --color-ink: #17191c;
+  --color-ink-2: #3b3f45;
+  --color-muted: #646870;
+  --color-line: #dedbd2;
+  --color-line-soft: #ecebe5;
+
+  --color-copper: #a85d32;
+  --color-copper-bg: #f6ebe3;
+  --color-volt: #e4f53a;
+
+  --color-ok: #2e7448;
+  --color-ok-bg: #e5f1e8;
+  --color-warn: #8a5a00;
+  --color-warn-bg: #f8eed6;
+  --color-bad: #a3372a;
+  --color-bad-bg: #f7e3df;
+  --color-info: #2c5784;
+  --color-info-bg: #e4ecf5;
+  --color-neu: #4b4f55;
+  --color-neu-bg: #eceae4;
+
+  --font-display: 'Space Grotesk Variable', 'Helvetica Neue', Arial, sans-serif;
+  --font-sans: 'IBM Plex Sans Variable', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+  --radius-card: 8px;
+
+  /* Shell metrics, shared by the sidebar, the top bar and sticky page furniture. */
+  --spacing-sidebar: 248px;
+  --spacing-rail: 64px;
+  --spacing-topbar: 56px;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-chalk);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Phase 9 exit criterion: every interactive element keeps a visible focus ring. */
+  :focus-visible {
+    outline: 2px solid var(--color-copper);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Amounts, quantities and hours line up in columns everywhere they appear. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+@layer utilities {
+  /* The dark sidebar inverts the focus ring so it stays visible on graphite. */
+  .focus-on-dark:focus-visible {
+    outline-color: var(--color-volt);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

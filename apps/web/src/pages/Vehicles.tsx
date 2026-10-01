@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { apiGet, apiList, apiPost, apiPut, apiDelete } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import { formatDate, formatNumber } from '../lib/format';
+import type { PageProps } from '../lib/page-props';
 
 interface Vehicle {
   id: string;
@@ -93,7 +94,7 @@ const emptyForm: VehicleForm = {
   insuranceExpiry: '',
 };
 
-export default function Vehicles() {
+export default function Vehicles({ embedded = false }: PageProps) {
   const { t } = useTranslation('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
