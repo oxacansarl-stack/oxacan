@@ -6,7 +6,7 @@
     "title": "Créer un lien d'accès au portail",
     "project": "Projet *",
     "selectProject": "Sélectionner un projet",
-    "expiresAt": "Date d'expiration (facultatif)",
+    "expiresAt": "Date d'expiration (par défaut : 90 jours, maximum 1 an)",
     "submit": "Créer le lien"
   },
   "table": {

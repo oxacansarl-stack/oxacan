@@ -4,7 +4,9 @@ import * as Sentry from '@sentry/node';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import helmet from 'helmet';
+import { json, NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
+import { paginationQuery } from './common/middleware/pagination-query.middleware';
 
 async function bootstrap() {
   if (process.env.SENTRY_DSN) {
@@ -24,6 +26,14 @@ async function bootstrap() {
   });
 
   app.use(helmet());
+  app.use(paginationQuery);
+
+  // A soumission can hold thousands of lines; only the import route gets a larger body limit
+  // (registered before Nest's own 100 kb parser, which then skips the already-parsed body).
+  // Wrapped so the layer is not named "jsonParser": Nest would take it for its own global parser
+  // and not register one for the other routes.
+  const importJson = json({ limit: '10mb' });
+  app.use('/catalogue/import', (req: Request, res: Response, next: NextFunction) => importJson(req, res, next));
 
   app.useGlobalPipes(
     new ValidationPipe({

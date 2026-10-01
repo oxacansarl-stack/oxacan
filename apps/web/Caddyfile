@@ -26,6 +26,12 @@
 	}
 
 	header {
+		# HTTPS only for a year (Railway terminates TLS in front of this server).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# The bundle is same-origin with no inline scripts or eval; Supabase is reached through
+		# /supabase, the direct host is allowed for when the proxy is switched off.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+		Permissions-Policy "camera=(), microphone=(), payment=(), usb=()"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin

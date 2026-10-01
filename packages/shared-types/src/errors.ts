@@ -32,8 +32,8 @@ export class TenantIsolationError extends OxacanError {
 }
 
 export class BusinessRuleError extends OxacanError {
-  constructor(rule: string, message: string) {
-    super('BUSINESS_RULE', message, 422, { rule });
+  constructor(rule: string, message: string, extra: Record<string, unknown> = {}) {
+    super('BUSINESS_RULE', message, 422, { rule, ...extra });
     this.name = 'BusinessRuleError';
   }
 }

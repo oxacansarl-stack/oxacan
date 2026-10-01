@@ -53,7 +53,7 @@ export class DailyReport {
   notes: string | null;
 
   @Column({ type: 'jsonb', default: '[]' })
-  photos: Record<string, unknown>[];
+  photos: { url: string; caption?: string; takenAt?: string }[];
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

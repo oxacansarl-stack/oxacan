@@ -9,8 +9,9 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
-import { IsCents, IsIsoDate } from '../../../common/validation/decorators';
+import { IsCents, IsHttpsUrl, IsIsoDate } from '../../../common/validation/decorators';
 
 /** DB CHECK constraint on expense.category */
 export const EXPENSE_CATEGORIES = [
@@ -48,6 +49,7 @@ export class CreateExpenseDto {
   @IsOptional()
   @IsString()
   @MaxLength(2048)
+  @IsHttpsUrl()
   receiptUrl?: string;
 
   @IsOptional()
@@ -85,6 +87,8 @@ export class UpdateExpenseDto {
   @IsOptional()
   @IsString()
   @MaxLength(2048)
+  @ValidateIf((_o, v) => v !== '')
+  @IsHttpsUrl()
   receiptUrl?: string | null;
 
   @IsOptional()

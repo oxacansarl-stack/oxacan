@@ -5,6 +5,23 @@ import { AuditAction } from '@oxacan/shared-types';
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 
 /**
+ * Live credentials are not personal data to hand out: a portal link token opens the client portal
+ * and a push token can message the device. The export shows that they exist, not their value.
+ */
+const REDACTED: Record<string, string[]> = {
+  portal_token: ['token'],
+  push_device: ['device_token'],
+  // Cached API responses (e.g. a freshly created portal token); the records themselves are exported.
+  idempotency_key: ['response_body'],
+};
+
+function redact(table: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const columns = REDACTED[table];
+  if (!columns) return rows;
+  return rows.map((row) => ({ ...row, ...Object.fromEntries(columns.map((c) => [c, row[c] == null ? null : '[redacted]'])) }));
+}
+
+/**
  * Full export of a company's data (right of access under the Swiss revFADP / GDPR).
  * Discovers every tenant table from the schema so new modules are included automatically.
  */
@@ -23,9 +40,9 @@ export class DataExportService {
     const tables: Record<string, unknown[]> = {};
     for (const { table_name } of tableRows) {
       if (!IDENTIFIER.test(table_name)) continue;
-      tables[table_name] = await this.dataSource.query(
-        `SELECT * FROM "${table_name}" WHERE company_id = $1`,
-        [companyId],
+      tables[table_name] = redact(
+        table_name,
+        await this.dataSource.query(`SELECT * FROM "${table_name}" WHERE company_id = $1`, [companyId]),
       );
     }
     // task_dependency has no company_id; it belongs to the company through its tasks.

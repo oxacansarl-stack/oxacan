@@ -12,6 +12,10 @@ import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { runAsSystem, setTenant } from '../../common/tenant/tenant-context';
 import { CreatePortalTokenDto } from './dto/portal-token.dto';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const PORTAL_DEFAULT_DAYS = 90;
+export const PORTAL_MAX_DAYS = 365;
+
 interface TokenFilters {
   page?: number;
   limit?: number;
@@ -81,11 +85,21 @@ export class PortalService {
     });
     if (!project) throw new NotFoundError('Project', dto.projectId);
 
+    // A shared link must not stay open forever: 90 days unless chosen, never beyond a year, never in the past.
+    const now = Date.now();
+    const expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : new Date(now + PORTAL_DEFAULT_DAYS * DAY_MS);
+    if (expiresAt.getTime() <= now || expiresAt.getTime() > now + PORTAL_MAX_DAYS * DAY_MS) {
+      throw new BusinessRuleError(
+        'INVALID_EXPIRY',
+        `A portal link must expire in the future and within ${PORTAL_MAX_DAYS} days.`,
+      );
+    }
+
     const portalToken = this.tokenRepo.create({
       companyId,
       projectId: dto.projectId,
       token: randomUUID(),
-      expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      expiresAt,
       isActive: true,
       createdById: userId,
     });

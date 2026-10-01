@@ -5,6 +5,7 @@ import { Task } from './entities/task.entity';
 import { TaskDependency } from './entities/task-dependency.entity';
 import { Project } from './entities/project.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { assertProjectExists } from '../../common/util/assert-project';
 import {
   CreateTaskDto,
   UpdateTaskDto,
@@ -50,6 +51,7 @@ export class TasksService {
     projectId: string,
     filters: TaskFilters = {},
   ) {
+    await assertProjectExists(this.projectRepo.manager, companyId, projectId);
     const { page = 1, limit = 50, lotId, status, assignedTo } = filters;
 
     const qb = this.taskRepo

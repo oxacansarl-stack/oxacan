@@ -9,8 +9,28 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
+  IsISO8601,
 } from 'class-validator';
-import { IsIsoDate } from '../../../common/validation/decorators';
+import { Type } from 'class-transformer';
+import { IsHttpsUrl, IsIsoDate } from '../../../common/validation/decorators';
+
+/** One site photo: a link to the stored image plus optional caption and capture time. */
+export class DailyReportPhotoDto {
+  @IsString()
+  @MaxLength(2048)
+  @IsHttpsUrl()
+  url!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  caption?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  takenAt?: string;
+}
 
 class DailyReportFieldsDto {
   @IsOptional()
@@ -45,8 +65,9 @@ class DailyReportFieldsDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(100)
-  @IsObject({ each: true })
-  photos?: Record<string, unknown>[];
+  @ValidateNested({ each: true })
+  @Type(() => DailyReportPhotoDto)
+  photos?: DailyReportPhotoDto[];
 }
 
 export class CreateDailyReportDto extends DailyReportFieldsDto {
