@@ -10,12 +10,26 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsHttpsUrl } from '../../../common/validation/decorators';
 
 /** DB CHECK constraint on plan.file_type */
 export const PLAN_FILE_TYPES = ['pdf', 'dwg', 'dxf', 'png', 'jpg'] as const;
 
-/** DB CHECK constraint on plan_annotation.type */
-export const ANNOTATION_TYPES = ['pin', 'rectangle', 'polygon', 'text', 'measurement'] as const;
+/** DB CHECK constraint on plan_annotation.type ('symbol' = a detection from the symbol kit) */
+export const ANNOTATION_TYPES = ['pin', 'rectangle', 'polygon', 'text', 'measurement', 'symbol'] as const;
+
+/** Content types accepted for an uploaded plan file (DB CHECK on plan_file.content_type) and the plan.file_type each one sets. */
+export const PLAN_UPLOAD_TYPES = {
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+} as const;
+export type PlanUploadType = keyof typeof PLAN_UPLOAD_TYPES;
+export const isPlanUploadType = (t: string): t is PlanUploadType =>
+  Object.prototype.hasOwnProperty.call(PLAN_UPLOAD_TYPES, t);
+
+/** 25 MiB, DB CHECK on plan_file.size_bytes. The largest real GEE plan is ~11 MB. */
+export const PLAN_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export class CreatePlanDto {
   @IsString()
@@ -26,6 +40,7 @@ export class CreatePlanDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2000)
+  @IsHttpsUrl()
   fileUrl!: string;
 
   @IsIn(PLAN_FILE_TYPES)
@@ -71,6 +86,7 @@ export class UpdatePlanDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(2000)
+  @IsHttpsUrl()
   fileUrl?: string;
 
   @IsOptional()
