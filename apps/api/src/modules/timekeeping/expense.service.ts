@@ -7,7 +7,7 @@ import { Expense } from './entities/expense.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { AccessScopeService, ScopeUser } from './access-scope.service';
 import { assertProjectExists } from '../../common/util/assert-project';
-import { CreateExpenseDto, UpdateExpenseDto } from './dto/expense.dto';
+import { CreateExpenseDto, UpdateExpenseDto, vatIncludedCents } from './dto/expense.dto';
 
 interface ExpenseFilters {
   page?: number;
@@ -129,6 +129,8 @@ export class ExpenseService {
       category: dto.category,
       description: dto.description,
       amountCents: dto.amountCents,
+      vatRateBps: dto.vatRateBps ?? null,
+      vatAmountCents: vatIncludedCents(dto.amountCents, dto.vatRateBps),
       receiptUrl: dto.receiptUrl || null,
       isBillable: dto.isBillable ?? false,
       status: 'draft',
@@ -158,6 +160,9 @@ export class ExpenseService {
     if (dto.category !== undefined) expense.category = dto.category;
     if (dto.description !== undefined) expense.description = dto.description;
     if (dto.amountCents !== undefined) expense.amountCents = dto.amountCents;
+    if (dto.vatRateBps !== undefined) expense.vatRateBps = dto.vatRateBps;
+    // Always recomputed from the stored TTC amount and rate (bigint columns load as strings).
+    expense.vatAmountCents = vatIncludedCents(Number(expense.amountCents), expense.vatRateBps);
     if (dto.receiptUrl !== undefined) expense.receiptUrl = dto.receiptUrl || null;
     if (dto.isBillable !== undefined) expense.isBillable = dto.isBillable;
 

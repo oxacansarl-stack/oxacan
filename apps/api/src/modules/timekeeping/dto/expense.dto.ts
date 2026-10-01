@@ -23,6 +23,20 @@ export const EXPENSE_CATEGORIES = [
   'other',
 ] as const;
 
+/** Swiss VAT rates in basis points (DB CHECK on expense.vat_rate_bps): 0 %, 2.6 %, 3.8 %, 8.1 %. */
+export const SWISS_VAT_RATES_BPS = [0, 260, 380, 810] as const;
+
+/**
+ * VAT contained in a TTC amount at `rateBps`, rounded half-up to the centime:
+ * amount × rate / (10000 + rate). Integer arithmetic, exact up to the IsCents bound.
+ * null rate → null (VAT unknown).
+ */
+export function vatIncludedCents(amountTtcCents: number, rateBps: number | null | undefined): number | null {
+  if (rateBps === null || rateBps === undefined) return null;
+  const divisor = 10_000 + rateBps;
+  return Math.floor((2 * amountTtcCents * rateBps + divisor) / (2 * divisor));
+}
+
 export class CreateExpenseDto {
   @IsOptional()
   @IsUUID()
@@ -43,8 +57,14 @@ export class CreateExpenseDto {
   @MaxLength(1000)
   description!: string;
 
+  /** TTC total actually paid. */
   @IsCents()
   amountCents!: number;
+
+  /** VAT rate in basis points (810 = 8.1 %); null or absent = unknown. The VAT amount is computed. */
+  @IsOptional()
+  @IsIn(SWISS_VAT_RATES_BPS)
+  vatRateBps?: number | null;
 
   @IsOptional()
   @IsString()
@@ -83,6 +103,11 @@ export class UpdateExpenseDto {
   @IsOptional()
   @IsCents()
   amountCents?: number;
+
+  /** null clears the rate (VAT unknown); absent keeps it. */
+  @IsOptional()
+  @IsIn(SWISS_VAT_RATES_BPS)
+  vatRateBps?: number | null;
 
   @IsOptional()
   @IsString()

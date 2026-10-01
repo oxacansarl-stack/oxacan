@@ -49,8 +49,17 @@ export class Expense {
   @Column({ type: 'text' })
   description: string;
 
+  /** TTC total actually paid. */
   @Column({ type: 'bigint' })
   amountCents: number;
+
+  /** Swiss VAT rate in basis points (0 / 260 / 380 / 810); null = unknown. */
+  @Column({ type: 'integer', nullable: true })
+  vatRateBps: number | null;
+
+  /** VAT contained in amountCents, computed from vatRateBps; null = unknown. */
+  @Column({ type: 'bigint', nullable: true })
+  vatAmountCents: number | null;
 
   @Column({ type: 'text', nullable: true })
   receiptUrl: string | null;
