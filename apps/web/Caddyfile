@@ -1,6 +1,16 @@
 {
 	admin off
 	auto_https off
+	servers {
+		# Railway's edge is the only peer of this server; it connects from its internal range
+		# 100.64.0.0/10 (or a private range) and puts the client's address in X-Forwarded-For.
+		# Trusting it makes reverse_proxy forward that header with the edge appended, instead of
+		# replacing it with the edge's address (which put every client in one API rate-limit
+		# bucket). Strict: the client IP is read right to left, so a client cannot spoof it by
+		# sending its own X-Forwarded-For. The API trusts the same ranges (trust-proxy.ts).
+		trusted_proxies static private_ranges 100.64.0.0/10
+		trusted_proxies_strict
+	}
 }
 
 :{$PORT:3000} {

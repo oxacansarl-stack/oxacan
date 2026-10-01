@@ -6,6 +6,7 @@ import { BillingEvent } from './entities/billing-event.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { CreateSubscriptionDto, UpdateSubscriptionDto } from './dto/subscription.dto';
+import { LicenceTierName, SeatAvailability, isLicenceTier, seatAvailability } from './seat-rules';
 
 
 interface AddBillingEventDto {
@@ -152,19 +153,29 @@ export class SubscriptionService {
 
   /* ───────────── Seat Availability ───────────── */
 
-  async checkSeatAvailability(companyId: string) {
+  /**
+   * Seats per licence tier (seat-rules.ts): every active user takes a seat of its own tier, and
+   * only a subscription in force (not cancelled, paused or expired) grants seats.
+   *
+   * With `licenceTier`, used/total/available are that tier's: what a caller about to add or
+   * reactivate a user of that tier must check (`available >= 1`). Without it they add both tiers
+   * up, which can show a free seat of the other tier; `byTier` always has the detail.
+   */
+  async checkSeatAvailability(companyId: string, licenceTier?: LicenceTierName): Promise<SeatAvailability> {
     const subscription = await this.findCurrent(companyId);
 
-    const used = await this.appUserRepo.count({
-      where: { companyId, isActive: true },
-    });
+    const rows: { tier: string; n: number }[] = await this.appUserRepo
+      .createQueryBuilder('u')
+      .select('u.licence_tier', 'tier')
+      .addSelect('COUNT(*)::int', 'n')
+      .where('u.company_id = :companyId', { companyId })
+      .andWhere('u.is_active = true')
+      .groupBy('u.licence_tier')
+      .getRawMany();
 
-    const total = subscription?.saasSeatCount ?? 0;
+    const used: Partial<Record<LicenceTierName, number>> = {};
+    for (const row of rows) if (isLicenceTier(row.tier)) used[row.tier] = Number(row.n);
 
-    return {
-      used,
-      total,
-      available: total - used,
-    };
+    return seatAvailability(subscription, used, licenceTier);
   }
 }

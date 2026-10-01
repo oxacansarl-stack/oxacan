@@ -151,4 +151,11 @@ export class UpdateSettingsDto {
   @Min(0)
   @Max(365)
   defaultPaymentTermsDays?: number;
+
+  /** Yearly change of the construction price index in basis points (DB check: −2000…5000). */
+  @IsOptional()
+  @IsInt()
+  @Min(-2000)
+  @Max(5000)
+  priceIndexRateBp?: number;
 }

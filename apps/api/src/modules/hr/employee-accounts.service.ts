@@ -5,6 +5,7 @@ import { BusinessRuleError, NotFoundError, OxacanError } from '@oxacan/shared-ty
 import { AppUser } from '../auth/entities/app-user.entity';
 import { Company } from '../company/entities/company.entity';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { isLicenceTier, LicenceTierName } from '../subscription/seat-rules';
 import { runAsSystem } from '../../common/tenant/tenant-context';
 import { Team } from './entities/team.entity';
 import { TeamMember } from './entities/team-member.entity';
@@ -44,20 +45,28 @@ export class EmployeeAccountsService {
    * checkSeatAvailability reads on its own connection, so it sees committed rows only; that is
    * accurate because every seat-taking change commits before it releases the lock.
    */
-  async withFreeSeat<T>(companyId: string, fn: (m: EntityManager) => Promise<T>): Promise<T> {
+  async withFreeSeat<T>(
+    companyId: string,
+    licenceTier: string,
+    fn: (m: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    const tier = seatTier(licenceTier);
     try {
       return await this.dataSource.transaction(async (m) => {
         // Bounded wait: waiters hold a pooled connection, so they must not queue forever.
         await m.query(`SET LOCAL lock_timeout = '10s'`);
         await m.query('SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))', [SEAT_LOCK_NAMESPACE, companyId]);
-        const seats = await this.subscriptions.checkSeatAvailability(companyId);
+        // Seats are per licence tier: a free "application" seat doesn't admit a "saas" user.
+        const seats = await this.subscriptions.checkSeatAvailability(companyId, tier);
         if (seats.available < 1) {
           throw new BusinessRuleError(
             'SEAT_LIMIT_REACHED',
-            seats.total === 0
-              ? 'The company has no subscription seats. Add seats to the subscription before adding users.'
-              : `All ${seats.total} subscription seat(s) are in use. Deactivate a user or add seats first.`,
-            { used: seats.used, total: seats.total },
+            !seats.subscriptionActive
+              ? 'The subscription is not active, so it grants no seats.'
+              : seats.total === 0
+                ? `The subscription has no ${tier} seats. Add seats before adding ${tier} users.`
+                : `All ${seats.total} ${tier} seat(s) are in use. Deactivate a user or add seats first.`,
+            { used: seats.used, total: seats.total, licenceTier: tier, subscriptionActive: seats.subscriptionActive },
           );
         }
         return fn(m);
@@ -89,8 +98,9 @@ export class EmployeeAccountsService {
     await this.assertNoEmployeeWithEmail(companyId, email);
     await this.assertNotRegisteredElsewhere(companyId, email);
     const company = await this.companyRepo.findOne({ where: { id: companyId } });
+    const licenceTier = dto.licenceTier ?? (OFFICE_ROLES.has(dto.role) ? 'application' : 'saas');
 
-    return this.withFreeSeat(companyId, async (m) => {
+    return this.withFreeSeat(companyId, licenceTier, async (m) => {
       // Again under the lock, so a concurrent request for the same email gets no second invite.
       await this.assertNoEmployeeWithEmail(companyId, email);
       const authUser = await this.invite(email, {
@@ -108,7 +118,7 @@ export class EmployeeAccountsService {
           lastName: dto.lastName,
           phone: dto.phone || null,
           role: dto.role,
-          licenceTier: dto.licenceTier ?? (OFFICE_ROLES.has(dto.role) ? 'application' : 'saas'),
+          licenceTier,
           hourlyRateCents: dto.hourlyRateCents ?? null,
           cctCode: dto.cctCode || null,
           hireDate: asDate(dto.hireDate),
@@ -221,7 +231,7 @@ export class EmployeeAccountsService {
   async reactivate(companyId: string, userId: string): Promise<AppUser> {
     const user = await this.load(companyId, userId);
     if (user.isActive) return user;
-    return this.withFreeSeat(companyId, async (m) => {
+    return this.withFreeSeat(companyId, user.licenceTier, async (m) => {
       user.isActive = true;
       user.deactivatedAt = null;
       await m.update(AppUser, { id: user.id, companyId }, { isActive: true, deactivatedAt: null });
@@ -241,4 +251,9 @@ function emailAlreadyRegistered(): BusinessRuleError {
     'EMAIL_ALREADY_REGISTERED',
     'This email address is already used by another OXACAN account and cannot be invited.',
   );
+}
+
+/** The seat tier a licence takes; anything unexpected is checked against the stricter saas seats. */
+function seatTier(licenceTier: string | null | undefined): LicenceTierName {
+  return isLicenceTier(licenceTier) ? licenceTier : 'saas';
 }

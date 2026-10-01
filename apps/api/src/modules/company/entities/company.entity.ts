@@ -57,6 +57,10 @@ export class Company {
   @Column({ type: 'integer', default: 30 })
   defaultPaymentTermsDays: number;
 
+  /** INDEXED pricing: yearly price change in basis points (200 = +2 %/year), PRD §7.4. */
+  @Column({ type: 'integer', default: 200 })
+  priceIndexRateBp: number;
+
   @Column({ type: 'integer', default: 810 })
   defaultVatRate: number;
 

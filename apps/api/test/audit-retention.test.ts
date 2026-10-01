@@ -330,6 +330,8 @@ describe('data retention', () => {
       'client_contact.departed_company': 0,
       'client.departed_company': 0,
       'portal_token.expired': 1,
+      'portal_comment.technical_data': 0,
+      'portal_comment.departed_company': 0,
       'notification.old': 2,
       'push_device.inactive': 1,
       'idempotency_key.expired': 1,

@@ -70,10 +70,11 @@ beforeAll(async () => {
     );
   }
   await db.query(`INSERT INTO team (id, company_id, name) VALUES ($1, $2, 'Équipe Sud')`, [TEAM_C, COMPANY_C]);
-  // 4 seats, 2 taken by the admin and the project manager.
+  // 4 saas seats, 2 taken by the admin and the project manager (seeded as saas); 1 application
+  // seat for the office user created (and deactivated) by the licence-default test.
   await db.query(
-    `INSERT INTO subscription (company_id, stripe_customer_id, tier, status, saas_seat_count)
-     VALUES ($1, 'cus_test_c', 'equipe', 'active', 4)`,
+    `INSERT INTO subscription (company_id, stripe_customer_id, tier, status, saas_seat_count, application_seat_count)
+     VALUES ($1, 'cus_test_c', 'equipe', 'active', 4, 1)`,
     [COMPANY_C],
   );
 });
@@ -196,7 +197,7 @@ describe('Employees: create and invite (PRD §18.2, §19.1)', () => {
   it('enforces subscription seats on create, and again on reactivation', async () => {
     // admin + PM + Anna + retry.me = 4 of 4 seats.
     const seats = await admin.get('/subscription/seats');
-    expect(seats.data).toMatchObject({ used: 4, total: 4, available: 0 });
+    expect(seats.data.byTier.saas).toMatchObject({ used: 4, total: 4, available: 0 });
 
     const full = await admin.post('/hr/employees', employee('one.more@example.test'));
     expect(full.status).toBe(422);
@@ -242,7 +243,7 @@ describe('Employees: create and invite (PRD §18.2, §19.1)', () => {
     const rejected = results.filter((r) => r.status !== 201);
     expect(rejected).toHaveLength(2);
     for (const r of rejected) expect(details(r)?.rule).toBe('SEAT_LIMIT_REACHED');
-    expect((await admin.get('/subscription/seats')).data).toMatchObject({ used: 6, total: 6 });
+    expect((await admin.get('/subscription/seats')).data.byTier.saas).toMatchObject({ used: 6, total: 6 });
   });
 
   it('resends an invitation to the same Supabase user, and relinks an unlinked account', async () => {

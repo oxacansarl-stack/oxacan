@@ -2,7 +2,7 @@ import {
   addDays, chf, date, ensureSpace, heading, letterhead, newDocument, PAGE, pageNumbers, paragraph, Party, pct, qty,
   Sender, table, titleBlock, toBuffer, totals, COLORS,
 } from './pdf-layout';
-import { sellingLineCents, sellingUnitCents } from '../offers/offer-pricing';
+import { sellingLineCents, sellingUnitCents, variantLabel, variantSemantics } from '../offers/offer-pricing';
 
 export interface OfferDocumentData {
   sender: Sender;
@@ -33,13 +33,6 @@ export interface OfferDocumentData {
   assumptions: { type: string; description: string; impactAmountCents: number | null; status: string }[];
 }
 
-const ASSUMPTION_LABELS: Record<string, string> = {
-  VARIANTE: 'Variante',
-  OPTION: 'Option',
-  HYPOTHESE_A_VALIDER: 'Hypothèse à valider',
-  INFORMATION_MANQUANTE: 'Information manquante',
-  EXCLU: 'Exclu',
-};
 
 export async function renderOffer(d: OfferDocumentData): Promise<Buffer> {
   const { offer } = d;
@@ -55,7 +48,10 @@ export async function renderOffer(d: OfferDocumentData): Promise<Buffer> {
     ['Validité', offer.validityDays ? `jusqu'au ${date(addDays(offer.date, offer.validityDays))}` : ''],
   ]);
 
+  // Where each line type goes is defined once in offer-pricing.ts (VARIANT_SEMANTICS, PRD §7.8).
   const byType = (t: string) => d.lines.filter((l) => l.variantType === t);
+  const inSection = (section: string) => d.lines.filter((l) => variantSemantics(l.variantType).pdfSection === section);
+  const reserveNote = (l: OfferDocumentData['lines'][number]) => variantLabel(l.variantType).toLowerCase();
   const columns = [
     { header: 'Pos.', width: 35 },
     { header: 'Désignation', width: width - 280 },
@@ -66,7 +62,10 @@ export async function renderOffer(d: OfferDocumentData): Promise<Buffer> {
   ];
   const row = (l: OfferDocumentData['lines'][number], i: number) => [
     String(l.positionNumber ?? i + 1),
-    l.roomType ? `${l.description}\n${l.roomType}` : l.description,
+    // A hypothesis is priced into the total but flagged, so the client sees it is still to confirm.
+    [variantSemantics(l.variantType).pdfReserve ? `${l.description} (${reserveNote(l)})` : l.description, l.roomType]
+      .filter(Boolean)
+      .join('\n'),
     qty(l.quantity),
     l.unit ?? '',
     // Stored prices are costs; the client sees selling prices (cost × margin factor).
@@ -74,7 +73,8 @@ export async function renderOffer(d: OfferDocumentData): Promise<Buffer> {
     l.unitPriceCents == null ? '' : chf(sellingLineCents(l.quantity, l.unitPriceCents, offer.marginFactor)),
   ];
 
-  table(doc, columns, byType('BASE').map(row));
+  // Main table: exactly the lines counted in the total (BASE and hypotheses), so it adds up.
+  table(doc, columns, inSection('main').map(row));
   const rounding = offer.totalTtcCents - offer.totalHtCents - offer.totalVatCents;
   totals(doc, [
     { label: 'Total HT', value: chf(offer.totalHtCents) },
@@ -93,20 +93,28 @@ export async function renderOffer(d: OfferDocumentData): Promise<Buffer> {
     table(doc, columns, lines.map(row));
   }
 
-  const excluded = byType('EXCLU');
+  const excluded = inSection('exclusions');
   if (excluded.length) {
     heading(doc, 'Prestations non comprises');
     paragraph(doc, excluded.map((l) => `• ${l.description}`).join('\n'));
   }
 
   const openPoints = [
-    ...byType('HYPOTHESE_A_VALIDER').map((l) => `• ${l.description} (hypothèse à valider)`),
-    ...byType('INFORMATION_MANQUANTE').map((l) => `• ${l.description} (information manquante)`),
+    // Hypotheses (also in the main table) and missing information (not priced in) are reserves.
+    ...d.lines
+      .filter((l) => variantSemantics(l.variantType).pdfReserve)
+      .map(
+        (l) =>
+          `• ${l.description} (${reserveNote(l)})` +
+          (variantSemantics(l.variantType).inTotal || l.unitPriceCents == null
+            ? ''
+            : ` (estimation ${chf(sellingLineCents(l.quantity, l.unitPriceCents, offer.marginFactor))} CHF HT, non comprise dans le total)`),
+      ),
     ...d.assumptions
       .filter((a) => a.status !== 'rejected')
       .map(
         (a) =>
-          `• ${ASSUMPTION_LABELS[a.type] ?? a.type} : ${a.description}` +
+          `• ${variantLabel(a.type)} : ${a.description}` +
           (a.impactAmountCents ? ` (incidence ${chf(a.impactAmountCents)} CHF HT)` : ''),
       ),
   ];

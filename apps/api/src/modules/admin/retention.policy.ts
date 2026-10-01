@@ -26,6 +26,9 @@ export const NOTIFICATION_MAX_DAYS = 365;
 /** Expired or revoked client-portal links are kept a little for support questions, then purged. */
 export const PORTAL_TOKEN_GRACE_DAYS = 30;
 
+/** IP address and user agent of client-portal comments: technical data, not needed for long. */
+export const PORTAL_COMMENT_TECHNICAL_DAYS = 90;
+
 /** Push-device tokens that were switched off and not used since. */
 export const PUSH_DEVICE_INACTIVE_DAYS = 90;
 
@@ -47,6 +50,13 @@ export const PROTECTED_TABLES: readonly string[] = [
   'billing_event',
   'subscription',
   'audit_log',
+  // Signature evidence of a client accepting or refusing an offer (it becomes the contract basis).
+  'portal_offer_decision',
+  // Supporting records of billing and bookkeeping.
+  'acompte_schedule_item',
+  'executed_quantity',
+  'bank_statement',
+  'bank_statement_line',
 ];
 
 export type RetentionAction = 'delete' | 'anonymise';
@@ -149,6 +159,27 @@ export const RETENTION_RULES: readonly RetentionRule[] = [
     where: `expires_at < now() - interval '${PORTAL_TOKEN_GRACE_DAYS} days'
       OR (is_active = false AND created_at < now() - interval '${PORTAL_TOKEN_GRACE_DAYS} days')
       OR company_id IN (${DEPARTED_COMPANIES})`,
+  },
+  {
+    key: 'portal_comment.technical_data',
+    table: 'portal_comment',
+    action: 'anonymise',
+    description: 'Drop the IP address and user agent of client-portal comments',
+    retention: `${PORTAL_COMMENT_TECHNICAL_DAYS} days`,
+    legalBasis: 'PRD §25.2 (données techniques: selon nécessité)',
+    where: `(ip_address IS NOT NULL OR user_agent IS NOT NULL)
+      AND created_at < now() - interval '${PORTAL_COMMENT_TECHNICAL_DAYS} days'`,
+    set: `ip_address = NULL, user_agent = NULL`,
+  },
+  {
+    key: 'portal_comment.departed_company',
+    table: 'portal_comment',
+    action: 'anonymise',
+    description: 'Anonymise the authors of client-portal comments of companies that left OXACAN',
+    retention: `${COMPANY_EXPORT_WINDOW_DAYS} days after termination`,
+    legalBasis: 'PRD §25.3',
+    where: `author_name <> 'Anonymisé' AND company_id IN (${DEPARTED_COMPANIES})`,
+    set: `author_name = 'Anonymisé', ip_address = NULL, user_agent = NULL`,
   },
   {
     key: 'notification.old',

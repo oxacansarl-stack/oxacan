@@ -42,6 +42,7 @@ export class SettingsController {
       geolocationEnabled: company.geolocationEnabled,
       iban: company.iban,
       defaultPaymentTermsDays: company.defaultPaymentTermsDays,
+      priceIndexRateBp: company.priceIndexRateBp,
     };
   }
 
@@ -65,6 +66,8 @@ export class SettingsController {
     if (body.iban !== undefined) data.iban = body.iban || null;
     if (body.defaultPaymentTermsDays !== undefined)
       data.defaultPaymentTermsDays = body.defaultPaymentTermsDays;
+    if (body.priceIndexRateBp !== undefined)
+      data.priceIndexRateBp = body.priceIndexRateBp;
 
     return this.companyService.update(companyId, data);
   }

@@ -73,3 +73,20 @@ export function plusValueDetectedMessage(pv: {
       `Elle doit être chiffrée et validée par le client avant exécution.`,
   };
 }
+
+export function acompteDueMessage(a: {
+  label: string | null;
+  reference: string;
+  name: string;
+  contractReference: string;
+  amountHtCents: number;
+  dueDate: string;
+}) {
+  const what = a.label ? `« ${truncate(a.label, 80)} »` : 'prévu';
+  return {
+    title: `Acompte à émettre : ${a.reference}`,
+    body:
+      `L'acompte ${what} du contrat ${a.contractReference} (projet ${projectLabel(a)}, ` +
+      `${formatChf(a.amountHtCents)} HT) était prévu le ${a.dueDate} et n'a pas encore été émis.`,
+  };
+}

@@ -15,7 +15,7 @@ export class CompanyController {
     const company = await this.companyService.findById(companyId);
     if (!hidesMoneyFor(user.role)) return company;
     // Field roles get the company identity, not its commercial terms or bank account.
-    const { defaultMarginFactor: _m, defaultRetentionRate: _r, iban: _i, ...visible } = company;
+    const { defaultMarginFactor: _m, defaultRetentionRate: _r, iban: _i, priceIndexRateBp: _p, ...visible } = company;
     return visible;
   }
 

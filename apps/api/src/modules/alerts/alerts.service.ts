@@ -3,7 +3,9 @@ import { DataSource, EntityManager } from 'typeorm';
 import { runAsSystem, tenantStorage } from '../../common/tenant/tenant-context';
 import { OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
-import { acompteOverdueMessage, budgetDriftMessage, plusValueDetectedMessage } from './alert-messages';
+import { acompteDueMessage, acompteOverdueMessage, budgetDriftMessage, plusValueDetectedMessage } from './alert-messages';
+import { findDueAcomptes } from '../contracts/acompte-schedule';
+import { projectActualCostSql } from '../projects/project-cost';
 
 /** Build Strategy Phase 6: the drift alert fires when actual costs exceed the budget by more than 10 %. */
 export const DRIFT_THRESHOLD_PERCENT = 10;
@@ -13,13 +15,15 @@ const JOB_LOCK = 'oxacan:financial_alerts';
 /** Transaction advisory lock serialising the checks of one company (job, manual trigger, recalculation). */
 const companyLock = (companyId: string) => `oxacan:financial_alerts:${companyId}`;
 
-type AlertKind = 'budget_drift' | 'acompte_overdue' | 'plus_value_detected';
+type AlertKind = 'budget_drift' | 'acompte_overdue' | 'plus_value_detected' | 'acompte_due';
 
 export interface CompanyAlertResult {
   companyId: string;
   /** Notified alerts (new, or a drift re-opened after it was resolved). */
   budgetDrift: number;
   acompteOverdue: number;
+  /** Planned acomptes due and not issued yet (PRD §15.6 "à émettre"). */
+  acompteDue: number;
   plusValueDetected: number;
   /** Drift alerts closed because the project is back under the threshold. */
   driftResolved: number;
@@ -104,6 +108,7 @@ export class AlertsService {
         budgetDrift: drift.notified,
         driftResolved: drift.resolved,
         acompteOverdue: await this.checkOverdueAcomptes(m, companyId, office),
+        acompteDue: await this.checkDueAcomptes(m, companyId, office),
         plusValueDetected: await this.checkPlusValues(m, companyId, office),
       };
     });
@@ -129,8 +134,8 @@ export class AlertsService {
   /* ───────────── Checks ───────────── */
 
   /**
-   * Actual cost is computed live with the formula of ProjectsService.updateProgress (approved hours at
-   * their frozen cost + approved expenses), so a drift is caught even before anyone recalculates.
+   * Actual cost is computed live with the formula of ProjectsService.updateProgress (projectActualCostSql),
+   * so a drift is caught even before anyone recalculates.
    * A project back under the threshold has its alert resolved; crossing it again notifies again.
    */
   private async checkBudgetDrift(
@@ -147,11 +152,7 @@ export class AlertsService {
               COALESCE(c.budget > 0 AND c.status NOT IN ('completed', 'cancelled')
                        AND c.actual::numeric * 100 > c.budget::numeric * (100 + $3::numeric), false) AS drifting
          FROM (SELECT p.id, p.reference, p.name, p.manager_id, p.status, p.budget_ht_cents AS budget,
-                      (COALESCE((SELECT SUM(t.cost_cents) FROM time_entry t
-                                  WHERE t.project_id = p.id AND t.company_id = p.company_id AND t.status = 'approved'), 0)
-                     + COALESCE((SELECT SUM(e.amount_cents) FROM expense e
-                                  WHERE e.project_id = p.id AND e.company_id = p.company_id AND e.status = 'approved'), 0)
-                      )::bigint AS actual
+                      ${projectActualCostSql('p.id', 'p.company_id')} AS actual
                  FROM project p
                 WHERE p.company_id = $1 AND ($2::uuid IS NULL OR p.id = $2::uuid)) c`,
       [companyId, projectId ?? null, DRIFT_THRESHOLD_PERCENT],
@@ -220,6 +221,35 @@ export class AlertsService {
       const msg = acompteOverdueMessage({ invoiceNumber: i.invoice_number, reference: i.reference, name: i.name, ...details });
       await this.notify(m, companyId, recipients(office, i.manager_id), {
         type: 'acompte_overdue', ...msg, referenceType: 'invoice', referenceId: i.id,
+      });
+      notified++;
+    }
+    return notified;
+  }
+
+  /**
+   * Planned acomptes (contract acompte schedule) due today or earlier with no sent acompte yet.
+   * One reminder per schedule item.
+   */
+  private async checkDueAcomptes(m: EntityManager, companyId: string, office: OfficeUser[]): Promise<number> {
+    const due = await findDueAcomptes(m, companyId);
+    if (!due.length) return 0;
+    const projects: { id: string; reference: string; manager_id: string | null }[] = await m.query(
+      'SELECT id, reference, manager_id FROM project WHERE company_id = $1 AND id = ANY($2::uuid[])',
+      [companyId, [...new Set(due.map((d) => d.projectId))]],
+    );
+    const byId = new Map(projects.map((p) => [p.id, p]));
+
+    let notified = 0;
+    for (const d of due) {
+      const project = byId.get(d.projectId);
+      if (!project) continue;
+      const dueDate = d.dueDate.split('-').reverse().join('.');
+      const details = { amountHtCents: Number(d.amountHtCents), dueDate, contractReference: d.contractReference };
+      if (!(await this.claim(m, companyId, 'acompte_due', d.projectId, d.id, details))) continue;
+      const msg = acompteDueMessage({ label: d.label, reference: project.reference, name: d.projectName, ...details });
+      await this.notify(m, companyId, recipients(office, project.manager_id), {
+        type: 'acompte_due', ...msg, referenceType: 'contract', referenceId: d.contractId,
       });
       notified++;
     }

@@ -13,6 +13,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RlsContextMiddleware } from './common/middleware/rls-context.middleware';
 import { TenantConnectionHook } from './common/tenant/tenant-connection.hook';
+import { DeferredBodyInterceptor } from './common/interceptors/deferred-body.interceptor';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
@@ -97,8 +98,10 @@ import { AlertsModule } from './modules/alerts/alerts.module';
     { provide: APP_GUARD, useClass: CompanyContextGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
-    // Global interceptors nest in this order (first = outermost). Idempotency must wrap the
-    // envelope so it stores and replays the exact body the client receives.
+    // Global interceptors nest in this order (first = outermost). The deferred body (large
+    // imports, parsed only after the guards) comes first so the others see it. Idempotency must
+    // wrap the envelope so it stores and replays the exact body the client receives.
+    { provide: APP_INTERCEPTOR, useClass: DeferredBodyInterceptor },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },

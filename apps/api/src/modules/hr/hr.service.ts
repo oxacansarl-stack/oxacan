@@ -288,6 +288,7 @@ export class HrService {
     });
     if (!user) throw new NotFoundError('AppUser', userId);
 
+    const previousTier = user.licenceTier;
     if (dto.hourlyRateCents !== undefined) user.hourlyRateCents = dto.hourlyRateCents;
     if (dto.role !== undefined) user.role = dto.role;
     if (dto.licenceTier !== undefined) user.licenceTier = dto.licenceTier;
@@ -301,8 +302,13 @@ export class HrService {
       }
       user.isActive = dto.isActive;
       user.deactivatedAt = dto.isActive ? null : new Date();
-      // Reactivating takes a subscription seat again.
-      if (dto.isActive) return this.accounts.withFreeSeat(companyId, (m) => m.save(user));
+      // Reactivating takes a subscription seat again, of the (possibly new) licence tier.
+      if (dto.isActive) return this.accounts.withFreeSeat(companyId, user.licenceTier, (m) => m.save(user));
+    }
+
+    // An active user moving to another licence tier takes a seat of that tier.
+    if (user.isActive && user.licenceTier !== previousTier) {
+      return this.accounts.withFreeSeat(companyId, user.licenceTier, (m) => m.save(user));
     }
 
     return this.userRepo.save(user);
