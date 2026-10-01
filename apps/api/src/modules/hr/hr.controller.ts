@@ -5,13 +5,16 @@ import {
   Put,
   Delete,
   Body,
+  HttpCode,
   Param,
   Query,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   CompanyId,
+  CurrentUser,
 } from '../../common/decorators/current-user.decorator';
+import { RequestUser } from '../../common/guards/jwt-auth.guard';
 import {
   ADMIN_ONLY,
   OFFICE_ROLES,
@@ -19,9 +22,11 @@ import {
   SITE_LEAD_ROLES,
 } from '../../common/decorators/roles.decorator';
 import { HrService } from './hr.service';
+import { EmployeeAccountsService } from './employee-accounts.service';
 import { parsePaging } from '../timekeeping/access-scope.service';
 import {
   AddTeamMemberDto,
+  CreateEmployeeDto,
   CreateTeamDto,
   UpdateEmployeeDto,
   UpdateTeamDto,
@@ -29,7 +34,10 @@ import {
 
 @Controller('hr')
 export class HrController {
-  constructor(private readonly service: HrService) {}
+  constructor(
+    private readonly service: HrService,
+    private readonly accounts: EmployeeAccountsService,
+  ) {}
 
   /* ───────────── Teams ───────────── */
 
@@ -127,14 +135,59 @@ export class HrController {
     });
   }
 
+  /**
+   * PRD §18.2: the administrator creates accounts. Takes a subscription seat and emails the
+   * employee a Supabase invitation; the returned auth user is linked to the new app_user.
+   */
+  @Post('employees')
+  @Roles(...ADMIN_ONLY)
+  async createEmployee(
+    @CompanyId() companyId: string,
+    @Body() body: CreateEmployeeDto,
+  ) {
+    return this.accounts.createEmployee(companyId, body);
+  }
+
   /** PRD: the administrator sets pay rates and roles. */
   @Put('employees/:userId')
   @Roles(...ADMIN_ONLY)
   async updateEmployee(
     @CompanyId() companyId: string,
+    @CurrentUser() actor: RequestUser,
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() body: UpdateEmployeeDto,
   ) {
-    return this.service.updateEmployee(companyId, userId, body);
+    return this.service.updateEmployee(companyId, userId, body, actor?.id);
+  }
+
+  @Post('employees/:userId/invite')
+  @HttpCode(200)
+  @Roles(...ADMIN_ONLY)
+  async resendInvite(
+    @CompanyId() companyId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.accounts.resendInvite(companyId, userId);
+  }
+
+  @Post('employees/:userId/deactivate')
+  @HttpCode(200)
+  @Roles(...ADMIN_ONLY)
+  async deactivateEmployee(
+    @CompanyId() companyId: string,
+    @CurrentUser() actor: RequestUser,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.accounts.deactivate(companyId, userId, actor?.id);
+  }
+
+  @Post('employees/:userId/reactivate')
+  @HttpCode(200)
+  @Roles(...ADMIN_ONLY)
+  async reactivateEmployee(
+    @CompanyId() companyId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    return this.accounts.reactivate(companyId, userId);
   }
 }

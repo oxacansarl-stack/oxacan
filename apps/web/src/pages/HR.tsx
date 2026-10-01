@@ -44,9 +44,42 @@ interface Employee {
   role: string;
   hourlyRateCents: number | null;
   cctCode?: string | null;
+  supabaseAuthId?: string | null;
   isActive: boolean;
   createdAt: string;
 }
+
+interface SeatAvailability {
+  used: number;
+  total: number;
+  available: number;
+}
+
+interface NewEmployeeForm {
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  licenceTier: string;
+  hourlyRate: string;
+  phone: string;
+  cctCode: string;
+  hireDate: string;
+  teamId: string;
+}
+
+const EMPTY_EMPLOYEE: NewEmployeeForm = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  role: 'WORKER',
+  licenceTier: '',
+  hourlyRate: '',
+  phone: '',
+  cctCode: '',
+  hireDate: '',
+  teamId: '',
+};
 
 /* ------------------------------------------------------------------ */
 /*  Style constants                                                    */
@@ -119,6 +152,7 @@ const ROLE_COLORS: Record<string, { bg: string; fg: string }> = {
 
 /** app_user.role CHECK values */
 const ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'] as const;
+const LICENCE_TIERS = ['saas', 'application'] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -126,6 +160,20 @@ const ROLES = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'WORKER'] as const;
 
 function roleLabel(role: string): string {
   return i18n.t(`role.${role}`, { ns: 'common', defaultValue: role });
+}
+
+/** HR-specific messages for account rules (seats, invitations), else the shared translation. */
+function hrErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const details = err.details ?? {};
+    let rule = typeof details.rule === 'string' ? details.rule : undefined;
+    if (rule === 'SEAT_LIMIT_REACHED' && details.total === 0) rule = 'NO_SEATS';
+    if (rule && i18n.exists(`errors.${rule}`, { ns: 'hr' })) {
+      return i18n.t(`errors.${rule}`, { ns: 'hr', used: details.used, total: details.total });
+    }
+    if (err.code && i18n.exists(`errors.${err.code}`, { ns: 'hr' })) return i18n.t(`errors.${err.code}`, { ns: 'hr' });
+  }
+  return errorMessage(err, fallback);
 }
 
 function displayName(u: { firstName?: string; lastName?: string; email: string }): string {
@@ -176,8 +224,10 @@ function activeBadge(isActive: boolean): React.ReactNode {
 export default function HR() {
   const { t } = useTranslation('hr');
   // The employee directory (with pay rates) is office-only; team leaders see their teams.
-  const { role } = useCurrentUser();
+  const { role, id: currentUserId } = useCurrentUser();
   const isOffice = role === 'ADMIN' || role === 'PROJECT_MANAGER';
+  // Creating, inviting and (de)activating accounts is the administrator's job (PRD §18.2).
+  const isAdmin = role === 'ADMIN';
   const [activeTab, setActiveTab] = useState<'teams' | 'employees'>('teams');
 
   /* ============ TEAMS STATE ============ */
@@ -217,6 +267,18 @@ export default function HR() {
   const [editIsActive, setEditIsActive] = useState(true);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState('');
+
+  /* Add employee (admin) */
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [newEmp, setNewEmp] = useState<NewEmployeeForm>(EMPTY_EMPLOYEE);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [seats, setSeats] = useState<SeatAvailability | null>(null);
+  const [teamOptions, setTeamOptions] = useState<Team[]>([]);
+
+  /* Row actions: resend invitation, deactivate, reactivate */
+  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
   /* Employees list is also used in team dropdowns */
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -357,6 +419,84 @@ export default function HR() {
 
   /* ============ EMPLOYEE ACTIONS ============ */
 
+  const fetchSeats = useCallback(() => {
+    apiGet<SeatAvailability>('/subscription/seats')
+      .then(setSeats)
+      .catch(() => setSeats(null));
+  }, []);
+
+  const openAddEmployee = () => {
+    setShowAddEmployee(true);
+    setNewEmp(EMPTY_EMPLOYEE);
+    setAddError('');
+    fetchSeats();
+    apiGet<Team[]>('/hr/teams?limit=100')
+      .then((list) => setTeamOptions(list ?? []))
+      .catch(() => setTeamOptions([]));
+  };
+
+  const setNewEmpField = (field: keyof NewEmployeeForm, value: string) =>
+    setNewEmp((prev) => ({ ...prev, [field]: value }));
+
+  const handleCreateEmployee = () => {
+    if (!newEmp.firstName.trim() || !newEmp.lastName.trim() || !newEmp.email.trim()) {
+      setAddError(t('messages.requiredFields'));
+      return;
+    }
+    // CHF → integer centimes
+    const hourlyRateCents = newEmp.hourlyRate.trim() === '' ? undefined : Math.round(parseFloat(newEmp.hourlyRate) * 100);
+    if (hourlyRateCents !== undefined && (!Number.isFinite(hourlyRateCents) || hourlyRateCents < 0)) {
+      setAddError(t('messages.invalidHourlyRate'));
+      return;
+    }
+    const email = newEmp.email.trim().toLowerCase();
+    const body: Record<string, unknown> = {
+      firstName: newEmp.firstName.trim(),
+      lastName: newEmp.lastName.trim(),
+      email,
+      role: newEmp.role,
+    };
+    if (newEmp.licenceTier) body.licenceTier = newEmp.licenceTier;
+    if (hourlyRateCents !== undefined) body.hourlyRateCents = hourlyRateCents;
+    if (newEmp.phone.trim()) body.phone = newEmp.phone.trim();
+    if (newEmp.cctCode.trim()) body.cctCode = newEmp.cctCode.trim();
+    if (newEmp.hireDate) body.hireDate = newEmp.hireDate;
+    if (newEmp.teamId) body.teamId = newEmp.teamId;
+
+    setAddLoading(true);
+    setAddError('');
+    apiPost<Employee>('/hr/employees', body)
+      .then(() => {
+        setShowAddEmployee(false);
+        setNewEmp(EMPTY_EMPLOYEE);
+        setNotice({ kind: 'success', text: t('messages.inviteSent', { email }) });
+        fetchEmployees();
+        fetchAllEmployees();
+      })
+      .catch((err) => {
+        setAddError(hrErrorMessage(err, t('messages.createEmployeeFailed')));
+        fetchSeats();
+      })
+      .finally(() => setAddLoading(false));
+  };
+
+  const runRowAction = (emp: Employee, action: 'invite' | 'deactivate' | 'reactivate') => {
+    if (action === 'deactivate' && !window.confirm(t('employees.confirmDeactivate', { name: displayName(emp) }))) return;
+    setRowBusyId(emp.id);
+    setNotice(null);
+    apiPost<Employee>(`/hr/employees/${emp.id}/${action}`)
+      .then(() => {
+        const key = { invite: 'inviteSent', deactivate: 'deactivated', reactivate: 'reactivated' }[action];
+        setNotice({ kind: 'success', text: t(`messages.${key}`, { email: emp.email, name: displayName(emp) }) });
+        if (action !== 'invite') {
+          fetchEmployees();
+          fetchAllEmployees();
+        }
+      })
+      .catch((err) => setNotice({ kind: 'error', text: hrErrorMessage(err, t(`messages.${action}Failed`)) }))
+      .finally(() => setRowBusyId(null));
+  };
+
   const startEditing = (emp: Employee) => {
     setEditingId(emp.id);
     setEditRole(emp.role);
@@ -395,7 +535,7 @@ export default function HR() {
         setEditError(
           err instanceof ApiError && err.status === 403
             ? t('messages.adminOnly')
-            : errorMessage(err, t('messages.updateEmployeeFailed')),
+            : hrErrorMessage(err, t('messages.updateEmployeeFailed')),
         ),
       )
       .finally(() => setEditLoading(false));
@@ -723,9 +863,137 @@ export default function HR() {
       {activeTab === 'employees' && (
         <div>
           {/* Employees header */}
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0, marginBottom: 16 }}>
-            {t('employees.title')}
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: 0 }}>
+              {t('employees.title')}
+            </h2>
+            {isAdmin && (
+              <button
+                style={showAddEmployee ? btnOutline : btnPrimary}
+                onClick={() => (showAddEmployee ? setShowAddEmployee(false) : openAddEmployee())}
+              >
+                {showAddEmployee ? t('common:actions.cancel') : t('employees.add')}
+              </button>
+            )}
+          </div>
+
+          {/* Add employee form (admin) */}
+          {isAdmin && showAddEmployee && (
+            <div
+              style={{
+                background: '#f9fafb',
+                border: '1px solid #e5e7eb',
+                borderRadius: 8,
+                padding: 20,
+                marginBottom: 20,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: '#111827', margin: 0 }}>{t('employees.form.title')}</h3>
+                {seats && (
+                  <span style={{ fontSize: 13, color: seats.available > 0 ? '#6b7280' : '#b91c1c' }}>
+                    {t('employees.form.seats', { used: seats.used, total: seats.total })}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label htmlFor="new-emp-first" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.firstName')}</label>
+                  <input id="new-emp-first" style={inputStyle} autoComplete="off" value={newEmp.firstName} onChange={(e) => setNewEmpField('firstName', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-last" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.lastName')}</label>
+                  <input id="new-emp-last" style={inputStyle} autoComplete="off" value={newEmp.lastName} onChange={(e) => setNewEmpField('lastName', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-email" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.email')}</label>
+                  <input id="new-emp-email" style={inputStyle} type="email" autoComplete="off" placeholder={t('employees.form.emailPlaceholder')} value={newEmp.email} onChange={(e) => setNewEmpField('email', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-role" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.role')}</label>
+                  <select id="new-emp-role" style={inputStyle} value={newEmp.role} onChange={(e) => setNewEmpField('role', e.target.value)}>
+                    {ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {roleLabel(r)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="new-emp-licence" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.licence')}</label>
+                  <select id="new-emp-licence" style={inputStyle} value={newEmp.licenceTier} onChange={(e) => setNewEmpField('licenceTier', e.target.value)}>
+                    <option value="">{t('employees.form.licenceAuto')}</option>
+                    {LICENCE_TIERS.map((tier) => (
+                      <option key={tier} value={tier}>
+                        {t(`common:licence.${tier}`)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="new-emp-rate" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.hourlyRate')}</label>
+                  <input id="new-emp-rate" style={inputStyle} type="number" min="0" step="0.05" value={newEmp.hourlyRate} onChange={(e) => setNewEmpField('hourlyRate', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-phone" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.phone')}</label>
+                  <input id="new-emp-phone" style={inputStyle} type="tel" value={newEmp.phone} onChange={(e) => setNewEmpField('phone', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-cct" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.cctCode')}</label>
+                  <input id="new-emp-cct" style={inputStyle} value={newEmp.cctCode} onChange={(e) => setNewEmpField('cctCode', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-hire" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.hireDate')}</label>
+                  <input id="new-emp-hire" style={inputStyle} type="date" value={newEmp.hireDate} onChange={(e) => setNewEmpField('hireDate', e.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="new-emp-team" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>{t('employees.form.team')}</label>
+                  <select id="new-emp-team" style={inputStyle} value={newEmp.teamId} onChange={(e) => setNewEmpField('teamId', e.target.value)}>
+                    <option value="">{t('employees.form.noTeam')}</option>
+                    {teamOptions.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 12px' }}>{t('employees.form.inviteHint')}</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <button style={btnPrimary} onClick={handleCreateEmployee} disabled={addLoading}>
+                  {addLoading ? t('employees.form.submitting') : t('employees.form.submit')}
+                </button>
+                {addError && <span role="alert" style={{ color: '#ef4444', fontSize: 13 }}>{addError}</span>}
+              </div>
+            </div>
+          )}
+
+          {/* Result of the last account action */}
+          {notice && (
+            <div
+              role={notice.kind === 'error' ? 'alert' : 'status'}
+              style={{
+                background: notice.kind === 'error' ? '#fee2e2' : '#dcfce7',
+                color: notice.kind === 'error' ? '#991b1b' : '#166534',
+                padding: '8px 16px',
+                borderRadius: 6,
+                marginBottom: 12,
+                fontSize: 13,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <span>{notice.text}</span>
+              <button
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 13 }}
+                onClick={() => setNotice(null)}
+              >
+                {t('common:actions.close')}
+              </button>
+            </div>
+          )}
 
           {/* Filters */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -948,12 +1216,41 @@ export default function HR() {
                             </button>
                           </div>
                         ) : (
-                          <button
-                            style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                            onClick={() => startEditing(emp)}
-                          >
-                            {t('common:actions.edit')}
-                          </button>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button
+                              style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
+                              onClick={() => startEditing(emp)}
+                            >
+                              {t('common:actions.edit')}
+                            </button>
+                            {isAdmin && emp.isActive && (
+                              <button
+                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
+                                onClick={() => runRowAction(emp, 'invite')}
+                                disabled={rowBusyId === emp.id}
+                              >
+                                {t('employees.resendInvite')}
+                              </button>
+                            )}
+                            {isAdmin && emp.isActive && emp.id !== currentUserId && (
+                              <button
+                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13, color: '#b91c1c' }}
+                                onClick={() => runRowAction(emp, 'deactivate')}
+                                disabled={rowBusyId === emp.id}
+                              >
+                                {t('employees.deactivate')}
+                              </button>
+                            )}
+                            {isAdmin && !emp.isActive && (
+                              <button
+                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13, color: '#166534' }}
+                                onClick={() => runRowAction(emp, 'reactivate')}
+                                disabled={rowBusyId === emp.id}
+                              >
+                                {t('employees.reactivate')}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>

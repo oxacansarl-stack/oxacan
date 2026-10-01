@@ -6,6 +6,7 @@ import { TeamMember } from './entities/team-member.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { CreateTeamDto, UpdateEmployeeDto, UpdateTeamDto } from './dto/hr.dto';
+import { EmployeeAccountsService } from './employee-accounts.service';
 
 /** Columns of a user that are safe to show to TEAM_LEADERs (no pay rate, no auth ids). */
 const PUBLIC_USER_COLUMNS = (alias: string) => [
@@ -40,6 +41,7 @@ export class HrService {
     private readonly teamMemberRepo: Repository<TeamMember>,
     @InjectRepository(AppUser)
     private readonly userRepo: Repository<AppUser>,
+    private readonly accounts: EmployeeAccountsService,
   ) {}
 
   /* ───────────── Teams: List ───────────── */
@@ -279,6 +281,7 @@ export class HrService {
     companyId: string,
     userId: string,
     dto: UpdateEmployeeDto,
+    actorId?: string,
   ): Promise<AppUser> {
     const user = await this.userRepo.findOne({
       where: { id: userId, companyId },
@@ -290,9 +293,16 @@ export class HrService {
     if (dto.licenceTier !== undefined) user.licenceTier = dto.licenceTier;
     if (dto.cctCode !== undefined) user.cctCode = dto.cctCode;
     if (dto.qualifications !== undefined) user.qualifications = dto.qualifications;
-    if (dto.isActive !== undefined) {
+
+    // Only a change of status counts (the web form always sends isActive).
+    if (dto.isActive !== undefined && dto.isActive !== user.isActive) {
+      if (!dto.isActive && actorId === userId) {
+        throw new BusinessRuleError('CANNOT_DEACTIVATE_SELF', 'You cannot deactivate your own account.');
+      }
       user.isActive = dto.isActive;
       user.deactivatedAt = dto.isActive ? null : new Date();
+      // Reactivating takes a subscription seat again.
+      if (dto.isActive) return this.accounts.withFreeSeat(companyId, (m) => m.save(user));
     }
 
     return this.userRepo.save(user);

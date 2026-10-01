@@ -47,6 +47,31 @@
       "cctCode": "Code CCT",
       "status": "Statut",
       "actions": "Actions"
+    },
+    "add": "+ Ajouter un employé",
+    "resendInvite": "Renvoyer l'invitation",
+    "deactivate": "Désactiver",
+    "reactivate": "Réactiver",
+    "confirmDeactivate": "Désactiver le compte de {{name}} ? La personne ne pourra plus se connecter et sa licence sera libérée. Ses données sont conservées.",
+    "form": {
+      "title": "Ajouter un employé",
+      "seats": "Licences utilisées : {{used}} / {{total}}",
+      "firstName": "Prénom *",
+      "lastName": "Nom *",
+      "email": "E-mail *",
+      "emailPlaceholder": "prenom.nom@entreprise.ch",
+      "role": "Rôle *",
+      "licence": "Licence",
+      "licenceAuto": "Automatique (selon le rôle)",
+      "hourlyRate": "Taux horaire (CHF/h)",
+      "phone": "Téléphone",
+      "cctCode": "Code CCT",
+      "hireDate": "Date d'entrée",
+      "team": "Équipe",
+      "noTeam": "Aucune équipe",
+      "inviteHint": "Un e-mail d'invitation sera envoyé à cette adresse pour que l'employé crée son mot de passe. Le compte occupe une licence de votre abonnement.",
+      "submit": "Créer et envoyer l'invitation",
+      "submitting": "Envoi de l'invitation…"
     }
   },
   "messages": {
@@ -59,6 +84,27 @@
     "removeMemberFailed": "Impossible de retirer le membre.",
     "invalidHourlyRate": "Le taux horaire doit être un montant positif en CHF.",
     "adminOnly": "Seul un administrateur peut modifier les rôles, les taux horaires et le statut des comptes.",
-    "updateEmployeeFailed": "Impossible de modifier le collaborateur."
+    "updateEmployeeFailed": "Impossible de modifier le collaborateur.",
+    "requiredFields": "Le prénom, le nom et l'e-mail sont obligatoires.",
+    "createEmployeeFailed": "Impossible de créer l'employé.",
+    "inviteSent": "Invitation envoyée à {{email}}.",
+    "deactivated": "Le compte de {{name}} a été désactivé.",
+    "reactivated": "Le compte de {{name}} a été réactivé.",
+    "inviteFailed": "Impossible de renvoyer l'invitation.",
+    "deactivateFailed": "Impossible de désactiver le compte.",
+    "reactivateFailed": "Impossible de réactiver le compte."
+  },
+  "errors": {
+    "SEAT_LIMIT_REACHED": "Toutes les licences de votre abonnement sont utilisées ({{used}} / {{total}}). Désactivez un compte ou ajoutez des licences à votre abonnement.",
+    "NO_SEATS": "Votre abonnement ne comporte aucune licence disponible. Ajoutez des licences avant de créer des comptes.",
+    "EMAIL_TAKEN": "Un employé avec cet e-mail existe déjà dans votre entreprise. S'il est désactivé, réactivez-le.",
+    "EMAIL_ALREADY_REGISTERED": "Cette adresse e-mail est déjà utilisée par un autre compte OXACAN et ne peut pas être invitée.",
+    "INVITE_ALREADY_ACCEPTED": "Cet employé a déjà activé son compte : il peut se connecter avec son e-mail et son mot de passe.",
+    "USER_INACTIVE": "Réactivez ce compte avant d'envoyer une invitation.",
+    "CANNOT_DEACTIVATE_SELF": "Vous ne pouvez pas désactiver votre propre compte.",
+    "INVITE_RATE_LIMITED": "Trop d'e-mails d'invitation envoyés. Réessayez dans quelques minutes.",
+    "INVITE_FAILED": "L'e-mail d'invitation n'a pas pu être envoyé. Aucun compte n'a été créé ; réessayez.",
+    "INVITE_NOT_CONFIGURED": "L'envoi des invitations n'est pas configuré sur le serveur. Contactez le support.",
+    "BUSY": "Une autre modification des comptes est en cours. Réessayez dans un instant."
   }
 }

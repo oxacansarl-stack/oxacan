@@ -1,5 +1,6 @@
 import { spawn, spawnSync, ChildProcess } from 'node:child_process';
-import { createServer, Server } from 'node:http';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { exportJWK, generateKeyPair } from 'jose';
@@ -21,6 +22,9 @@ const admin = {
   user: process.env.DB_MIGRATION_USERNAME || process.env.DB_USERNAME,
   password: process.env.DB_MIGRATION_PASSWORD || process.env.DB_PASSWORD,
 };
+
+/** Service role key the spawned API sends to the mock Supabase Admin API (test-only value). */
+const MOCK_SUPABASE_SERVICE_KEY = 'test-only-supabase-service-role-key';
 
 let server: ChildProcess | undefined;
 let jwksServer: Server | undefined;
@@ -106,6 +110,7 @@ export async function setup() {
       SENTRY_DSN: '',
       ALLOW_DEV_TOKENS: 'true',
       SUPABASE_URL: MOCK_SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: MOCK_SUPABASE_SERVICE_KEY,
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
@@ -132,12 +137,86 @@ async function startMockSupabaseJwks(): Promise<Server> {
     if (req.url === '/auth/v1/.well-known/jwks.json') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ keys: [publicJwk] }));
-    } else {
+    } else if (!handleMockAdminApi(req, res)) {
       res.writeHead(404).end();
     }
   });
   await new Promise<void>((resolve) => srv.listen(MOCK_SUPABASE_PORT, resolve));
   return srv;
+}
+
+/*
+ * Mock of the Supabase Auth invite endpoint (POST /auth/v1/invite), plus test controls:
+ *   GET  /__mock/invites           every invite request received, in order
+ *   POST /__mock/invite-failures   {"count": n}: the next n invites answer 500
+ *   POST /__mock/confirm           {"email": e}: e has accepted; further invites answer 422
+ * Like Supabase, re-inviting an unconfirmed email returns the same user id. Emails at
+ * @already-registered.test answer 422 email_exists, at @rate-limited.test 429.
+ */
+const mockAuthUsers = new Map<string, { id: string; confirmed: boolean }>();
+const mockInviteLog: { email: string; data: unknown; redirectTo: string | null; userId: string }[] = [];
+let mockInviteFailures = 0;
+
+function handleMockAdminApi(req: IncomingMessage, res: ServerResponse): boolean {
+  const url = new URL(req.url ?? '/', MOCK_SUPABASE_URL);
+  const route = `${req.method} ${url.pathname}`;
+  if (!['POST /auth/v1/invite', 'GET /__mock/invites', 'POST /__mock/invite-failures', 'POST /__mock/confirm'].includes(route)) {
+    return false;
+  }
+  const json = (status: number, body?: unknown) => {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(body === undefined ? undefined : JSON.stringify(body));
+  };
+  const chunks: Buffer[] = [];
+  req.on('data', (c: Buffer) => chunks.push(c));
+  req.on('end', () => {
+    let body: any = {};
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+    } catch {
+      return json(400, { code: 400, msg: 'invalid JSON' });
+    }
+    if (route === 'GET /__mock/invites') return json(200, { invites: mockInviteLog });
+    if (route === 'POST /__mock/invite-failures') {
+      mockInviteFailures = Number(body.count) || 0;
+      return json(204);
+    }
+    if (route === 'POST /__mock/confirm') {
+      const u = mockAuthUsers.get(String(body.email).toLowerCase());
+      if (u) u.confirmed = true;
+      return json(u ? 204 : 404);
+    }
+
+    // POST /auth/v1/invite
+    if (req.headers.apikey !== MOCK_SUPABASE_SERVICE_KEY || req.headers.authorization !== `Bearer ${MOCK_SUPABASE_SERVICE_KEY}`) {
+      return json(401, { code: 401, error_code: 'no_authorization', msg: 'This endpoint requires a valid service role key' });
+    }
+    if (mockInviteFailures > 0) {
+      mockInviteFailures--;
+      return json(500, { code: 500, error_code: 'unexpected_failure', msg: 'mock failure' });
+    }
+    const email = typeof body.email === 'string' ? body.email.toLowerCase() : '';
+    if (!email) return json(400, { code: 400, error_code: 'validation_failed', msg: 'email is required' });
+    if (email.endsWith('@rate-limited.test')) {
+      return json(429, { code: 429, error_code: 'over_email_send_rate_limit', msg: 'email rate limit exceeded' });
+    }
+    const existing = mockAuthUsers.get(email);
+    if (email.endsWith('@already-registered.test') || existing?.confirmed) {
+      return json(422, { code: 422, error_code: 'email_exists', msg: 'A user with this email address has already been registered' });
+    }
+    const user = existing ?? { id: randomUUID(), confirmed: false };
+    mockAuthUsers.set(email, user);
+    mockInviteLog.push({ email, data: body.data ?? null, redirectTo: url.searchParams.get('redirect_to'), userId: user.id });
+    return json(200, {
+      id: user.id,
+      aud: 'authenticated',
+      role: 'authenticated',
+      email,
+      invited_at: new Date().toISOString(),
+      user_metadata: body.data ?? {},
+    });
+  });
+  return true;
 }
 
 export async function teardown() {
