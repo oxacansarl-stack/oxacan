@@ -2,6 +2,7 @@ import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 import { join } from 'path';
@@ -37,6 +38,7 @@ import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 
 @Module({
   imports: [
@@ -66,6 +68,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
       }),
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
+    ScheduleModule.forRoot(),
     AuthModule,
     CompanyModule,
     HealthModule,
@@ -86,6 +89,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
     PortalModule,
     NotificationsModule,
     DocumentsModule,
+    AlertsModule,
   ],
   providers: [
     TenantConnectionHook,
