@@ -43,6 +43,10 @@ export class Invoice {
   @Column({ type: 'text' })
   invoiceNumber: string;
 
+  /** Situations only: Situation 1, 2, … per project (PRD §15.2), next to the gapless invoiceNumber. */
+  @Column({ type: 'integer', nullable: true })
+  situationNumber: number | null;
+
   @Column({ type: 'uuid', nullable: true })
   referenceInvoiceId: string | null;
 

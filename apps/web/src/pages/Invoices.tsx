@@ -27,8 +27,31 @@ interface InvoiceLine {
   quantity: number;
   unitPriceCents: number;
   totalPriceCents?: number;
-  cumulativeQuantity?: number;
-  previousQuantity?: number;
+  /** Situations: the offer position the line bills; quantity is then the offer budget. */
+  offerLineId?: string | null;
+  cumulativeQuantity?: number | null;
+  /** Situations: computed by the server from earlier situations — never sent by the client. */
+  previousQuantity?: number | null;
+  periodQuantity?: number | null;
+}
+
+/** GET /invoices/project/:projectId/situation-preview — the server's values for the next situation. */
+interface SituationPosition {
+  offerLineId: string;
+  positionNumber: number;
+  description: string;
+  unit: string;
+  variantType: string;
+  offerQuantity: number;
+  unitPriceCents: number | null;
+  previousQuantity: number;
+}
+
+interface SituationPreview {
+  projectId: string;
+  situationNumber: number;
+  acomptesToDeductCents: number;
+  positions: SituationPosition[];
 }
 
 interface Payment {
@@ -44,6 +67,8 @@ interface Invoice {
   id: string;
   invoiceNumber: string;
   type: 'invoice' | 'situation' | 'acompte' | 'credit_note' | 'final_invoice';
+  /** Situations: Situation 1, 2, … per project. */
+  situationNumber?: number | null;
   projectId: string;
   project?: { name: string; reference?: string };
   clientId: string;
@@ -120,6 +145,18 @@ const PAYMENT_METHODS = ['bank_transfer', 'card', 'cash', 'other'] as const;
 const percentToBps = (value: string): number => Math.round(parseFloat(value) * 100);
 
 const swissRound = (cents: number): number => Math.round(cents / 5) * 5;
+
+/** Quantities are stored as REAL: compare and subtract at the precision the server uses. */
+const roundQuantity = (q: number): number => Math.round(q * 1e6) / 1e6;
+
+/** A line the user left untouched (situations may consist of offer positions only). */
+const isBlankLine = (l: InvoiceLine): boolean => !l.description.trim() && !l.unitPriceCents;
+
+/** "Situation 2" when the server numbered it, else the type label. */
+const typeLabel = (inv: Pick<Invoice, 'type' | 'situationNumber'>, t: (k: string, o?: any) => string): string =>
+  inv.type === 'situation' && inv.situationNumber
+    ? t('detail.situationNumber', { number: inv.situationNumber })
+    : enumLabel('invoiceType', inv.type);
 
 /* ------------------------------------------------------------------ */
 /*  Shared styles                                                      */
@@ -217,6 +254,12 @@ export default function Invoices() {
     { description: '', unit: 'u', quantity: 1, unitPriceCents: 0 },
   ]);
   const [createError, setCreateError] = useState('');
+  // Situations: the server's values for the project's next situation, and the cumulative
+  // quantity typed per offer position ('' = position not billed on this situation).
+  const [situationPreview, setSituationPreview] = useState<SituationPreview | null>(null);
+  const [situationLoading, setSituationLoading] = useState(false);
+  const [cumulativeInputs, setCumulativeInputs] = useState<Record<string, string>>({});
+  const isSituation = createForm.type === 'situation';
 
   // Detail view
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -303,16 +346,51 @@ export default function Invoices() {
     }
   };
 
+  /* --- Situation: load the server's values for the next situation of the project --- */
+  useEffect(() => {
+    setSituationPreview(null);
+    setCumulativeInputs({});
+    if (!showCreate || !isSituation || !createForm.projectId) return;
+    let stale = false;
+    setSituationLoading(true);
+    apiGet<SituationPreview>(`/invoices/project/${createForm.projectId}/situation-preview`)
+      .then(preview => { if (!stale) setSituationPreview(preview); })
+      .catch(e => { if (!stale) setCreateError(errorMessage(e, t('errors.loadSituation'))); })
+      .finally(() => { if (!stale) setSituationLoading(false); });
+    return () => { stale = true; };
+  }, [showCreate, isSituation, createForm.projectId]);
+
+  // Preview of each position: period = cumulative typed − quantity already billed (from the server).
+  const situationRows = (situationPreview?.positions ?? []).map(position => {
+    const raw = (cumulativeInputs[position.offerLineId] ?? '').trim();
+    const cumulative = raw === '' ? null : Number(raw);
+    const period = cumulative == null || !Number.isFinite(cumulative) ? 0 : roundQuantity(cumulative - position.previousQuantity);
+    const total = position.unitPriceCents == null ? 0 : Math.round(Math.max(period, 0) * position.unitPriceCents);
+    return { position, cumulative, period, total };
+  });
+  const billedRows = situationRows.filter(r => r.cumulative != null);
+  // On a situation, offer positions carry the billing; untouched free lines are simply left out.
+  const freeLines = isSituation ? createLines.filter(l => !isBlankLine(l)) : createLines;
+
   /* --- Create invoice --- */
   const handleCreate = async () => {
     setCreateError('');
     if (!createForm.projectId) { setCreateError(t('validation.projectRequired')); return; }
     if (!createForm.clientId) { setCreateError(t('validation.clientRequired')); return; }
-    if (createLines.length === 0) { setCreateError(t('validation.lineRequired')); return; }
-    const hasEmpty = createLines.some(l => !l.description.trim() || !Number.isInteger(l.unitPriceCents) || l.unitPriceCents <= 0);
+    if (freeLines.length + billedRows.length === 0) { setCreateError(t('validation.lineRequired')); return; }
+    const hasEmpty = freeLines.some(l => !l.description.trim() || !Number.isInteger(l.unitPriceCents) || l.unitPriceCents <= 0);
     if (hasEmpty) { setCreateError(t('validation.linesIncomplete')); return; }
-    if (createLines.some(l => l.quantity < 0 || (l.cumulativeQuantity ?? 0) < 0 || (l.previousQuantity ?? 0) < 0)) {
+    if (freeLines.some(l => l.quantity < 0) || billedRows.some(r => !Number.isFinite(r.cumulative!) || r.cumulative! < 0)) {
       setCreateError(t('validation.negativeQuantity')); return;
+    }
+    const backwards = billedRows.find(r => roundQuantity(r.cumulative!) < r.position.previousQuantity);
+    if (backwards) {
+      setCreateError(t('validation.cumulativeBelowPrevious', {
+        position: backwards.position.positionNumber,
+        cumulative: backwards.cumulative,
+        previous: backwards.position.previousQuantity,
+      }));
+      return;
     }
     const vatRateBps = percentToBps(createForm.vatRate);
     if (!Number.isFinite(vatRateBps) || vatRateBps < 0 || vatRateBps > 10000) {
@@ -325,21 +403,28 @@ export default function Invoices() {
         clientId: createForm.clientId,
         type: createForm.type,
         vatRate: vatRateBps,
-        lines: createLines.map(l => ({
-          description: l.description.trim(),
-          ...(l.unit.trim() ? { unit: l.unit.trim() } : {}),
-          quantity: l.quantity,
-          unitPriceCents: l.unitPriceCents,
-          ...(createForm.type === 'situation' ? {
-            cumulativeQuantity: l.cumulativeQuantity ?? 0,
-            previousQuantity: l.previousQuantity ?? 0,
-          } : {}),
-        })),
+        lines: [
+          // The server computes each position's previous quantity; only the cumulative is sent.
+          ...billedRows.map(r => ({
+            offerLineId: r.position.offerLineId,
+            description: r.position.description,
+            unit: r.position.unit,
+            unitPriceCents: r.position.unitPriceCents!,
+            cumulativeQuantity: r.cumulative!,
+          })),
+          ...freeLines.map(l => ({
+            description: l.description.trim(),
+            ...(l.unit.trim() ? { unit: l.unit.trim() } : {}),
+            quantity: l.quantity,
+            unitPriceCents: l.unitPriceCents,
+          })),
+        ],
         ...(createForm.notes.trim() ? { notes: createForm.notes.trim() } : {}),
       });
       setShowCreate(false);
       setCreateForm({ projectId: '', clientId: '', type: 'invoice', vatRate: '8.10', notes: '' });
       setCreateLines([{ description: '', unit: 'u', quantity: 1, unitPriceCents: 0 }]);
+      setCumulativeInputs({});
       fetchInvoices();
     } catch (e) {
       setCreateError(errorMessage(e, t('errors.createInvoice')));
@@ -456,16 +541,17 @@ export default function Invoices() {
   };
 
   /* --- Computed --- */
-  // Preview mirrors InvoicingService.createInvoice (situation lines bill the period quantity).
-  const lineTotal = (l: InvoiceLine): number =>
-    createForm.type === 'situation'
-      ? Math.round(((l.cumulativeQuantity ?? 0) - (l.previousQuantity ?? 0)) * l.unitPriceCents)
-      : Math.round(l.quantity * l.unitPriceCents);
-  const subtotalHt = createLines.reduce((sum, l) => sum + lineTotal(l), 0);
+  // Preview mirrors InvoicingService.createInvoice: offer positions bill the period quantity,
+  // free lines quantity × price; acomptes carry no retention; a situation deducts the acomptes
+  // the server reports as not yet deducted.
+  const lineTotal = (l: InvoiceLine): number => Math.round(l.quantity * l.unitPriceCents);
+  const subtotalHt = freeLines.reduce((sum, l) => sum + lineTotal(l), 0)
+    + billedRows.reduce((sum, r) => sum + r.total, 0);
   const vatRate = parseFloat(createForm.vatRate) || 8.10;
   const vatAmount = swissRound(Math.round(subtotalHt * Math.round(vatRate * 100) / 10000));
-  const retentionAmount = swissRound(Math.round(subtotalHt * 500 / 10000));
-  const totalTtc = swissRound(subtotalHt + vatAmount - retentionAmount);
+  const retentionAmount = createForm.type === 'acompte' ? 0 : swissRound(Math.round(subtotalHt * 500 / 10000));
+  const priorAcomptes = isSituation ? situationPreview?.acomptesToDeductCents ?? 0 : 0;
+  const totalTtc = swissRound(subtotalHt + vatAmount - retentionAmount - priorAcomptes);
 
   const filteredInvoices = searchTerm
     ? invoices.filter(inv => inv.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -493,13 +579,14 @@ export default function Invoices() {
           <div>
             <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
               {inv.invoiceNumber || t('detail.fallbackTitle')}
+              {inv.type === 'situation' && inv.situationNumber ? ` · ${typeLabel(inv, t)}` : ''}
             </h1>
             <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
               {inv.client?.name} &middot; {inv.project?.name || inv.projectId}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Badge color={TYPE_COLORS[inv.type]}>{enumLabel('invoiceType', inv.type)}</Badge>
+            <Badge color={TYPE_COLORS[inv.type]}>{typeLabel(inv, t)}</Badge>
             <Badge color={STATUS_COLORS[inv.status]} strike={STATUS_COLORS[inv.status]?.strike}>
               {statusLabel('invoice', inv.status)}
             </Badge>
@@ -534,13 +621,17 @@ export default function Invoices() {
               <tr>
                 <th style={thStyle}>{t('table.description')}</th>
                 <th style={thStyle}>{t('table.unit')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.quantity')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>
+                  {inv.type === 'situation' ? t('table.offerQuantity') : t('table.quantity')}
+                </th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.unitPrice')}</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.total')}</th>
                 {inv.type === 'situation' && (
                   <>
                     <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
                     <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.previousQuantity')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.budgetPercent')}</th>
                   </>
                 )}
               </tr>
@@ -559,12 +650,18 @@ export default function Invoices() {
                     <>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>{line.cumulativeQuantity ?? '-'}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>{line.previousQuantity ?? '-'}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{line.periodQuantity ?? '-'}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>
+                        {line.offerLineId && line.cumulativeQuantity != null && Number(line.quantity) > 0
+                          ? `${Math.round((line.cumulativeQuantity / Number(line.quantity)) * 100)} %`
+                          : '-'}
+                      </td>
                     </>
                   )}
                 </tr>
               ))}
               {(!inv.lines || inv.lines.length === 0) && (
-                <tr><td style={{ ...tdStyle, textAlign: 'center', color: '#9ca3af' }} colSpan={5}>{t('detail.noLines')}</td></tr>
+                <tr><td style={{ ...tdStyle, textAlign: 'center', color: '#9ca3af' }} colSpan={inv.type === 'situation' ? 9 : 5}>{t('detail.noLines')}</td></tr>
               )}
             </tbody>
           </table>
@@ -809,8 +906,90 @@ export default function Invoices() {
                 </div>
               </div>
 
+              {/* Situation: offer positions with the server's previously billed quantities */}
+              {isSituation && (
+                <div style={{ marginBottom: 16 }}>
+                  <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>
+                    {situationPreview
+                      ? t('form.situationTitle', { number: situationPreview.situationNumber })
+                      : t('form.situationPositions')}
+                  </h4>
+                  <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6b7280' }}>{t('form.situationHint')}</p>
+                  {!createForm.projectId ? (
+                    <p style={{ fontSize: 13, color: '#9ca3af' }}>{t('form.situationSelectProject')}</p>
+                  ) : situationLoading ? (
+                    <p style={{ fontSize: 13, color: '#6b7280' }}>{t('state.loadingPositions')}</p>
+                  ) : situationRows.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#9ca3af' }}>{t('state.noPositions')}</p>
+                  ) : (
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead style={{ background: '#f3f4f6' }}>
+                          <tr>
+                            <th style={{ ...thStyle, width: 50 }}>{t('table.position')}</th>
+                            <th style={thStyle}>{t('table.description')}</th>
+                            <th style={{ ...thStyle, width: 60 }}>{t('table.unit')}</th>
+                            <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>{t('table.offerQuantity')}</th>
+                            <th style={{ ...thStyle, width: 110, textAlign: 'right' }}>{t('table.unitPrice')}</th>
+                            <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.previouslyInvoiced')}</th>
+                            <th style={{ ...thStyle, width: 100, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
+                            <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
+                            <th style={{ ...thStyle, width: 70, textAlign: 'right' }}>{t('table.budgetPercent')}</th>
+                            <th style={{ ...thStyle, width: 110, textAlign: 'right' }}>{t('table.total')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {situationRows.map(({ position: p, cumulative, period, total }) => {
+                            const executed = cumulative ?? p.previousQuantity;
+                            const belowPrevious = cumulative != null && roundQuantity(cumulative) < p.previousQuantity;
+                            return (
+                              <tr key={p.offerLineId}>
+                                <td style={{ ...tdStyle, color: '#6b7280' }}>{p.positionNumber}</td>
+                                <td style={tdStyle}>{p.description}</td>
+                                <td style={tdStyle}>{p.unit}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right' }}>{p.offerQuantity}</td>
+                                <td style={{ ...tdStyle, textAlign: 'right' }}>
+                                  {p.unitPriceCents == null ? t('form.unpriced') : formatMoney(p.unitPriceCents)}
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', color: '#6b7280' }}>{p.previousQuantity}</td>
+                                <td style={tdStyle}>
+                                  <input
+                                    type="number"
+                                    min={p.previousQuantity}
+                                    step="any"
+                                    disabled={p.unitPriceCents == null}
+                                    placeholder={String(p.previousQuantity)}
+                                    style={{
+                                      ...inputStyle, padding: '4px 8px', textAlign: 'right',
+                                      borderColor: belowPrevious ? '#dc2626' : '#d1d5db',
+                                    }}
+                                    value={cumulativeInputs[p.offerLineId] ?? ''}
+                                    onChange={e => setCumulativeInputs(prev => ({ ...prev, [p.offerLineId]: e.target.value }))}
+                                  />
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13, color: belowPrevious ? '#dc2626' : '#6b7280' }}>
+                                  {cumulative == null ? '-' : period}
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13, color: executed > p.offerQuantity ? '#b45309' : '#6b7280' }}>
+                                  {p.offerQuantity > 0 && Number.isFinite(executed) ? `${Math.round((executed / p.offerQuantity) * 100)} %` : '-'}
+                                </td>
+                                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
+                                  {cumulative == null ? '-' : formatMoney(total)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Lines */}
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>{t('form.lines')}</h4>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>
+                {isSituation ? t('form.extraLines') : t('form.lines')}
+              </h4>
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: '#f3f4f6' }}>
@@ -820,19 +999,11 @@ export default function Invoices() {
                       <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>{t('table.quantity')}</th>
                       <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.unitPriceChf')}</th>
                       <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.total')}</th>
-                      {createForm.type === 'situation' && (
-                        <>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.previousQuantity')}</th>
-                          <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
-                        </>
-                      )}
                       <th style={{ ...thStyle, width: 40 }}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {createLines.map((line, idx) => {
-                      const periodQty = (line.cumulativeQuantity ?? 0) - (line.previousQuantity ?? 0);
                       return (
                         <tr key={idx}>
                           <td style={tdStyle}>
@@ -870,31 +1041,8 @@ export default function Invoices() {
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
                             {formatMoney(lineTotal(line))}
                           </td>
-                          {createForm.type === 'situation' && (
-                            <>
-                              <td style={tdStyle}>
-                                <input
-                                  type="number"
-                                  style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                                  value={line.cumulativeQuantity ?? ''}
-                                  onChange={e => updateLine(idx, 'cumulativeQuantity', parseFloat(e.target.value) || 0)}
-                                />
-                              </td>
-                              <td style={tdStyle}>
-                                <input
-                                  type="number"
-                                  style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                                  value={line.previousQuantity ?? ''}
-                                  onChange={e => updateLine(idx, 'previousQuantity', parseFloat(e.target.value) || 0)}
-                                />
-                              </td>
-                              <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13, color: '#6b7280' }}>
-                                {periodQty}
-                              </td>
-                            </>
-                          )}
                           <td style={tdStyle}>
-                            {createLines.length > 1 && (
+                            {(createLines.length > 1 || isSituation) && (
                               <button
                                 onClick={() => removeLine(idx)}
                                 style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16 }}
@@ -933,6 +1081,12 @@ export default function Invoices() {
                   <span style={{ color: '#6b7280' }}>{t('summary.retention')}</span>
                   <span style={{ color: '#dc2626' }}>- {formatMoney(retentionAmount)}</span>
                 </div>
+                {isSituation && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
+                    <span style={{ color: '#6b7280' }}>{t('summary.priorAcomptes')}</span>
+                    <span style={{ color: '#dc2626' }}>- {formatMoney(priorAcomptes)}</span>
+                  </div>
+                )}
                 <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{t('summary.totalTtc')}</span>
                   <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{formatMoney(totalTtc)}</span>
@@ -1035,7 +1189,7 @@ export default function Invoices() {
                     >
                       <td style={{ ...tdStyle, fontWeight: 600, color: '#2563eb' }}>{inv.invoiceNumber}</td>
                       <td style={tdStyle}>
-                        <Badge color={TYPE_COLORS[inv.type]}>{enumLabel('invoiceType', inv.type)}</Badge>
+                        <Badge color={TYPE_COLORS[inv.type]}>{typeLabel(inv, t)}</Badge>
                       </td>
                       <td style={tdStyle}>{inv.client?.name || '-'}</td>
                       <td style={tdStyle}>{inv.project?.name || '-'}</td>

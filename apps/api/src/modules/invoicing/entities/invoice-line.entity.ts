@@ -38,6 +38,13 @@ export class InvoiceLine {
   @Column({ type: 'bigint' })
   totalPriceCents: number;
 
+  /**
+   * Situations: the contracted offer position this line bills. Its previous quantity is what
+   * earlier situations of the project billed for the same position, computed by the server.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  offerLineId: string | null;
+
   @Column({ type: 'real', nullable: true })
   cumulativeQuantity: number | null;
 

@@ -50,6 +50,16 @@ export class InvoicingController {
     return this.service.getProjectInvoiceSummary(companyId, projectId);
   }
 
+  /** Next situation of the project: its number, acomptes to deduct, offer positions with the quantity already billed. */
+  @Get('project/:projectId/situation-preview')
+  @Roles(...OFFICE_ROLES)
+  async getSituationPreview(
+    @CompanyId() companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return this.service.getSituationPreview(companyId, projectId);
+  }
+
   /* ───────────── Plus-values (before :id) ───────────── */
 
   @Get('plus-values')

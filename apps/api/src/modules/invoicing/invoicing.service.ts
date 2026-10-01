@@ -13,6 +13,7 @@ import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/share
 import { DEFAULT_VAT_RATE, DEFAULT_RETENTION_RATE } from '@oxacan/shared-types';
 import { assertProjectExists } from '../../common/util/assert-project';
 import { swissRound } from '../../common/util/money';
+import { sellingUnitCents } from '../offers/offer-pricing';
 import { CreateInvoiceDto, CreatePlusValueDto, RecordPaymentDto } from './dto/invoice.dto';
 
 /** One side of a journal entry: positive amounts are debits, negative amounts credits. */
@@ -106,6 +107,113 @@ async function releasePlusValues(db: { query: DataSource['query'] }, companyId: 
       WHERE company_id = $1 AND invoice_id = $2`,
     [companyId, invoiceId],
   );
+}
+
+/* ─── Situations (PRD §15.2) ─── */
+
+/** Offer variants that are priced work a situation may bill (not exclusions or open points). */
+const SITUATION_VARIANTS = ['BASE', 'VARIANTE', 'OPTION'];
+
+/** Quantities are REAL columns: subtract and compare at a precision they actually hold. */
+const roundQuantity = (q: number): number => Math.round(q * 1e6) / 1e6;
+
+/** A position of the project's contracted offer, as a situation bills it. */
+export interface SituationPosition {
+  offerLineId: string;
+  positionNumber: number;
+  description: string;
+  unit: string;
+  variantType: string;
+  /** Quantity in the offer: the budget the executed quantity is compared with. */
+  offerQuantity: number;
+  /** Selling unit price (offer cost × margin factor); null while the position is unpriced. */
+  unitPriceCents: number | null;
+  /** What earlier non-cancelled, non-credited situations of the project billed for it. */
+  previousQuantity: number;
+}
+
+/**
+ * Positions of the project's contracted offer (project → contract → offer), each with the
+ * quantity earlier situations already billed for it. Draft situations count, like their acompte
+ * deduction: cancelling a draft (or crediting an issued situation) gives its quantities back.
+ * Executed quantities are not recorded per position anywhere in OXACAN yet (tasks carry a
+ * progress % only and aren't linked to offer lines), so the cumulative quantity comes from the
+ * situation request.
+ */
+async function situationPositions(
+  db: { query: DataSource['query'] },
+  companyId: string,
+  projectId: string,
+  offerLineIds?: string[],
+): Promise<SituationPosition[]> {
+  const rows: {
+    id: string; position_number: number; description: string; unit: string; variant_type: string;
+    quantity: string; unit_price_cents: number | null; margin_factor: number | null; previous: string;
+  }[] = await db.query(
+    `SELECT ol.id, ol.position_number, ol.description, ol.unit, ol.variant_type,
+            ol.quantity::numeric AS quantity, ol.unit_price_cents, o.margin_factor,
+            COALESCE((
+              SELECT SUM(il.period_quantity::numeric)
+                FROM invoice_line il
+                JOIN invoice i ON i.company_id = il.company_id AND i.id = il.invoice_id
+               WHERE il.company_id = p.company_id AND il.offer_line_id = ol.id
+                 AND i.project_id = p.id AND i.type = 'situation' AND i.status <> 'cancelled'
+                 AND NOT EXISTS (SELECT 1 FROM invoice cn
+                                  WHERE cn.company_id = i.company_id AND cn.reference_invoice_id = i.id
+                                    AND cn.type = 'credit_note' AND cn.status <> 'cancelled')
+            ), 0) AS previous
+       FROM project p
+       JOIN contract c ON c.company_id = p.company_id AND c.id = p.contract_id
+       JOIN offer o ON o.company_id = c.company_id AND o.id = c.offer_id
+       JOIN offer_line ol ON ol.company_id = o.company_id AND ol.offer_id = o.id
+      WHERE p.company_id = $1 AND p.id = $2 AND ol.variant_type = ANY($3::text[])
+        AND ($4::uuid[] IS NULL OR ol.id = ANY($4::uuid[]))
+      ORDER BY ol.sort_order, ol.position_number`,
+    [companyId, projectId, SITUATION_VARIANTS, offerLineIds ?? null],
+  );
+  return rows.map((r) => ({
+    offerLineId: r.id,
+    positionNumber: r.position_number,
+    description: r.description,
+    unit: r.unit,
+    variantType: r.variant_type,
+    offerQuantity: Number(r.quantity),
+    unitPriceCents: r.unit_price_cents == null ? null : sellingUnitCents(Number(r.unit_price_cents), Number(r.margin_factor ?? 100)),
+    previousQuantity: roundQuantity(Number(r.previous)),
+  }));
+}
+
+/** Next per-project situation number; a cancelled draft gives its number back. */
+async function nextSituationNumber(db: { query: DataSource['query'] }, companyId: string, projectId: string): Promise<number> {
+  const [{ next }] = await db.query(
+    `SELECT COALESCE(MAX(situation_number), 0) + 1 AS next FROM invoice
+      WHERE company_id = $1 AND project_id = $2 AND type = 'situation' AND status <> 'cancelled'`,
+    [companyId, projectId],
+  );
+  return Number(next);
+}
+
+/**
+ * Acomptes a new situation of the project deducts. Each acompte is deducted once: issued acomptes
+ * that were not credited, minus what earlier situations of the project already deducted. A draft
+ * situation reserves its deduction (cancelling it releases it), so two situations drafted in a
+ * row can't both take it.
+ */
+async function remainingAcomptesCents(db: { query: DataSource['query'] }, companyId: string, projectId: string): Promise<number> {
+  const [{ remaining }] = await db.query(
+    `WITH uncredited AS (
+       SELECT i.* FROM invoice i
+        WHERE i.company_id = $1 AND i.project_id = $2 AND i.status <> 'cancelled'
+          AND NOT EXISTS (SELECT 1 FROM invoice cn
+                           WHERE cn.company_id = i.company_id AND cn.reference_invoice_id = i.id
+                             AND cn.type = 'credit_note' AND cn.status <> 'cancelled'))
+     SELECT GREATEST(
+       COALESCE((SELECT SUM(total_ttc_cents) FROM uncredited WHERE type = 'acompte' AND status <> 'draft'), 0)
+       - COALESCE((SELECT SUM(prior_acomptes_cents) FROM uncredited WHERE type = 'situation'), 0),
+       0)::bigint AS remaining`,
+    [companyId, projectId],
+  );
+  return Number(remaining);
 }
 
 /* ─── DTOs ─── */
@@ -272,40 +380,97 @@ export class InvoicingService {
         throw new ValidationError('An invoice needs at least one line.');
       }
 
-      /* ── Build lines and compute totals ── */
+      /* ── Situation positions: what earlier situations billed, computed here (PRD §15.2) ── */
       const isSituation = dto.type === 'situation';
+      const offerLineIds = dto.lines.map((l) => l.offerLineId).filter((id): id is string => !!id);
+      if (!isSituation && offerLineIds.length) {
+        throw new ValidationError('Only situation lines bill offer positions (offerLineId).');
+      }
+      if (new Set(offerLineIds).size !== offerLineIds.length) {
+        throw new ValidationError('A situation bills each offer position on one line only.');
+      }
+      // Read under the invoice lock, so a concurrent situation can't bill the same quantity twice.
+      const positions = new Map(
+        (offerLineIds.length
+          ? await situationPositions(queryRunner.manager, companyId, dto.projectId, offerLineIds)
+          : []
+        ).map((p) => [p.offerLineId, p]),
+      );
+      if (positions.size !== offerLineIds.length) {
+        throw new BusinessRuleError(
+          'OFFER_LINE_NOT_IN_PROJECT',
+          'Situation lines can only bill priced work positions of the offer contracted for this project.',
+        );
+      }
+      const situationNumber = isSituation
+        ? await nextSituationNumber(queryRunner.manager, companyId, dto.projectId)
+        : null;
+
+      /* ── Build lines and compute totals ── */
       const lines: Partial<InvoiceLine>[] = [];
       let subtotalHtCents = 0;
 
       for (let i = 0; i < dto.lines.length; i++) {
         const l = dto.lines[i];
-        let totalPriceCents: number;
-        let periodQuantity: number | null = null;
+        const position = l.offerLineId ? positions.get(l.offerLineId)! : null;
 
-        if (isSituation && l.cumulativeQuantity != null && l.previousQuantity != null) {
-          periodQuantity = l.cumulativeQuantity - l.previousQuantity;
-          if (periodQuantity < 0) {
+        if (position) {
+          // Billed for the period: executed to date minus what earlier situations already billed.
+          const previousQuantity = position.previousQuantity;
+          const cumulativeQuantity = l.cumulativeQuantity;
+          if (cumulativeQuantity == null) {
             throw new ValidationError(
-              `Line ${i + 1}: cumulative quantity is lower than the previously invoiced quantity.`,
+              `Line ${i + 1}: no executed quantity is recorded for position ${position.positionNumber}; give its cumulative quantity.`,
             );
           }
-          totalPriceCents = Math.round(periodQuantity * l.unitPriceCents);
-        } else {
-          totalPriceCents = Math.round(l.quantity * l.unitPriceCents);
+          if (roundQuantity(cumulativeQuantity) < previousQuantity) {
+            throw new ValidationError(
+              `Line ${i + 1}: cumulative quantity ${cumulativeQuantity} is lower than the ${previousQuantity} already invoiced by earlier situations.`,
+            );
+          }
+          const periodQuantity = roundQuantity(cumulativeQuantity - previousQuantity);
+          // The contracted selling price; the request's price is used only for a position the offer
+          // left unpriced ("prix à compléter").
+          const unitPriceCents = position.unitPriceCents ?? l.unitPriceCents;
+          const totalPriceCents = Math.round(periodQuantity * unitPriceCents);
+          subtotalHtCents += totalPriceCents;
+          lines.push({
+            companyId,
+            offerLineId: position.offerLineId,
+            description: l.description,
+            unit: l.unit || position.unit || null,
+            quantity: position.offerQuantity,
+            unitPriceCents,
+            totalPriceCents,
+            cumulativeQuantity,
+            previousQuantity,
+            periodQuantity,
+            sortOrder: i,
+          });
+          continue;
         }
 
+        if (isSituation && l.cumulativeQuantity != null) {
+          throw new ValidationError(
+            `Line ${i + 1}: cumulative quantities are tracked per offer position; set the line's offerLineId.`,
+          );
+        }
+        if (l.quantity == null) {
+          throw new ValidationError(`Line ${i + 1}: quantity is required.`);
+        }
+        const totalPriceCents = Math.round(l.quantity * l.unitPriceCents);
         subtotalHtCents += totalPriceCents;
-
         lines.push({
           companyId,
+          offerLineId: null,
           description: l.description,
           unit: l.unit || null,
           quantity: l.quantity,
           unitPriceCents: l.unitPriceCents,
           totalPriceCents,
           cumulativeQuantity: l.cumulativeQuantity ?? null,
-          previousQuantity: l.previousQuantity ?? null,
-          periodQuantity,
+          previousQuantity: null,
+          periodQuantity: null,
           sortOrder: i,
         });
       }
@@ -327,26 +492,10 @@ export class InvoicingService {
         });
       }
 
-      /* ── Prior acomptes (for situation type) ── */
-      // Each acompte is deducted once: issued acomptes that were not credited, minus what earlier
-      // situations of the project already deducted. A draft situation reserves its deduction
-      // (cancelling it releases it), so two situations drafted in a row can't both take it.
+      /* ── Prior acomptes (for situation type): each acompte deducted once, drafts reserve ── */
       let priorAcomptesCents = 0;
       if (dto.type === 'situation') {
-        const [{ remaining }] = await queryRunner.query(
-          `WITH uncredited AS (
-             SELECT i.* FROM invoice i
-              WHERE i.company_id = $1 AND i.project_id = $2 AND i.status <> 'cancelled'
-                AND NOT EXISTS (SELECT 1 FROM invoice cn
-                                 WHERE cn.company_id = i.company_id AND cn.reference_invoice_id = i.id
-                                   AND cn.type = 'credit_note' AND cn.status <> 'cancelled'))
-           SELECT GREATEST(
-             COALESCE((SELECT SUM(total_ttc_cents) FROM uncredited WHERE type = 'acompte' AND status <> 'draft'), 0)
-             - COALESCE((SELECT SUM(prior_acomptes_cents) FROM uncredited WHERE type = 'situation'), 0),
-             0)::bigint AS remaining`,
-          [companyId, dto.projectId],
-        );
-        priorAcomptesCents = Number(remaining);
+        priorAcomptesCents = await remainingAcomptesCents(queryRunner.manager, companyId, dto.projectId);
       }
 
       /* ── VAT, retention, total ── */
@@ -365,6 +514,7 @@ export class InvoicingService {
         clientId: dto.clientId,
         type: dto.type,
         invoiceNumber,
+        situationNumber,
         status: 'draft',
         issueDate: new Date(),
         vatRate,
@@ -487,6 +637,7 @@ export class InvoicingService {
           const line = queryRunner.manager.create(InvoiceLine, {
             invoiceId: saved.id,
             companyId,
+            offerLineId: ol.offerLineId,
             description: ol.description,
             unit: ol.unit,
             quantity: -ol.quantity,
@@ -701,6 +852,23 @@ export class InvoicingService {
         invoicedCents: Number(pv.invoiced),
       },
     };
+  }
+
+  /* ═══════════════════════════════════════════════
+     Situations — what the next situation of a project starts from
+     ═══════════════════════════════════════════════ */
+
+  /**
+   * The server's values for the next situation of a project: its number, the acomptes it would
+   * deduct, and each offer position with its budget and the quantity already billed. The
+   * situation itself recomputes all of these under the invoice lock when it is created.
+   */
+  async getSituationPreview(companyId: string, projectId: string) {
+    await assertProjectExists(this.invoiceRepo.manager, companyId, projectId);
+    const positions = await situationPositions(this.dataSource, companyId, projectId);
+    const situationNumber = await nextSituationNumber(this.dataSource, companyId, projectId);
+    const acomptesToDeductCents = await remainingAcomptesCents(this.dataSource, companyId, projectId);
+    return { projectId, situationNumber, acomptesToDeductCents, positions };
   }
 
   /* ═══════════════════════════════════════════════

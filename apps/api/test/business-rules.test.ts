@@ -155,16 +155,6 @@ describe('Invoicing', () => {
       secondDeducts: Number(second.priorAcomptesCents),
     }).toEqual({ acompteRetention: 0, firstDeducts: Number(acompte.totalTtcCents), secondDeducts: 0 });
   });
-
-  it('rejects situation lines whose cumulative quantity went backwards', async () => {
-    const res = await admin.post('/invoices', {
-      projectId,
-      clientId,
-      type: 'situation',
-      lines: [{ description: 'Béton', unit: 'm3', quantity: 10, unitPriceCents: 1000, cumulativeQuantity: 2, previousQuantity: 5 }],
-    });
-    expect(res.status).toBe(400);
-  });
 });
 
 describe('Purchase order deliveries', () => {

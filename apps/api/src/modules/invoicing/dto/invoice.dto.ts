@@ -14,6 +14,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { IsCents, IsIsoDate } from '../../../common/validation/decorators';
@@ -57,28 +58,38 @@ export class InvoiceLineDto {
   @MaxLength(20)
   unit?: string;
 
-  /** May be decimal (m2, m3, h …). */
+  /**
+   * May be decimal (m2, m3, h …). Not needed on a line tied to an offer position: the server
+   * stores the position's offer quantity there (the budget the situation is compared with).
+   */
+  @ValidateIf((l: InvoiceLineDto) => !l.offerLineId || l.quantity !== undefined)
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
   @Max(MAX_QUANTITY)
-  quantity!: number;
+  quantity?: number;
 
   @IsCents()
   unitPriceCents!: number;
 
-  /** Situations only: cumulative quantity executed to date. */
+  /**
+   * Situations only: the position of the project's contracted offer this line bills. The server
+   * computes the quantity earlier situations already billed for it (previousQuantity is no
+   * longer accepted from the client) and bills cumulativeQuantity minus that.
+   */
+  @IsOptional()
+  @IsUUID()
+  offerLineId?: string;
+
+  /**
+   * Situations only, with offerLineId: cumulative quantity executed to date. Must not be below
+   * what earlier situations billed. Required for now: no executed quantity is recorded per
+   * offer position anywhere else to fall back on (see InvoicingService.situationPositions).
+   */
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
   @Max(MAX_QUANTITY)
   cumulativeQuantity?: number;
-
-  /** Situations only: cumulative quantity already invoiced by previous situations. */
-  @IsOptional()
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(0)
-  @Max(MAX_QUANTITY)
-  previousQuantity?: number;
 }
 
 export class CreateInvoiceDto {

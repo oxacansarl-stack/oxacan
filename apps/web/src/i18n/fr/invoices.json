@@ -37,10 +37,14 @@
     "quantity": "Qté",
     "unitPrice": "Prix unitaire",
     "unitPriceChf": "Prix unitaire (CHF)",
+    "position": "Pos.",
+    "offerQuantity": "Qté offre",
     "total": "Total",
     "cumulativeQuantity": "Qté cumulée",
-    "previousQuantity": "Qté précédente",
+    "previouslyInvoiced": "Déjà facturé",
+    "previousQuantity": "Qté déjà facturée",
     "periodQuantity": "Qté de la période",
+    "budgetPercent": "% offre",
     "date": "Date",
     "method": "Mode de paiement",
     "reference": "Référence",
@@ -56,6 +60,12 @@
     "type": "Type",
     "vatRate": "Taux de TVA (%)",
     "lines": "Lignes de la facture",
+    "situationPositions": "Positions de l'offre",
+    "situationTitle": "Situation {{number}} — positions de l'offre",
+    "situationHint": "Saisissez la quantité exécutée cumulée à ce jour. La quantité déjà facturée est calculée par le serveur à partir des situations précédentes (hors situations annulées ou créditées).",
+    "situationSelectProject": "Sélectionnez un projet pour afficher les positions de son offre.",
+    "unpriced": "Prix à compléter",
+    "extraLines": "Lignes supplémentaires (hors offre)",
     "descriptionPlaceholder": "Description",
     "notes": "Remarques"
   },
@@ -63,10 +73,12 @@
     "subtotalHt": "Sous-total HT",
     "vat": "TVA ({{rate}} %)",
     "retention": "Retenue de garantie (-5 %)",
+    "priorAcomptes": "Acomptes déduits",
     "totalTtc": "Total TTC"
   },
   "detail": {
     "fallbackTitle": "Facture",
+    "situationNumber": "Situation {{number}}",
     "issueDate": "Date d'émission",
     "dueDate": "Échéance",
     "notes": "Remarques",
@@ -97,7 +109,9 @@
     "loadingInvoices": "Chargement des factures…",
     "noInvoices": "Aucune facture trouvée",
     "loadingPlusValues": "Chargement des plus-values…",
-    "noPlusValues": "Aucune plus-value trouvée"
+    "noPlusValues": "Aucune plus-value trouvée",
+    "loadingPositions": "Chargement des positions de l'offre…",
+    "noPositions": "Aucune position chiffrée dans l'offre de ce projet."
   },
   "confirm": {
     "creditNote": "Établir une note de crédit pour cette facture ? Cette action est irréversible."
@@ -108,6 +122,7 @@
     "lineRequired": "Ajoutez au moins une ligne.",
     "linesIncomplete": "Chaque ligne doit avoir une description et un prix.",
     "negativeQuantity": "Les quantités ne peuvent pas être négatives.",
+    "cumulativeBelowPrevious": "Position {{position}} : la quantité cumulée ({{cumulative}}) est inférieure à la quantité déjà facturée ({{previous}}).",
     "vatRange": "Le taux de TVA doit être compris entre 0 et 100 %.",
     "paymentAmount": "Le montant du paiement doit être supérieur à zéro.",
     "paymentDate": "La date du paiement est obligatoire."
@@ -116,6 +131,7 @@
     "loadInvoices": "Impossible de charger les factures.",
     "loadPlusValues": "Impossible de charger les plus-values.",
     "loadInvoice": "Impossible de charger la facture.",
+    "loadSituation": "Impossible de charger les positions de la situation.",
     "createInvoice": "Impossible de créer la facture.",
     "updateStatus": "Impossible de modifier le statut.",
     "createCreditNote": "Impossible d'établir la note de crédit.",
