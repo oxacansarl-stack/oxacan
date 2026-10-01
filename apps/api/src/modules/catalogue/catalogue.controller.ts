@@ -7,12 +7,16 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CompanyId, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles, ALL_ROLES, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
 import { CatalogueService } from './catalogue.service';
 import { hidesMoneyFor, stripMoney } from '../../common/util/strip-money';
-import { CreateArticleDto, UpdateArticleDto, ImportCsvDto } from './dto/catalogue.dto';
+import { CreateArticleDto, UpdateArticleDto, ImportCsvDto, ImportPdfDto } from './dto/catalogue.dto';
+import { PDF_LIMITS } from './pdf-text.extractor';
 
 @Controller('catalogue')
 export class CatalogueController {
@@ -80,6 +84,26 @@ export class CatalogueController {
     @Body() body: ImportCsvDto,
   ) {
     return this.catalogueService.importCsv(companyId, user.id, body);
+  }
+
+  /**
+   * A soumission PDF imported as is (multipart/form-data, field "file"). Kept in memory only,
+   * one file, 10 MB at most; the content must be a real PDF whatever its name or MIME type says.
+   */
+  @Post('import/pdf')
+  @Roles(...OFFICE_ROLES)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: PDF_LIMITS.maxBytes, files: 1, fields: 10, fieldSize: 1024, parts: 12 },
+    }),
+  )
+  async importPdf(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
+    @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
+    @Body() body: ImportPdfDto,
+  ) {
+    return this.catalogueService.importPdf(companyId, user.id, file, body);
   }
 
   @Get('articles/:id/prices')

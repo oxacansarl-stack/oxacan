@@ -15,7 +15,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { IsCents, IsSignedCents } from '../../../common/validation/decorators';
+import { IsCents, IsIsoDate, IsSignedCents } from '../../../common/validation/decorators';
 
 export class ComposedComponentDto {
   @IsUUID()
@@ -109,6 +109,21 @@ export class CsvRowDto {
   rawText!: string;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sectionCode?: string;
+
+  /** Variant / non-added line (not part of the base total, not a price observation). */
+  @IsOptional()
+  @IsBoolean()
+  isVariant?: boolean;
+
+  @IsOptional()
   @IsString()
   @MaxLength(50)
   npkNumber?: string;
@@ -148,6 +163,34 @@ export class CsvRowDto {
   floor?: string;
 }
 
+/**
+ * Text fields sent with a soumission PDF (multipart/form-data, field "file"). Each overrides what
+ * is read from the document itself; multipart values arrive as strings.
+ */
+export class ImportPdfDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  projectName?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1900)
+  @Max(2100)
+  projectYear?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  entrepreneurName?: string;
+
+  /** Date the soumission was issued (YYYY-MM-DD); defaults to the date printed on page 1. */
+  @IsOptional()
+  @IsIsoDate()
+  documentDate?: string;
+}
+
 export class ImportCsvDto {
   @IsString()
   @IsNotEmpty()
@@ -174,6 +217,11 @@ export class ImportCsvDto {
   @IsString()
   @MaxLength(50)
   documentType?: string;
+
+  /** Date the soumission was issued (YYYY-MM-DD); its prices are dated by it. */
+  @IsOptional()
+  @IsIsoDate()
+  documentDate?: string;
 
   @IsArray()
   @ArrayMinSize(1)

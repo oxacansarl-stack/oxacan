@@ -44,6 +44,10 @@ export class SourceDocument {
   @Column({ type: 'timestamptz', nullable: true })
   importDate: Date | null;
 
+  /** Date the soumission was issued; its prices are dated by it (R001). */
+  @Column({ type: 'date', nullable: true })
+  documentDate: string | null;
+
   @Column({ type: 'text', default: 'imported' })
   status: string;
 

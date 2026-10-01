@@ -8,7 +8,10 @@
   "import": {
     "complete": "Importation terminée :",
     "summary": "{{matched}} correspondance(s), {{unmatched}} sans correspondance",
-    "failed": "Échec de l'importation : {{message}}"
+    "failed": "Échec de l'importation : {{message}}",
+    "documentDate": "Date de la soumission",
+    "review": "{{count}} ligne(s) à vérifier : code interne de projet ou unité différente de l'article connu (non rattachées automatiquement).",
+    "totalMismatch": "{{count}} ligne(s) dont le total imprimé ne correspond pas à quantité × prix unitaire."
   },
   "filters": {
     "search": "Rechercher un article…",
@@ -31,6 +34,7 @@
   },
   "messages": {
     "noValidRows": "Aucune ligne valide trouvée dans le fichier CSV.",
-    "loadFailed": "Impossible de charger les articles du catalogue."
+    "loadFailed": "Impossible de charger les articles du catalogue.",
+    "noHeader": "En-tête non reconnue : le fichier doit contenir au moins les colonnes N° CAN/NPK ou Désignation (séparateur « ; », « , » ou tabulation)."
   }
 }

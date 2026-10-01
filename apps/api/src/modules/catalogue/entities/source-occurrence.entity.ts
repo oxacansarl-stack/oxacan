@@ -31,6 +31,18 @@ export class SourceOccurrence {
   @Column({ type: 'text' })
   rawText: string;
 
+  /** Page of the source document the line was read from. */
+  @Column({ type: 'integer', nullable: true })
+  page: number | null;
+
+  /** CFC/CAN section code, e.g. "231.21". */
+  @Column({ type: 'text', nullable: true })
+  sectionCode: string | null;
+
+  /** Variant / non-added line: kept, but never used as a price observation (R004). */
+  @Column({ type: 'boolean', default: false })
+  isVariant: boolean;
+
   @Column({ type: 'text', nullable: true })
   npkNumber: string | null;
 

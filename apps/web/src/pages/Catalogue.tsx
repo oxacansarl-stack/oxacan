@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, ApiError } from '../lib/api';
 import { formatAmount } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import { CsvImportError, decodeCsv, parseCsv, type ImportRow } from '../lib/csv-import';
 
 interface Article {
   id: string;
@@ -20,26 +21,16 @@ interface ImportResponse {
   totalRows: number;
   matchedRows: number;
   unmatchedRows: number;
+  reviewRows: number;
+  warnings: { lineNumber: number; type: 'INTERNAL_CODE' | 'UNIT_MISMATCH' | 'TOTAL_MISMATCH' }[];
 }
 
 interface ImportResult {
   matched: number;
   unmatched: number;
+  review?: number;
+  totalMismatch?: number;
   errors: string[];
-}
-
-/** Row shape accepted by POST /catalogue/import (CsvRowDto). */
-interface ImportRow {
-  lineNumber: number;
-  rawText: string;
-  npkNumber?: string;
-  description?: string;
-  unit?: string;
-  quantity?: number;
-  unitPriceCents?: number;
-  totalPriceCents?: number;
-  roomType?: string;
-  floor?: string;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -61,64 +52,13 @@ const buttonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-// Header aliases (normalised: lower-case, no accents/spaces/punctuation) → import field.
-const HEADER_ALIASES: Record<string, keyof Omit<ImportRow, 'lineNumber' | 'rawText'>> = {
-  npk: 'npkNumber', npknumber: 'npkNumber', nonpk: 'npkNumber', position: 'npkNumber', pos: 'npkNumber',
-  description: 'description', designation: 'description', libelle: 'description', texte: 'description',
-  unit: 'unit', unite: 'unit', ut: 'unit', u: 'unit',
-  quantity: 'quantity', quantite: 'quantity', qte: 'quantity', qty: 'quantity',
-  unitprice: 'unitPriceCents', prixunitaire: 'unitPriceCents', pu: 'unitPriceCents', prix: 'unitPriceCents',
-  total: 'totalPriceCents', totalprice: 'totalPriceCents', montant: 'totalPriceCents', prixtotal: 'totalPriceCents',
-  room: 'roomType', roomtype: 'roomType', local: 'roomType', piece: 'roomType',
-  floor: 'floor', etage: 'floor', niveau: 'floor',
-};
-
-const normaliseHeader = (h: string) =>
-  h.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
-
-/** Swiss number format: 1'234.50 / 1 234,50 → 1234.5 */
-function parseSwissNumber(v: string): number | undefined {
-  const cleaned = v.replace(/['’\s]/g, '').replace(',', '.');
-  if (!cleaned) return undefined;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/** Parses a ';'-separated CSV (prices in CHF) into import rows (prices in centimes). */
-function parseCSV(text: string): ImportRow[] {
-  const lines = text.split(/\r?\n/);
-  const headerIndex = lines.findIndex((l) => l.trim());
-  if (headerIndex < 0) return [];
-  const fields = lines[headerIndex].split(';').map((h) => HEADER_ALIASES[normaliseHeader(h)]);
-  const rows: ImportRow[] = [];
-  lines.forEach((line, idx) => {
-    if (idx <= headerIndex || !line.trim()) return;
-    const values = line.split(';').map((v) => v.trim());
-    const row: ImportRow = { lineNumber: idx + 1, rawText: line };
-    fields.forEach((field, i) => {
-      const value = values[i] ?? '';
-      if (!field || !value) return;
-      if (field === 'quantity') {
-        const n = parseSwissNumber(value);
-        if (n !== undefined) row.quantity = n;
-      } else if (field === 'unitPriceCents' || field === 'totalPriceCents') {
-        const n = parseSwissNumber(value);
-        if (n !== undefined) row[field] = Math.round(n * 100);
-      } else {
-        row[field] = value;
-      }
-    });
-    rows.push(row);
-  });
-  return rows;
-}
-
 export default function Catalogue() {
   const { t } = useTranslation('catalogue');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [documentDate, setDocumentDate] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: articles = [], isLoading, error } = useQuery<Article[], ApiError>({
@@ -130,10 +70,16 @@ export default function Catalogue() {
     retry: false,
   });
 
-  const importMutation = useMutation<ImportResponse, ApiError, { filename: string; rows: ImportRow[] }>({
+  const importMutation = useMutation<ImportResponse, ApiError, { filename: string; documentDate?: string; rows: ImportRow[] }>({
     mutationFn: (payload) => apiPost<ImportResponse>('/catalogue/import', payload),
     onSuccess: (result) => {
-      setImportResult({ matched: result.matchedRows, unmatched: result.unmatchedRows, errors: [] });
+      setImportResult({
+        matched: result.matchedRows,
+        unmatched: result.unmatchedRows,
+        review: result.reviewRows,
+        totalMismatch: result.warnings.filter((w) => w.type === 'TOTAL_MISMATCH').length,
+        errors: [],
+      });
       queryClient.invalidateQueries({ queryKey: ['catalogue'] });
     },
   });
@@ -141,15 +87,17 @@ export default function Catalogue() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const rows = parseCSV(text);
-    if (rows.length === 0) {
-      setImportResult({ matched: 0, unmatched: 0, errors: [t('messages.noValidRows')] });
+    // Reset file input so the same file can be selected again
+    if (fileRef.current) fileRef.current.value = '';
+    let rows: ImportRow[];
+    try {
+      rows = parseCsv(decodeCsv(await file.arrayBuffer()));
+    } catch (err) {
+      const key = err instanceof CsvImportError && err.code === 'NO_HEADER' ? 'messages.noHeader' : 'messages.noValidRows';
+      setImportResult({ matched: 0, unmatched: 0, errors: [t(key)] });
       return;
     }
-    importMutation.mutate({ filename: file.name, rows });
-    // Reset file input so same file can be selected again
-    if (fileRef.current) fileRef.current.value = '';
+    importMutation.mutate({ filename: file.name, rows, ...(documentDate ? { documentDate } : {}) });
   };
 
   // Collect unique categories for filter
@@ -238,11 +186,20 @@ export default function Catalogue() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
           {t('title')}
         </h1>
-        <div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ fontSize: 13, color: '#374151' }}>
+            {t('import.documentDate')}{' '}
+            <input
+              type="date"
+              value={documentDate}
+              onChange={(e) => setDocumentDate(e.target.value)}
+              style={{ ...inputStyle, padding: '6px 8px' }}
+            />
+          </label>
           <input
             ref={fileRef}
             type="file"
-            accept=".csv"
+            accept=".csv,text/csv"
             style={{ display: 'none' }}
             onChange={handleFileSelect}
           />
@@ -270,6 +227,8 @@ export default function Catalogue() {
         >
           <strong>{t('import.complete')}</strong>{' '}
           {t('import.summary', { matched: importResult.matched, unmatched: importResult.unmatched })}
+          {!!importResult.review && <div>{t('import.review', { count: importResult.review })}</div>}
+          {!!importResult.totalMismatch && <div>{t('import.totalMismatch', { count: importResult.totalMismatch })}</div>}
           {importResult.errors.length > 0 && (
             <ul style={{ margin: '8px 0 0', paddingLeft: 16 }}>
               {importResult.errors.map((err, i) => (

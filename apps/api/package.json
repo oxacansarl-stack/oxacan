@@ -27,6 +27,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "dotenv": "^16.6.1",
+    "express": "^4.22.1",
     "helmet": "^7.1.0",
     "jose": "^5.10.0",
     "pdfkit": "^0.15.2",
@@ -35,7 +36,8 @@
     "rxjs": "^7.8.1",
     "swissqrbill": "^4.4.1",
     "typeorm": "^0.3.20",
-    "typeorm-naming-strategies": "^4.1.0"
+    "typeorm-naming-strategies": "^4.1.0",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
