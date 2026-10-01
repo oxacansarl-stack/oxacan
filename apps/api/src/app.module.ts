@@ -12,6 +12,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RlsContextMiddleware } from './common/middleware/rls-context.middleware';
 import { TenantConnectionHook } from './common/tenant/tenant-connection.hook';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
@@ -92,6 +93,9 @@ import { DocumentsModule } from './modules/documents/documents.module';
     { provide: APP_GUARD, useClass: CompanyContextGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
+    // Global interceptors nest in this order (first = outermost). Idempotency must wrap the
+    // envelope so it stores and replays the exact body the client receives.
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

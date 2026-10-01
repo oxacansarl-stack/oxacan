@@ -1,7 +1,9 @@
-import { isNetworkError, post } from './api';
+import { api, isNetworkError, post } from './api';
 import {
   enqueue,
   getQueueForUser,
+  IDEMPOTENCY_HEADER,
+  newIdempotencyKey,
   QueuedAction,
   REF_PLACEHOLDER,
   syncQueue,
@@ -10,16 +12,21 @@ import type { TimeEntry } from './types';
 
 export type Outcome<T> = { status: 'sent'; data: T } | { status: 'queued'; action: QueuedAction };
 
-type Draft = Omit<QueuedAction, 'id' | 'timestamp' | 'userId' | 'method'>;
+type Draft = Omit<QueuedAction, 'id' | 'timestamp' | 'userId' | 'method' | 'idempotencyKey'>;
 
 /**
  * Sends a field action now, or queues it when there is no network.
  * HTTP errors (4xx business rules, validation, 5xx) are thrown to the caller
  * and never queued. Earlier queued actions are flushed first so the server
  * sees clock-in/out in the order the user did them.
+ *
+ * The idempotency key is chosen before the first attempt and queued with the
+ * action: if that attempt timed out after the server processed it, the replay
+ * carries the same key and the server returns the stored result instead of
+ * creating a duplicate.
  */
 async function sendOrQueue<T>(userId: string, draft: Draft): Promise<Outcome<T>> {
-  const action = { ...draft, userId, method: 'POST' as const };
+  const action = { ...draft, userId, method: 'POST' as const, idempotencyKey: newIdempotencyKey() };
 
   // Depends on a clock-in the server hasn't seen yet: can only be queued.
   if (draft.dependsOn) return { status: 'queued', action: await enqueue(action) };
@@ -30,7 +37,11 @@ async function sendOrQueue<T>(userId: string, draft: Draft): Promise<Outcome<T>>
   }
 
   try {
-    const data = await post<T>(draft.endpoint, draft.body);
+    const data = await api<T>(draft.endpoint, {
+      method: 'POST',
+      body: draft.body === undefined ? undefined : JSON.stringify(draft.body),
+      headers: { [IDEMPOTENCY_HEADER]: action.idempotencyKey },
+    });
     return { status: 'sent', data };
   } catch (err) {
     if (isNetworkError(err)) return { status: 'queued', action: await enqueue(action) };
