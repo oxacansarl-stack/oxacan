@@ -31,3 +31,13 @@ export class AddOfferAssumptionDto {
   @IsIn(ASSUMPTION_STATUSES)
   status?: string;
 }
+
+/** Decision on an open point: confirm or reject it, optionally with its price impact. */
+export class UpdateOfferAssumptionDto {
+  @IsIn(ASSUMPTION_STATUSES)
+  status!: string;
+
+  @IsOptional()
+  @IsSignedCents()
+  impactAmountCents?: number | null;
+}

@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -28,8 +30,36 @@ export const VARIANT_TYPES = [
 
 const SkipIfUndefined = () => ValidateIf((_o, v) => v !== undefined);
 const MAX_QUANTITY = 1_000_000_000;
+const MAX_EVIDENCE = 100;
 
-export class AddOfferLineDto {
+/**
+ * Traceability of a proposed line (§11.2): the rule that proposed it, how confident the engine is
+ * (R008, 0–1) and the source lines it rests on (R007). All optional: a manual line has none.
+ */
+class LineTraceabilityFields {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  ruleId?: string | null;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  confidenceScore?: number | null;
+
+  /** Source occurrence ids or references; null is not allowed (send [] to clear). */
+  @SkipIfUndefined()
+  @IsArray()
+  @ArrayMaxSize(MAX_EVIDENCE)
+  @IsString({ each: true })
+  @IsNotEmpty({ each: true })
+  @MaxLength(200, { each: true })
+  evidence?: string[];
+}
+
+export class AddOfferLineDto extends LineTraceabilityFields {
   @IsOptional()
   @IsUUID()
   canonicalArticleId?: string | null;
@@ -74,7 +104,7 @@ export class AddOfferLineDto {
   sortOrder?: number;
 }
 
-export class UpdateOfferLineDto {
+export class UpdateOfferLineDto extends LineTraceabilityFields {
   @SkipIfUndefined()
   @IsString()
   @IsNotEmpty()

@@ -53,8 +53,17 @@ export class OfferLine {
   @Column({ type: 'text', nullable: true })
   pricingStrategy: string | null;
 
+  /** 0–1: how reliable the proposed line is (R008, §7.7). */
   @Column({ type: 'real', nullable: true })
   confidenceScore: number | null;
+
+  /** Rule that proposed the line (business rule id or rule code), if any (§11.2). */
+  @Column({ type: 'text', nullable: true })
+  ruleId: string | null;
+
+  /** Source lines / documents the proposal is based on (R007). */
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  evidence: string[];
 
   @Column({ type: 'text', nullable: true })
   roomType: string | null;

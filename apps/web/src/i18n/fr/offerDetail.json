@@ -13,7 +13,8 @@
     "submit": "Soumettre l'offre",
     "submitBlocked": "Toutes les lignes doivent avoir un prix avant la soumission",
     "downloadPdf": "Télécharger le PDF",
-    "generatingPdf": "Génération du PDF…"
+    "generatingPdf": "Génération du PDF…",
+    "submitPending": "{{count}} point(s) à décider (hypothèse à valider / information manquante) avant l’envoi"
   },
   "summary": {
     "totalHt": "Total HT",
@@ -68,6 +69,12 @@
       "description": "Description",
       "impact": "Impact (CHF)",
       "status": "Statut"
-    }
+    },
+    "confirm": "Confirmer",
+    "reject": "Rejeter"
+  },
+  "locked": {
+    "message": "Offre {{status}} : elle ne peut plus être modifiée. Créez une nouvelle version pour la changer.",
+    "newVersion": "Nouvelle version"
   }
 }

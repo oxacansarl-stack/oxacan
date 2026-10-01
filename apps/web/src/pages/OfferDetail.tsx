@@ -46,20 +46,14 @@ interface Offer {
   lines?: OfferLine[];
   assumptions?: Assumption[];
   createdAt: string;
+  /** Set by GET /offers/:id: only draft / in-progress offers can change (§14 Versioning). */
+  editable?: boolean;
+  nextStatuses?: string[];
 }
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
-
-const STATUSES = [
-  'draft',
-  'in_progress',
-  'submitted',
-  'accepted',
-  'rejected',
-  'archived',
-] as const;
 
 const VARIANT_TYPES = [
   'BASE',
@@ -99,6 +93,8 @@ const VARIANT_COLORS: Record<string, { bg: string; fg: string }> = {
   INFORMATION_MANQUANTE: { bg: '#ffedd5', fg: '#9a3412' },
   EXCLU: { bg: '#f3f4f6', fg: '#6b7280' },
 };
+
+const PENDING_TYPES = ['HYPOTHESE_A_VALIDER', 'INFORMATION_MANQUANTE'];
 
 /* ------------------------------------------------------------------ */
 /*  Shared styles                                                      */
@@ -253,6 +249,12 @@ export default function OfferDetail() {
     },
   });
 
+  const decideAssumptionMutation = useMutation({
+    mutationFn: ({ assumptionId, status }: { assumptionId: string; status: 'confirmed' | 'rejected' }) =>
+      apiPatch(`/offers/${id}/assumptions/${assumptionId}`, { status }),
+    onSuccess: invalidate,
+  });
+
   const recalcMutation = useMutation({
     mutationFn: () => apiPost(`/offers/${id}/recalculate`),
     onSuccess: invalidate,
@@ -323,7 +325,15 @@ export default function OfferDetail() {
   const assumptions = offer?.assumptions ?? [];
   // Mirrors the server's submit rule (OffersService.updateStatus): only BASE lines must be priced.
   const hasUnpricedLines = lines.some((l) => l.unitPriceCents == null && l.variantType === 'BASE');
-  const actionError = statusMutation.error || recalcMutation.error || duplicateMutation.error || pdfMutation.error;
+  // Mirrors VALIDATION_PENDING: open hypotheses / missing information block sending.
+  const pendingCount =
+    lines.filter((l) => PENDING_TYPES.includes(l.variantType)).length +
+    assumptions.filter((a) => PENDING_TYPES.includes(a.type) && a.status === 'open').length;
+  const editable = offer?.editable ?? true;
+  const canSubmit = (offer?.nextStatuses ?? []).includes('submitted') && !hasUnpricedLines && pendingCount === 0;
+  const submitHint = hasUnpricedLines ? t('actions.submitBlocked') : pendingCount ? t('actions.submitPending', { count: pendingCount }) : '';
+  const actionError =
+    statusMutation.error || recalcMutation.error || duplicateMutation.error || pdfMutation.error || decideAssumptionMutation.error;
 
   /* --- Render --- */
 
@@ -397,13 +407,15 @@ export default function OfferDetail() {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          <button
-            style={buttonSecondaryStyle}
-            onClick={() => recalcMutation.mutate()}
-            disabled={recalcMutation.isPending}
-          >
-            {recalcMutation.isPending ? t('actions.recalculating') : t('actions.recalculate')}
-          </button>
+          {editable && (
+            <button
+              style={buttonSecondaryStyle}
+              onClick={() => recalcMutation.mutate()}
+              disabled={recalcMutation.isPending}
+            >
+              {recalcMutation.isPending ? t('actions.recalculating') : t('actions.recalculate')}
+            </button>
+          )}
           <button
             style={buttonSecondaryStyle}
             onClick={() => duplicateMutation.mutate()}
@@ -418,25 +430,27 @@ export default function OfferDetail() {
           >
             {pdfMutation.isPending ? t('actions.generatingPdf') : t('actions.downloadPdf')}
           </button>
-          <div style={{ position: 'relative' }} title={hasUnpricedLines ? t('actions.submitBlocked') : ''}>
-            <button
-              style={{
-                ...buttonStyle,
-                opacity: hasUnpricedLines ? 0.5 : 1,
-                cursor: hasUnpricedLines ? 'not-allowed' : 'pointer',
-              }}
-              disabled={hasUnpricedLines}
-              onClick={() => statusMutation.mutate('submitted')}
-            >
-              {t('actions.submit')}
-            </button>
-          </div>
+          {editable && (
+            <div style={{ position: 'relative' }} title={submitHint}>
+              <button
+                style={{
+                  ...buttonStyle,
+                  opacity: canSubmit ? 1 : 0.5,
+                  cursor: canSubmit ? 'pointer' : 'not-allowed',
+                }}
+                disabled={!canSubmit}
+                onClick={() => statusMutation.mutate('submitted')}
+              >
+                {t('actions.submit')}
+              </button>
+            </div>
+          )}
           <select
             style={{ ...inputStyle, width: 'auto', minWidth: 140 }}
             value={offer.status}
             onChange={(e) => statusMutation.mutate(e.target.value)}
           >
-            {STATUSES.map((s) => (
+            {[offer.status, ...(offer.nextStatuses ?? [])].map((s) => (
               <option key={s} value={s}>
                 {statusLabel('offer', s)}
               </option>
@@ -448,6 +462,33 @@ export default function OfferDetail() {
       {actionError && (
         <div style={{ color: '#ef4444', fontSize: 13, marginTop: -12, marginBottom: 16 }}>
           {errorMessage(actionError)}
+        </div>
+      )}
+
+      {!editable && (
+        <div
+          style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 16,
+            fontSize: 13,
+            color: '#1e3a8a',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <span>{t('locked.message', { status: statusLabel('offer', offer.status) })}</span>
+          <button
+            style={buttonStyle}
+            onClick={() => duplicateMutation.mutate()}
+            disabled={duplicateMutation.isPending}
+          >
+            {t('locked.newVersion')}
+          </button>
         </div>
       )}
 
@@ -488,7 +529,7 @@ export default function OfferDetail() {
           <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
             {t('lines.title', { count: lines.length })}
           </h2>
-          <button
+          {editable && <button
             style={buttonStyle}
             onClick={() => {
               setShowLineForm(!showLineForm);
@@ -497,11 +538,11 @@ export default function OfferDetail() {
             }}
           >
             {showLineForm ? t('common:actions.cancel') : t('lines.add')}
-          </button>
+          </button>}
         </div>
 
         {/* Line form (add or edit) */}
-        {(showLineForm || editingLineId) && (
+        {editable && (showLineForm || editingLineId) && (
           <div
             style={{
               background: '#f9fafb',
@@ -713,6 +754,7 @@ export default function OfferDetail() {
                     </span>
                   </td>
                   <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                    {editable && <>
                     <button
                       style={{
                         background: 'none',
@@ -741,6 +783,7 @@ export default function OfferDetail() {
                     >
                       {t('common:actions.delete')}
                     </button>
+                    </>}
                   </td>
                 </tr>
               );
@@ -762,16 +805,18 @@ export default function OfferDetail() {
           <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
             {t('assumptions.title', { count: assumptions.length })}
           </h2>
-          <button
-            style={buttonStyle}
-            onClick={() => setShowAssumptionForm(!showAssumptionForm)}
-          >
-            {showAssumptionForm ? t('common:actions.cancel') : t('assumptions.add')}
-          </button>
+          {editable && (
+            <button
+              style={buttonStyle}
+              onClick={() => setShowAssumptionForm(!showAssumptionForm)}
+            >
+              {showAssumptionForm ? t('common:actions.cancel') : t('assumptions.add')}
+            </button>
+          )}
         </div>
 
         {/* Assumption form */}
-        {showAssumptionForm && (
+        {editable && showAssumptionForm && (
           <div
             style={{
               background: '#f9fafb',
@@ -853,9 +898,10 @@ export default function OfferDetail() {
                   t('assumptions.table.description'),
                   t('assumptions.table.impact'),
                   t('assumptions.table.status'),
-                ].map((h) => (
+                  '',
+                ].map((h, i) => (
                   <th
-                    key={h}
+                    key={h || i}
                     style={{
                       textAlign: 'left',
                       padding: '8px 10px',
@@ -917,6 +963,26 @@ export default function OfferDetail() {
                     >
                       {statusLabel('assumption', a.status ?? 'open')}
                     </span>
+                  </td>
+                  <td style={{ padding: '8px 10px', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' }}>
+                    {editable && a.status === 'open' && (
+                      <>
+                        <button
+                          style={{ ...buttonSecondaryStyle, padding: '4px 10px', fontSize: 12, marginRight: 6 }}
+                          disabled={decideAssumptionMutation.isPending}
+                          onClick={() => decideAssumptionMutation.mutate({ assumptionId: a.id, status: 'confirmed' })}
+                        >
+                          {t('assumptions.confirm')}
+                        </button>
+                        <button
+                          style={{ ...buttonDangerStyle, padding: '4px 10px', fontSize: 12 }}
+                          disabled={decideAssumptionMutation.isPending}
+                          onClick={() => decideAssumptionMutation.mutate({ assumptionId: a.id, status: 'rejected' })}
+                        >
+                          {t('assumptions.reject')}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

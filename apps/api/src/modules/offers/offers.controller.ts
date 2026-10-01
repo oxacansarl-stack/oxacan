@@ -14,11 +14,11 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { Roles, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
-import { OffersService } from './offers.service';
+import { OffersService, withLifecycle } from './offers.service';
 import { PricingService } from './pricing.service';
 import { CreateOfferDto, UpdateOfferDto, UpdateOfferStatusDto } from './dto/offer.dto';
 import { AddOfferLineDto, UpdateOfferLineDto } from './dto/offer-line.dto';
-import { AddOfferAssumptionDto } from './dto/offer-assumption.dto';
+import { AddOfferAssumptionDto, UpdateOfferAssumptionDto } from './dto/offer-assumption.dto';
 
 /** Parses a positive integer query param; falls back on missing/invalid values and clamps to max. */
 function positiveInt(value: string | undefined, max?: number): number | undefined {
@@ -58,7 +58,7 @@ export class OffersController {
   @Roles(...OFFICE_ROLES)
   async suggestArticles(
     @CompanyId() companyId: string,
-    @Query('roomType') roomType: string,
+    @Query('roomType') roomType?: string,
   ) {
     return this.pricingService.suggestArticlesForRoom(companyId, roomType);
   }
@@ -69,7 +69,7 @@ export class OffersController {
     @CompanyId() companyId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.offersService.findById(companyId, id);
+    return withLifecycle(await this.offersService.findById(companyId, id));
   }
 
   @Post()
@@ -144,6 +144,17 @@ export class OffersController {
     @Body() body: AddOfferAssumptionDto,
   ) {
     return this.offersService.addAssumption(companyId, id, body);
+  }
+
+  @Patch(':id/assumptions/:assumptionId')
+  @Roles(...OFFICE_ROLES)
+  async updateAssumption(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('assumptionId', ParseUUIDPipe) assumptionId: string,
+    @Body() body: UpdateOfferAssumptionDto,
+  ) {
+    return this.offersService.updateAssumption(companyId, id, assumptionId, body);
   }
 
   @Post(':id/recalculate')
