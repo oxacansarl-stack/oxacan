@@ -1,18 +1,11 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { setPassword } from '../lib/auth';
+import { AuthLayout } from '@/components/auth-layout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 const MIN_LENGTH = 10;
-
-const input: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  boxSizing: 'border-box',
-};
-const label: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 };
 
 /** Shown after an invite or password-reset link signed the person in, before they enter the app. */
 export default function SetPassword({ onDone }: { onDone: () => void }) {
@@ -39,63 +32,41 @@ export default function SetPassword({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f8f9fa',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        padding: 16,
-      }}
-    >
-      <form
-        onSubmit={submit}
-        style={{ width: '100%', maxWidth: 380, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 28 }}
-      >
-        <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: -0.5 }}>OXACAN</div>
-        <h1 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: '16px 0 4px' }}>{t('auth.setPasswordTitle')}</h1>
-        <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 20px' }}>{t('auth.setPasswordHelp')}</p>
+    <AuthLayout>
+      <h1 className="font-display text-xl font-semibold text-ink">{t('auth.setPasswordTitle')}</h1>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted">{t('auth.setPasswordHelp')}</p>
 
-        <label style={label}>{t('auth.newPassword')}</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={MIN_LENGTH}
-          value={password}
-          onChange={(e) => setPw(e.target.value)}
-          style={{ ...input, marginBottom: 14 }}
-        />
-        <label style={label}>{t('auth.confirmPassword')}</label>
-        <input
-          type="password"
-          autoComplete="new-password"
-          required
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          style={{ ...input, marginBottom: 18 }}
-        />
-        {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            background: busy ? '#93c5fd' : '#2563eb',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: busy ? 'default' : 'pointer',
-          }}
-        >
+      <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
+        <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink-2">
+          {t('auth.newPassword')}
+          <Input
+            type="password"
+            autoComplete="new-password"
+            required
+            minLength={MIN_LENGTH}
+            value={password}
+            onChange={(e) => setPw(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink-2">
+          {t('auth.confirmPassword')}
+          <Input
+            type="password"
+            autoComplete="new-password"
+            required
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </label>
+        {error && (
+          <p role="alert" className="rounded-md bg-bad-bg px-3 py-2.5 text-[13px] leading-snug text-bad">
+            {error}
+          </p>
+        )}
+        <Button type="submit" variant="primary" disabled={busy} className="mt-1 h-10 w-full text-sm">
           {busy ? t('auth.saving') : t('auth.savePassword')}
-        </button>
+        </Button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
