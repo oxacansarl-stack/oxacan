@@ -19,6 +19,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['log', 'warn', 'error'],
   });
+  // Tests only: lets a test drain its own anonymous rate-limit bucket (X-Forwarded-For) without
+  // starving the other test files, which all reach the API from 127.0.0.1.
+  if (process.env.NODE_ENV === 'test') app.getHttpAdapter().getInstance().set('trust proxy', true);
 
   app.enableCors({
     origin: process.env.WEB_URL?.split(',') ?? true,

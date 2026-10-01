@@ -404,23 +404,17 @@ describe('B file references stored as URLs', () => {
 /* ─────────────── C. File outputs ─────────────── */
 describe('C exports and documents', () => {
   it('C1 fiduciary CSV neutralises spreadsheet formulas', async () => {
-    const evil = await must(adminA.post('/clients', { name: '=HYPERLINK("http://evil.example","Payer")' }));
-    const inv = await must(adminA.post('/invoices', {
-      projectId: fx.project, clientId: evil.id, type: 'invoice',
-      lines: [{ description: 'x', unit: 'u', quantity: 1, unitPriceCents: 100 }],
+    // Free text a worker controls ends up in the export: an approved expense's description.
+    const e = await must(worker1.post('/expenses', {
+      projectId: fx.project, date: '2026-09-25', category: 'material', description: '=HYPERLINK("http://evil.example","Payer")', amountCents: 100,
     }));
-    await must(adminA.patch(`/invoices/${inv.id}/status`, { status: 'sent' }));
-    const accounts = asList(await must(adminA.get('/accounting/accounts')));
-    await must(adminA.post('/accounting/entries', {
-      entryDate: '2026-09-29', description: '+cmd|\' /C calc\'!A0',
-      lines: [
-        { accountId: accounts[0].id, debitCents: 5, creditCents: 0 },
-        { accountId: accounts[1].id, debitCents: 0, creditCents: 5 },
-      ],
-    }));
-    const exp = await must(pm.get('/accounting/export/fiduciary?dateFrom=2026-01-01&dateTo=2026-12-31'));
-    const cells = [exp.clientCsv, exp.journalCsv].join('\n').split(/[\n;]/).map((c: string) => c.replace(/^"|"$/g, ''));
-    expect(cells.filter((c: string) => /^[=+\-@\t\r]/.test(c) && !/^-?\d/.test(c))).toEqual([]);
+    await must(worker1.post('/expenses/submit', { expenseIds: [e.id] }));
+    await must(pm.post('/expenses/approve', { expenseIds: [e.id] }));
+    const exp = await must(adminA.get('/accounting/export/fiduciary?dateFrom=2026-01-01&dateTo=2026-12-31'));
+    const contents = Object.values(exp.files).map((f: any) => f.content as string);
+    expect(contents.join('\n')).toContain('HYPERLINK');
+    const cells = contents.join('\n').split(/[\r\n;]/).map((c: string) => c.replace(/^\uFEFF/, '').replace(/^"|"$/g, ''));
+    expect(cells.filter((c: string) => /^[=+\-@\t]/.test(c) && !/^-?\d/.test(c))).toEqual([]);
   });
 
   it('C3 fiduciary export with bad dates is a 400', async () => {
@@ -628,12 +622,14 @@ describe('L audit trail', () => {
   });
 });
 
-/* ─────────────── J8 rate limiting (last: it exhausts the anonymous bucket) ─────────────── */
+/* ─────────────── J8 rate limiting ─────────────── */
 describe('J8 / I5 rate limiting', () => {
   it('limits anonymous portal guessing', async () => {
+    // A client IP of its own, so draining it doesn't rate-limit the other test files' anonymous calls.
+    const headers = { 'X-Forwarded-For': '203.0.113.8' };
     let limited = false;
     for (let i = 0; i < 700 && !limited; i++) {
-      limited = (await anon.get(`/portal/view/${RANDOM_UUID}`)).status === 429;
+      limited = (await fetch(`${BASE_URL}/portal/view/${RANDOM_UUID}`, { headers })).status === 429;
     }
     expect(limited).toBe(true);
   }, 120_000);

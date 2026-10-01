@@ -213,6 +213,8 @@ export class ProjectsService {
   ): Promise<Project> {
     const project = await this.findById(companyId, id);
     Object.assign(project, dto);
+    // findById loads the manager relation, which save() would prefer over a new managerId.
+    if (dto.managerId !== undefined) project.manager = undefined as unknown as Project['manager'];
     return this.projectRepo.save(project);
   }
 
