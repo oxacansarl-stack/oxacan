@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CompanyId, CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles, ALL_ROLES, OFFICE_ROLES } from '../../common/decorators/roles.decorator';
+import { Roles, OFFICE_ROLES, SITE_LEAD_ROLES } from '../../common/decorators/roles.decorator';
 import { CatalogueService } from './catalogue.service';
 import { hidesMoneyFor, stripMoney } from '../../common/util/strip-money';
 import { CreateArticleDto, UpdateArticleDto, ImportCsvDto, ImportPdfDto } from './dto/catalogue.dto';
@@ -22,9 +22,10 @@ import { PDF_LIMITS } from './pdf-text.extractor';
 export class CatalogueController {
   constructor(private readonly catalogueService: CatalogueService) {}
 
-  /** Field staff pick materials from the catalogue, so reads are open to all roles. */
+  // Catalogue reads show unit prices, so workers are excluded (product decision 2026-10-01);
+  // team leaders still read it with prices stripped by the financial redaction.
   @Get('articles')
-  @Roles(...ALL_ROLES)
+  @Roles(...SITE_LEAD_ROLES)
   async listArticles(
     @CompanyId() companyId: string,
     @CurrentUser() user: { role: string },
@@ -45,7 +46,7 @@ export class CatalogueController {
   }
 
   @Get('articles/:id')
-  @Roles(...ALL_ROLES)
+  @Roles(...SITE_LEAD_ROLES)
   async getArticle(
     @CompanyId() companyId: string,
     @CurrentUser() user: { role: string },

@@ -58,7 +58,8 @@ const navItems: { to: string; labelKey: string; roles: Role[]; element: React.Re
   { to: '/meetings', labelKey: 'nav.meetings', roles: SITE_LEAD, element: <Meetings /> },
   { to: '/invoices', labelKey: 'nav.invoices', roles: OFFICE, element: <Invoices /> },
   { to: '/accounting', labelKey: 'nav.accounting', roles: OFFICE, element: <Accounting /> },
-  { to: '/catalogue', labelKey: 'nav.catalogue', roles: ALL, element: <Catalogue /> },
+  // Catalogue shows unit prices: workers are excluded (the API enforces it too).
+  { to: '/catalogue', labelKey: 'nav.catalogue', roles: SITE_LEAD, element: <Catalogue /> },
   { to: '/plans', labelKey: 'nav.plans', roles: ALL, element: <Plans /> },
   { to: '/settings', labelKey: 'nav.settings', roles: OFFICE, element: <Settings /> },
   { to: '/portal', labelKey: 'nav.portal', roles: OFFICE, element: <Portal /> },

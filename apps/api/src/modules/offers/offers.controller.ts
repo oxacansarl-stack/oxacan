@@ -63,6 +63,13 @@ export class OffersController {
     return this.pricingService.suggestArticlesForRoom(companyId, roomType);
   }
 
+  /** Counts and TTC totals per status (open = draft + in_progress + submitted), for the dashboard. */
+  @Get('stats')
+  @Roles(...OFFICE_ROLES)
+  async getStats(@CompanyId() companyId: string) {
+    return this.offersService.getStats(companyId);
+  }
+
   @Get(':id')
   @Roles(...OFFICE_ROLES)
   async getOffer(

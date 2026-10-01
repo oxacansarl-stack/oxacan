@@ -945,6 +945,42 @@ export class InvoicingService {
      Invoices — Project Summary
      ═══════════════════════════════════════════════ */
 
+  /**
+   * Company-wide dashboard figures. "Invoiced" counts issued documents of the year (credit notes
+   * always count: they never leave draft) at TTC; open = invoiced − paid. Receipts this month come
+   * from recorded payments, so a payment on last year's invoice still shows.
+   */
+  async getCompanyStats(companyId: string, year?: number) {
+    const [row] = await this.dataSource.query(
+      `WITH issued AS (
+         SELECT * FROM invoice
+          WHERE company_id = $1 AND status <> 'cancelled' AND (type = 'credit_note' OR status <> 'draft')
+            AND EXTRACT(YEAR FROM issue_date) = COALESCE($2::int, EXTRACT(YEAR FROM CURRENT_DATE)))
+       SELECT COALESCE($2::int, EXTRACT(YEAR FROM CURRENT_DATE))::int                    AS year,
+              COALESCE((SELECT SUM(total_ttc_cents) FROM issued), 0)::bigint             AS invoiced,
+              COALESCE((SELECT SUM(amount_paid_cents) FROM issued), 0)::bigint           AS paid,
+              (SELECT COUNT(*) FROM issued WHERE status IN ('sent', 'partially_paid', 'overdue'))::int AS pending,
+              COALESCE((SELECT SUM(total_ttc_cents - COALESCE(amount_paid_cents, 0)) FROM issued
+                         WHERE status IN ('sent', 'partially_paid', 'overdue')), 0)::bigint AS "pendingCents",
+              (SELECT COUNT(*) FROM issued WHERE status = 'overdue')::int                AS overdue,
+              COALESCE((SELECT SUM(p.amount_cents) FROM payment p
+                         WHERE p.company_id = $1
+                           AND date_trunc('month', p.payment_date) = date_trunc('month', CURRENT_DATE)), 0)::bigint
+                AS "paidThisMonthCents"`,
+      [companyId, year ?? null],
+    );
+    return {
+      year: row.year,
+      invoicedTtcCents: Number(row.invoiced),
+      paidTtcCents: Number(row.paid),
+      outstandingTtcCents: Number(row.invoiced) - Number(row.paid),
+      pendingCount: row.pending,
+      pendingTtcCents: Number(row.pendingCents),
+      overdueCount: row.overdue,
+      paidThisMonthCents: Number(row.paidThisMonthCents),
+    };
+  }
+
   async getProjectInvoiceSummary(companyId: string, projectId: string) {
     await assertProjectExists(this.invoiceRepo.manager, companyId, projectId);
     const result = await this.invoiceRepo

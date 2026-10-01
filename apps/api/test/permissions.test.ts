@@ -55,7 +55,7 @@ describe('Role access (PRD §3.1–3.2)', () => {
     expect((await pm.put(`/hr/employees/${WORKER_1_A.id}`, { hourlyRateCents: 1 })).status).toBe(403);
   });
 
-  it.each(['/auth/profile', '/companies/me', '/notifications', '/notifications/unread-count', '/projects', '/catalogue/articles', '/plans', '/timekeeping', '/timekeeping/summary/weekly', '/expenses', '/daily-reports'])(
+  it.each(['/auth/profile', '/companies/me', '/notifications', '/notifications/unread-count', '/projects', '/plans', '/timekeeping', '/timekeeping/summary/weekly', '/expenses', '/daily-reports'])(
     'WORKER may GET %s',
     async (path) => {
       const res = await worker1.get(path);

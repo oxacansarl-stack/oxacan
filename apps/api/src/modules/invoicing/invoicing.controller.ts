@@ -14,6 +14,7 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { ADMIN_ONLY, OFFICE_ROLES, Roles } from '../../common/decorators/roles.decorator';
+import { ValidationError } from '@oxacan/shared-types';
 import { InvoicingService } from './invoicing.service';
 import {
   CreateInvoiceDto,
@@ -40,6 +41,19 @@ function parsePaging(page?: string, limit?: string) {
 @Controller('invoices')
 export class InvoicingController {
   constructor(private readonly service: InvoicingService) {}
+
+  /* ───────────── Aggregates (before :id) ───────────── */
+
+  /** Company-wide financial figures for the dashboard (year totals + current month's receipts). */
+  @Get('stats')
+  @Roles(...OFFICE_ROLES)
+  async getCompanyStats(@CompanyId() companyId: string, @Query('year') year?: string) {
+    const y = year === undefined ? undefined : Number(year);
+    if (y !== undefined && (!Number.isInteger(y) || y < 2000 || y > 2100)) {
+      throw new ValidationError('year must be a four-digit year');
+    }
+    return this.service.getCompanyStats(companyId, y);
+  }
 
   /* ───────────── Project summary (before :id) ───────────── */
 

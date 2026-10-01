@@ -225,6 +225,24 @@ export class OffersService {
     };
   }
 
+  /** Dashboard aggregate: per-status counts and TTC sums, plus the open pipeline total. */
+  async getStats(companyId: string) {
+    const rows: { status: string; n: number; ttc: string }[] = await this.offerRepo.query(
+      `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(total_ttc_cents), 0)::bigint AS ttc
+         FROM offer WHERE company_id = $1 GROUP BY status`,
+      [companyId],
+    );
+    const byStatus = Object.fromEntries(rows.map((r) => [r.status, { count: r.n, totalTtcCents: Number(r.ttc) }]));
+    const OPEN = ['draft', 'in_progress', 'submitted'];
+    return {
+      byStatus,
+      open: {
+        count: OPEN.reduce((n, st) => n + (byStatus[st]?.count ?? 0), 0),
+        totalTtcCents: OPEN.reduce((n, st) => n + (byStatus[st]?.totalTtcCents ?? 0), 0),
+      },
+    };
+  }
+
   async findById(companyId: string, id: string): Promise<Offer> {
     const offer = await this.offerRepo.findOne({
       where: { id, companyId },
