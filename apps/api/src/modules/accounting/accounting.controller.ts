@@ -8,7 +8,9 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  StreamableFile,
 } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import {
   CompanyId,
   CurrentUser,
@@ -18,7 +20,14 @@ import {
   OFFICE_ROLES,
   Roles,
 } from '../../common/decorators/roles.decorator';
-import { AccountingService } from './accounting.service';
+import { SkipEnvelope } from '../../common/decorators/skip-envelope.decorator';
+import { AccountingService, FiduciaryFilters } from './accounting.service';
+import {
+  FIDUCIARY_CATEGORIES,
+  FIDUCIARY_FILES,
+  FiduciaryCategory,
+  FiduciaryFile,
+} from './fiduciary-csv';
 import {
   CreateAccountDto,
   CreateJournalEntryDto,
@@ -41,7 +50,8 @@ function parsePaging(page?: string, limit?: string) {
 /** Optional YYYY-MM-DD query filter; malformed values are a 400 instead of a DB error. */
 function optionalDate(name: string, value?: string): string | undefined {
   if (value === undefined || value === '') return undefined;
-  if (!ISO_DATE.test(value)) {
+  // The regex alone accepts impossible days such as 2026-02-30; round-trip through UTC to reject them.
+  if (!ISO_DATE.test(value) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
     throw new BadRequestException(`${name} must be a date in YYYY-MM-DD format`);
   }
   return value;
@@ -49,7 +59,7 @@ function optionalDate(name: string, value?: string): string | undefined {
 
 /**
  * PRD: accounting (chart of accounts, journal, ledger, trial balance) is direction / ADMIN only.
- * Exception: project managers may export fiduciary data.
+ * Exception: project managers may export fiduciary data, limited to their own projects (§17.6).
  */
 @Controller('accounting')
 export class AccountingController {
@@ -190,30 +200,78 @@ export class AccountingController {
   }
 
   /* ═══════════════════════════════════════════════
-     Fiduciary Export
+     Fiduciary Export (PRD §17)
      ═══════════════════════════════════════════════ */
 
   /**
-   * Returns { journalCsv, balanceCsv, clientCsv } (semicolon-separated, UTF-8 BOM) in the
-   * standard envelope. Date range via ?dateFrom=&dateTo= (aliases ?from=&to=), both required.
+   * Returns the three §17 files { heures_employes, frais_debours, resume_projets }, each
+   * { filename, content, rowCount } (UTF-8 BOM, ';', CRLF, ISO dates), in the standard envelope.
+   * Period via ?dateFrom=&dateTo= (aliases ?from=&to=), both required. Optional filters
+   * (§17.7): ?projectId=, ?employeeId=, ?category= (materiel|deplacement|equipement|sous-traitance|divers).
+   * ADMIN sees everything; a PROJECT_MANAGER only the projects they manage (§17.6).
    */
   @Get('export/fiduciary')
   @Roles(...OFFICE_ROLES)
   async exportFiduciary(
     @CompanyId() companyId: string,
-    @Query('dateFrom') dateFrom?: string,
-    @Query('dateTo') dateTo?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
+    @CurrentUser() user: { id: string; role: string },
+    @Query() query: Record<string, string | undefined>,
   ) {
-    const start = optionalDate('dateFrom', dateFrom ?? from);
-    const end = optionalDate('dateTo', dateTo ?? to);
-    if (!start || !end) {
-      throw new BadRequestException('dateFrom and dateTo are required (YYYY-MM-DD)');
-    }
-    if (start > end) {
-      throw new BadRequestException('dateFrom must not be after dateTo');
-    }
-    return this.service.exportFiduciary(companyId, start, end);
+    return this.service.exportFiduciary(companyId, user, parseFiduciaryQuery(query));
   }
+
+  /** One §17 file as a raw text/csv download (the exact bytes the fiduciary receives). */
+  @Get('export/fiduciary/:file')
+  @Roles(...OFFICE_ROLES)
+  @SkipEnvelope()
+  async downloadFiduciaryFile(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string; role: string },
+    @Param('file') file: string,
+    @Query() query: Record<string, string | undefined>,
+  ) {
+    const key = file.replace(/\.csv$/, '') as FiduciaryFile;
+    if (!FIDUCIARY_FILES.includes(key)) {
+      throw new BadRequestException(`file must be one of: ${FIDUCIARY_FILES.join(', ')}`);
+    }
+    const result = await this.service.exportFiduciary(companyId, user, parseFiduciaryQuery(query));
+    const { filename, content } = result.files[key];
+    const bytes = Buffer.from(content, 'utf8');
+    return new StreamableFile(bytes, {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${filename}"`,
+      length: bytes.length,
+    });
+  }
+}
+
+/** Validates the fiduciary export query; malformed values are a 400 instead of a DB error. */
+function parseFiduciaryQuery(q: Record<string, string | undefined>): FiduciaryFilters {
+  const start = optionalDate('dateFrom', q.dateFrom ?? q.from);
+  const end = optionalDate('dateTo', q.dateTo ?? q.to);
+  if (!start || !end) {
+    throw new BadRequestException('dateFrom and dateTo are required (YYYY-MM-DD)');
+  }
+  if (start > end) {
+    throw new BadRequestException('dateFrom must not be after dateTo');
+  }
+  const uuid = (name: string, value?: string) => {
+    if (value === undefined || value === '') return undefined;
+    if (!isUUID(value)) throw new BadRequestException(`${name} must be a UUID`);
+    return value;
+  };
+  let category: FiduciaryCategory | undefined;
+  if (q.category !== undefined && q.category !== '') {
+    if (!(FIDUCIARY_CATEGORIES as readonly string[]).includes(q.category)) {
+      throw new BadRequestException(`category must be one of: ${FIDUCIARY_CATEGORIES.join(', ')}`);
+    }
+    category = q.category as FiduciaryCategory;
+  }
+  return {
+    dateFrom: start,
+    dateTo: end,
+    projectId: uuid('projectId', q.projectId),
+    employeeId: uuid('employeeId', q.employeeId ?? q.userId),
+    category,
+  };
 }

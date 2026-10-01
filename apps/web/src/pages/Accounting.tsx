@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { apiGet, apiList, apiPost } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
 import { errorMessage } from '../lib/errors';
-import { enumLabel, formatAmount, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { enumLabel, formatAmount, formatDate, formatMoney } from '../lib/format';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -49,11 +49,35 @@ interface LedgerEntry {
   balanceCents: number;
 }
 
-/** GET /accounting/export/fiduciary → semicolon-separated CSV strings (UTF-8 BOM). */
+/** GET /accounting/export/fiduciary → the three PRD §17 files (UTF-8 BOM, ';', CRLF, ISO dates). */
+const FIDUCIARY_FILES = ['heures_employes', 'frais_debours', 'resume_projets'] as const;
+type FiduciaryFileKey = typeof FIDUCIARY_FILES[number];
+
+interface FiduciaryCsvFile {
+  filename: string;
+  content: string;
+  rowCount: number;
+}
+
 interface FiduciaryExport {
-  journalCsv: string;
-  balanceCsv: string;
-  clientCsv: string;
+  dateFrom: string;
+  dateTo: string;
+  periode: string;
+  scope: 'all' | 'own_projects';
+  files: Record<FiduciaryFileKey, FiduciaryCsvFile>;
+}
+
+interface ExportProject {
+  id: string;
+  reference: string;
+  name: string;
+  managerId?: string | null;
+}
+
+interface ExportEmployee {
+  id: string;
+  firstName: string;
+  lastName: string;
 }
 
 interface TrialBalanceRow {
@@ -82,20 +106,48 @@ type Tab = typeof TABS[number];
 
 const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
 
+/** §17.4 expense categories, as written in the CSV. */
+const FIDUCIARY_CATEGORIES = ['materiel', 'deplacement', 'equipement', 'sous-traitance', 'divers'] as const;
+
+/** §17.7 period selection. */
+const PERIOD_TYPES = ['month', 'quarter', 'year', 'custom'] as const;
+type PeriodType = typeof PERIOD_TYPES[number];
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
-/** Fiduciary CSV cells that hold DB values are shown translated in the preview (the file itself is unchanged). */
-const exportCellLabel = (column: string, value: string): string => {
-  if (!value) return value;
-  if (column === 'Type') return enumLabel('accountType', value);
-  if (column === 'Status') return statusLabel('invoice', value);
-  return value;
-};
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Last day of a month as YYYY-MM-DD (month is 1-based). */
+const monthEnd = (year: number, month: number) =>
+  `${year}-${pad2(month)}-${pad2(new Date(Date.UTC(year, month, 0)).getUTCDate())}`;
+
+/** [dateFrom, dateTo] (ISO) for the selected period, or null when incomplete. */
+function periodRange(
+  type: PeriodType, month: string, quarter: number, year: number, from: string, to: string,
+): [string, string] | null {
+  if (type === 'month') {
+    const m = /^(\d{4})-(\d{2})$/.exec(month);
+    if (!m) return null;
+    return [`${month}-01`, monthEnd(Number(m[1]), Number(m[2]))];
+  }
+  if (type === 'quarter') {
+    const first = (quarter - 1) * 3 + 1;
+    return [`${year}-${pad2(first)}-01`, monthEnd(year, first + 2)];
+  }
+  if (type === 'year') return [`${year}-01-01`, `${year}-12-31`];
+  return from && to ? [from, to] : null;
+}
 
 const entryTotalDebit = (e: JournalEntry): number =>
   (e.lines ?? []).reduce((sum, l) => sum + (l.debitCents || 0), 0);
+
+/** Column names of a CSV (first line), so the preview shows headers even for an empty file. */
+function parseCsvHeader(csv: string): string[] {
+  const first = csv.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] ?? '';
+  return first ? first.split(';') : [];
+}
 
 /** Parses the API's semicolon-separated CSV (optional BOM, "quoted" fields) for preview. */
 function parseCsv(csv: string): Record<string, string>[] {
@@ -181,6 +233,13 @@ const thStyle: React.CSSProperties = {
   textTransform: 'uppercase',
 };
 
+const labelStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: '#6b7280',
+  display: 'block',
+  marginBottom: 4,
+};
+
 const tdStyle: React.CSSProperties = {
   padding: '10px 12px',
   fontSize: 14,
@@ -195,7 +254,8 @@ const tdStyle: React.CSSProperties = {
 export default function Accounting() {
   const { t } = useTranslation('accounting');
   // Project managers may only run the fiduciary export (PRD §3.2); the ledger is admin-only.
-  const isAdmin = useCurrentUser().role === 'ADMIN';
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser.role === 'ADMIN';
   const visibleTabs: readonly Tab[] = isAdmin ? TABS : ['export'];
   const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'accounts' : 'export');
   const [error, setError] = useState('');
@@ -247,8 +307,19 @@ export default function Accounting() {
   /* ============================================================ */
   /*  Export state                                                */
   /* ============================================================ */
+  const today = new Date();
+  const [exportPeriodType, setExportPeriodType] = useState<PeriodType>('month');
+  const [exportMonth, setExportMonth] = useState(`${today.getFullYear()}-${pad2(today.getMonth() + 1)}`);
+  const [exportQuarter, setExportQuarter] = useState(Math.floor(today.getMonth() / 3) + 1);
+  const [exportYear, setExportYear] = useState(today.getFullYear());
   const [exportDateFrom, setExportDateFrom] = useState('');
   const [exportDateTo, setExportDateTo] = useState('');
+  const [exportProjectId, setExportProjectId] = useState('');
+  const [exportEmployeeId, setExportEmployeeId] = useState('');
+  const [exportCategory, setExportCategory] = useState('');
+  const [exportFile, setExportFile] = useState<FiduciaryFileKey>('heures_employes');
+  const [exportProjects, setExportProjects] = useState<ExportProject[]>([]);
+  const [exportEmployees, setExportEmployees] = useState<ExportEmployee[]>([]);
   const [exportData, setExportData] = useState<FiduciaryExport | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
 
@@ -315,6 +386,18 @@ export default function Accounting() {
     if (activeTab === 'entries') { fetchAccounts(); fetchEntries(); }
     if (activeTab === 'ledger') fetchAccounts();
   }, [activeTab, fetchAccounts, fetchEntries]);
+
+  // Filter options for the fiduciary export: a project manager only picks among their own projects (§17.6).
+  useEffect(() => {
+    if (activeTab !== 'export') return;
+    const projectPath = isAdmin ? '/projects?limit=100' : `/projects?limit=100&managerId=${encodeURIComponent(currentUser.id)}`;
+    apiGet<ExportProject[]>(projectPath)
+      .then(items => setExportProjects(Array.isArray(items) ? items : []))
+      .catch(() => setExportProjects([]));
+    apiGet<ExportEmployee[]>('/hr/employees?limit=200')
+      .then(items => setExportEmployees(Array.isArray(items) ? items : []))
+      .catch(() => setExportEmployees([]));
+  }, [activeTab, isAdmin, currentUser.id]);
 
   /* ============================================================ */
   /*  Account actions                                             */
@@ -428,19 +511,23 @@ export default function Accounting() {
   /* ============================================================ */
 
   const generateExport = async () => {
-    if (!exportDateFrom || !exportDateTo) {
+    const range = periodRange(exportPeriodType, exportMonth, exportQuarter, exportYear, exportDateFrom, exportDateTo);
+    if (!range) {
       setError(t('validation.exportDates'));
+      return;
+    }
+    const [from, to] = range;
+    if (from > to) {
+      setError(t('validation.exportRange'));
       return;
     }
     setExportLoading(true);
     try {
-      if (exportDateFrom > exportDateTo) {
-        setError(t('validation.exportRange'));
-        return;
-      }
-      const res = await apiGet<FiduciaryExport>(
-        `/accounting/export/fiduciary?dateFrom=${encodeURIComponent(exportDateFrom)}&dateTo=${encodeURIComponent(exportDateTo)}`,
-      );
+      const params = new URLSearchParams({ dateFrom: from, dateTo: to });
+      if (exportProjectId) params.set('projectId', exportProjectId);
+      if (exportEmployeeId) params.set('employeeId', exportEmployeeId);
+      if (exportCategory) params.set('category', exportCategory);
+      const res = await apiGet<FiduciaryExport>(`/accounting/export/fiduciary?${params.toString()}`);
       setExportData(res);
     } catch (e) {
       setError(errorMessage(e, t('errors.generateExport')));
@@ -449,7 +536,7 @@ export default function Accounting() {
     }
   };
 
-  /** Downloads the CSV exactly as generated by the API (semicolons, BOM, Swiss dates). */
+  /** Downloads the CSV exactly as generated by the API (UTF-8 BOM, semicolons, CRLF, ISO dates). */
   const downloadCSV = (csv: string, filename: string) => {
     if (!csv) return;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1020,16 +1107,69 @@ export default function Accounting() {
           <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
             <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>{t('export.title')}</h3>
             <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-              {t('export.help')}
+              {isAdmin ? t('export.help') : t('export.helpOwnProjects')}
             </p>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('export.from')}</label>
-                <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)} />
+                <label style={labelStyle}>{t('export.periodType')}</label>
+                <select style={{ ...inputStyle, width: 170 }} value={exportPeriodType} onChange={e => setExportPeriodType(e.target.value as PeriodType)}>
+                  {PERIOD_TYPES.map(p => <option key={p} value={p}>{t(`export.periodTypes.${p}`)}</option>)}
+                </select>
+              </div>
+              {exportPeriodType === 'month' && (
+                <div>
+                  <label style={labelStyle}>{t('export.month')}</label>
+                  <input type="month" style={{ ...inputStyle, width: 180 }} value={exportMonth} onChange={e => setExportMonth(e.target.value)} />
+                </div>
+              )}
+              {exportPeriodType === 'quarter' && (
+                <div>
+                  <label style={labelStyle}>{t('export.quarter')}</label>
+                  <select style={{ ...inputStyle, width: 120 }} value={exportQuarter} onChange={e => setExportQuarter(Number(e.target.value))}>
+                    {[1, 2, 3, 4].map(q => <option key={q} value={q}>{t('export.quarterLabel', { quarter: q })}</option>)}
+                  </select>
+                </div>
+              )}
+              {(exportPeriodType === 'quarter' || exportPeriodType === 'year') && (
+                <div>
+                  <label style={labelStyle}>{t('export.year')}</label>
+                  <input type="number" min={2000} max={2100} style={{ ...inputStyle, width: 110 }} value={exportYear} onChange={e => setExportYear(Number(e.target.value))} />
+                </div>
+              )}
+              {exportPeriodType === 'custom' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>{t('export.from')}</label>
+                    <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>{t('export.to')}</label>
+                    <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} />
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div>
+                <label style={labelStyle}>{t('export.project')}</label>
+                <select style={{ ...inputStyle, width: 240 }} value={exportProjectId} onChange={e => setExportProjectId(e.target.value)}>
+                  <option value="">{isAdmin ? t('export.allProjects') : t('export.allOwnProjects')}</option>
+                  {exportProjects.map(p => <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>)}
+                </select>
               </div>
               <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('export.to')}</label>
-                <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} />
+                <label style={labelStyle}>{t('export.employee')}</label>
+                <select style={{ ...inputStyle, width: 220 }} value={exportEmployeeId} onChange={e => setExportEmployeeId(e.target.value)}>
+                  <option value="">{t('export.allEmployees')}</option>
+                  {exportEmployees.map(u => <option key={u.id} value={u.id}>{`${u.firstName} ${u.lastName}`.trim()}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>{t('export.category')}</label>
+                <select style={{ ...inputStyle, width: 200 }} value={exportCategory} onChange={e => setExportCategory(e.target.value)}>
+                  <option value="">{t('export.allCategories')}</option>
+                  {FIDUCIARY_CATEGORIES.map(c => <option key={c} value={c}>{t(`export.categories.${c}`)}</option>)}
+                </select>
               </div>
               <button style={btnPrimary} onClick={generateExport} disabled={exportLoading}>
                 {exportLoading ? t('export.generating') : t('export.generate')}
@@ -1037,51 +1177,60 @@ export default function Accounting() {
             </div>
           </div>
 
-          {exportData && (
-            <div>
-              {/* Render each CSV dataset */}
-              {(() => {
-                const datasets: { key: string; label: string; csv: string; data: Record<string, string>[] }[] = [];
-                const sources: [string, string, string][] = [
-                  ['journal', t('export.datasets.journal'), exportData.journalCsv],
-                  ['balance', t('export.datasets.balance'), exportData.balanceCsv],
-                  ['clients', t('export.datasets.clients'), exportData.clientCsv],
-                ];
-                sources.forEach(([key, label, csv]) => {
-                  const data = csv ? parseCsv(csv) : [];
-                  if (data.length > 0) datasets.push({ key, label, csv, data });
-                });
-
-                if (datasets.length === 0) {
-                  return <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>{t('export.noData')}</p>;
-                }
-
-                return datasets.map(ds => (
-                  <div key={ds.key} style={{ marginBottom: 24 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>{ds.label}</h4>
-                      <button
-                        style={{ ...btnOutline, fontSize: 12, padding: '4px 12px' }}
-                        onClick={() => downloadCSV(ds.csv, `${ds.key}_${exportDateFrom}_${exportDateTo}.csv`)}
-                      >
-                        {t('export.downloadCsv')}
-                      </button>
-                    </div>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 320 }}>
+          {exportData && (() => {
+            const file = exportData.files[exportFile];
+            const data = file ? parseCsv(file.content) : [];
+            const headers = file ? parseCsvHeader(file.content) : [];
+            return (
+              <div>
+                {/* §17.7: one tab per file — Heures | Frais & Débours | Résumé projets */}
+                <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', marginBottom: 12 }}>
+                  {FIDUCIARY_FILES.map(key => (
+                    <button
+                      key={key}
+                      onClick={() => setExportFile(key)}
+                      style={{
+                        padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14,
+                        fontWeight: exportFile === key ? 600 : 400,
+                        color: exportFile === key ? '#2563eb' : '#6b7280',
+                        borderBottom: exportFile === key ? '2px solid #2563eb' : '2px solid transparent',
+                      }}
+                    >
+                      {t(`export.files.${key}`)} ({exportData.files[key]?.rowCount ?? 0})
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#6b7280' }}>{file?.filename}</span>
+                  <button
+                    style={{ ...btnOutline, fontSize: 12, padding: '4px 12px' }}
+                    disabled={!file}
+                    onClick={() => file && downloadCSV(file.content, file.filename)}
+                  >
+                    {t('export.downloadCsv')}
+                  </button>
+                </div>
+                {data.length === 0 ? (
+                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>{t('export.noData')}</p>
+                ) : (
+                  <>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 360 }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                         <thead style={{ background: '#f9fafb', position: 'sticky', top: 0 }}>
                           <tr>
-                            {Object.keys(ds.data[0]).map(h => (
-                              <th key={h} style={thStyle}>{t(`export.columns.${h}`, { defaultValue: h })}</th>
+                            {headers.map(h => (
+                              <th key={h} style={thStyle} title={h}>{t(`export.columns.${h}`, { defaultValue: h })}</th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {ds.data.slice(0, 100).map((row, ri) => (
+                          {data.slice(0, 100).map((row, ri) => (
                             <tr key={ri}>
-                              {Object.entries(row).map(([col, val], ci) => (
-                                <td key={ci} style={{ ...tdStyle, fontSize: 13, whiteSpace: 'nowrap' }}>
-                                  {val == null ? '' : exportCellLabel(col, String(val))}
+                              {headers.map(col => (
+                                <td key={col} style={{ ...tdStyle, fontSize: 13, whiteSpace: 'nowrap' }}>
+                                  {col === 'categorie' && row[col]
+                                    ? t(`export.categories.${row[col]}`, { defaultValue: row[col] })
+                                    : row[col]}
                                 </td>
                               ))}
                             </tr>
@@ -1089,16 +1238,16 @@ export default function Accounting() {
                         </tbody>
                       </table>
                     </div>
-                    {ds.data.length > 100 && (
+                    {data.length > 100 && (
                       <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                        {t('export.truncated', { count: ds.data.length })}
+                        {t('export.truncated', { count: data.length })}
                       </p>
                     )}
-                  </div>
-                ));
-              })()}
-            </div>
-          )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>

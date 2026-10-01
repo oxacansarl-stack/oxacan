@@ -1,12 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ChartOfAccounts } from './entities/chart-of-accounts.entity';
 import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalEntryLine } from './entities/journal-entry-line.entity';
-import { Invoice } from '../invoicing/entities/invoice.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
 import { CreateAccountDto, CreateJournalEntryDto, UpdateAccountDto } from './dto/accounting.dto';
+import {
+  FRAIS_COLUMNS,
+  FiduciaryCategory,
+  FiduciaryFile,
+  HEURES_COLUMNS,
+  RESUME_COLUMNS,
+  buildCsv,
+  dbCategoriesFor,
+  escapeCsvField,
+  fiduciaryFilename,
+  formatAmount,
+  formatHours,
+  periodLabel,
+  toFiduciaryCategory,
+} from './fiduciary-csv';
 
 /* ─── DTOs ─── */
 
@@ -40,8 +54,6 @@ export class AccountingService {
     private readonly entryRepo: Repository<JournalEntry>,
     @InjectRepository(JournalEntryLine)
     private readonly entryLineRepo: Repository<JournalEntryLine>,
-    @InjectRepository(Invoice)
-    private readonly invoiceRepo: Repository<Invoice>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -444,108 +456,277 @@ export class AccountingService {
   }
 
   /* ═══════════════════════════════════════════════
-     Fiduciary Export (CSV)
+     Fiduciary Export (PRD §17) — 3 CSV files
      ═══════════════════════════════════════════════ */
 
-  async exportFiduciary(companyId: string, dateFrom: string, dateTo: string) {
-    const BOM = '﻿';
+  /**
+   * Builds heures_employes, frais_debours and resume_projets for [dateFrom, dateTo].
+   *
+   * Only approved time entries and approved expenses are exported (validated data only).
+   * Access (§17.6): ADMIN → every project and employee; PROJECT_MANAGER → only projects whose
+   * manager is the caller (project.manager_id). Expenses without a project are therefore admin-only.
+   * resume_projets is aggregated from exactly the rows of the two detail files, one row per
+   * project and calendar month, so the three files always reconcile.
+   */
+  async exportFiduciary(
+    companyId: string,
+    caller: FiduciaryCaller,
+    filters: FiduciaryFilters,
+  ): Promise<FiduciaryExportResult> {
+    const { dateFrom, dateTo, projectId, employeeId, category } = filters;
+    const ownProjectsOnly = caller.role !== 'ADMIN';
 
-    /* ── 1) Journal CSV ── */
-    const entries = await this.entryRepo
-      .createQueryBuilder('entry')
-      .leftJoinAndSelect('entry.lines', 'line')
-      .leftJoinAndSelect('line.account', 'account')
-      .where('entry.company_id = :companyId', { companyId })
-      .andWhere('entry.entry_date >= :dateFrom', { dateFrom })
-      .andWhere('entry.entry_date <= :dateTo', { dateTo })
-      .orderBy('entry.entryNumber', 'ASC')
-      .getMany();
-
-    let journalCsv = BOM + 'EntryNumber;Date;Description;AccountNumber;Debit;Credit\n';
-    for (const entry of entries) {
-      const dateStr = formatSwissDate(entry.entryDate);
-      for (const line of entry.lines || []) {
-        journalCsv += [
-          entry.entryNumber,
-          dateStr,
-          escapeCsvField(entry.description),
-          line.account?.accountNumber || '',
-          formatAmount(line.debitCents),
-          formatAmount(line.creditCents),
-        ].join(';') + '\n';
+    if (projectId) {
+      const [project] = await this.dataSource.query(
+        'SELECT manager_id FROM project WHERE id = $1 AND company_id = $2',
+        [projectId, companyId],
+      );
+      if (!project) throw new NotFoundError('Project', projectId);
+      if (ownProjectsOnly && project.manager_id !== caller.id) {
+        throw new ForbiddenException('A project manager may only export their own projects.');
       }
     }
 
-    /* ── 2) Balance CSV ── */
-    const trialBalance = await this.getTrialBalance(companyId, dateTo);
+    /* ── Shared WHERE clause ── */
+    const where = (alias: string) => {
+      const params: unknown[] = [companyId, dateFrom, dateTo];
+      const clauses = [
+        `${alias}.company_id = $1`,
+        `${alias}.status = 'approved'`,
+        `${alias}.date >= $2`,
+        `${alias}.date <= $3`,
+      ];
+      if (ownProjectsOnly) {
+        params.push(caller.id);
+        clauses.push(`p.manager_id = $${params.length}`);
+      }
+      if (projectId) {
+        params.push(projectId);
+        clauses.push(`${alias}.project_id = $${params.length}`);
+      }
+      if (employeeId) {
+        params.push(employeeId);
+        clauses.push(`${alias}.user_id = $${params.length}`);
+      }
+      return { sql: clauses.join(' AND '), params };
+    };
 
-    let balanceCsv =
-      BOM + 'AccountNumber;AccountName;Type;TotalDebit;TotalCredit;Balance\n';
-    for (const acc of trialBalance.accounts) {
-      balanceCsv += [
-        acc.accountNumber,
-        escapeCsvField(acc.accountName),
-        acc.accountType,
-        formatAmount(acc.totalDebitCents),
-        formatAmount(acc.totalCreditCents),
-        formatAmount(acc.balanceCents),
-      ].join(';') + '\n';
+    /* ── 1) Heures des employés (§17.3) ── */
+    const te = where('te');
+    const timeRows: TimeRow[] = await this.dataSource.query(
+      `SELECT to_char(te.date, 'YYYY-MM-DD') AS date,
+              u.id AS user_id, u.first_name, u.last_name,
+              p.id AS project_id, p.reference AS project_ref, p.name AS project_name,
+              te.normal_minutes, te.overtime_minutes, te.travel_minutes, te.total_minutes,
+              COALESCE(te.hourly_rate_cents, u.hourly_rate_cents) AS rate_cents,
+              te.cost_cents, te.notes
+         FROM time_entry te
+         JOIN app_user u ON u.id = te.user_id AND u.company_id = te.company_id
+         JOIN project p ON p.id = te.project_id AND p.company_id = te.company_id
+        WHERE ${te.sql}
+        ORDER BY te.date, u.last_name, u.first_name, p.reference, te.start_time, te.id`,
+      te.params,
+    );
+
+    /* ── 2) Frais et débours (§17.4) ── */
+    const ex = where('e');
+    if (category) {
+      ex.params.push(dbCategoriesFor(category));
+      ex.sql += ` AND e.category = ANY($${ex.params.length})`;
     }
+    const expenseRows: ExpenseRow[] = await this.dataSource.query(
+      `SELECT to_char(e.date, 'YYYY-MM-DD') AS date,
+              u.id AS user_id, u.first_name, u.last_name,
+              p.id AS project_id, p.reference AS project_ref, p.name AS project_name,
+              e.category, e.description, e.amount_cents, e.receipt_url
+         FROM expense e
+         JOIN app_user u ON u.id = e.user_id AND u.company_id = e.company_id
+         LEFT JOIN project p ON p.id = e.project_id AND p.company_id = e.company_id
+        WHERE ${ex.sql}
+        ORDER BY e.date, u.last_name, u.first_name, p.reference NULLS LAST, e.created_at, e.id`,
+      ex.params,
+    );
 
-    /* ── 3) Client CSV ── */
-    const invoices = await this.invoiceRepo
-      .createQueryBuilder('inv')
-      .leftJoinAndSelect('inv.client', 'client')
-      .where('inv.company_id = :companyId', { companyId })
-      .andWhere('inv.issue_date >= :dateFrom', { dateFrom })
-      .andWhere('inv.issue_date <= :dateTo', { dateTo })
-      .orderBy('inv.invoiceNumber', 'ASC')
-      .getMany();
+    const fullName = (r: { first_name: string; last_name: string }) =>
+      `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim();
 
-    let clientCsv =
-      BOM + 'ClientName;InvoiceNumber;Date;AmountHT;VAT;AmountTTC;Status\n';
-    for (const inv of invoices) {
-      clientCsv += [
-        escapeCsvField(inv.client?.name || ''),
-        inv.invoiceNumber,
-        formatSwissDate(inv.issueDate),
-        formatAmount(inv.subtotalHtCents),
-        formatAmount(inv.vatAmountCents),
-        formatAmount(inv.totalTtcCents),
-        inv.status,
-      ].join(';') + '\n';
+    const heures = timeRows.map((r) => {
+      const normal = Number(r.normal_minutes) || 0;
+      const overtime = Number(r.overtime_minutes) || 0;
+      const travel = Number(r.travel_minutes) || 0;
+      const total = r.total_minutes != null ? Number(r.total_minutes) : normal + overtime + travel;
+      const rate = r.rate_cents != null ? Number(r.rate_cents) : 0;
+      const amount = r.cost_cents != null ? Number(r.cost_cents) : Math.round((total / 60) * rate);
+      return { r, total, amount, cells: [
+        r.date,
+        escapeCsvField(fullName(r)),
+        r.user_id,
+        escapeCsvField(r.project_ref),
+        escapeCsvField(r.project_name),
+        formatHours(normal),
+        formatHours(overtime),
+        formatHours(travel),
+        formatHours(total),
+        formatAmount(rate),
+        formatAmount(amount),
+        escapeCsvField(r.notes),
+      ] };
+    });
+
+    // Expenses carry one amount (the receipt total) and no VAT breakdown in the data model,
+    // so HT = TTC and the VAT columns are 0.00 until a VAT rate is recorded per expense.
+    const frais = expenseRows.map((r) => {
+      const amount = Number(r.amount_cents) || 0;
+      const vatRate = 0; // hundredths of a percent: 810 = 8.10 %
+      const vat = Math.round((amount * vatRate) / 10000);
+      const cat = toFiduciaryCategory(r.category);
+      return { r, cat, ht: amount, cells: [
+        r.date,
+        escapeCsvField(fullName(r)),
+        r.user_id,
+        escapeCsvField(r.project_ref),
+        escapeCsvField(r.project_name),
+        cat,
+        escapeCsvField(r.description),
+        formatAmount(amount),
+        formatAmount(vatRate),
+        formatAmount(vat),
+        formatAmount(amount + vat),
+        escapeCsvField(r.receipt_url),
+      ] };
+    });
+
+    /* ── 3) Résumé par projet (§17.5) ── */
+    const summary = new Map<string, ProjectSummary>();
+    const bucket = (r: { project_id: string; project_ref: string; project_name: string; date: string }) => {
+      const periode = r.date.slice(0, 7);
+      const key = `${periode}|${r.project_id}`;
+      let s = summary.get(key);
+      if (!s) {
+        s = { ref: r.project_ref, name: r.project_name, periode, minutes: 0, labour: 0,
+          materiel: 0, deplacement: 0, sousTraitance: 0, divers: 0 };
+        summary.set(key, s);
+      }
+      return s;
+    };
+    for (const h of heures) {
+      const s = bucket(h.r);
+      s.minutes += h.total;
+      s.labour += h.amount;
     }
+    for (const f of frais) {
+      if (!f.r.project_id) continue; // not attributable to a project
+      const s = bucket(f.r as ExpenseRow & { project_id: string; project_ref: string; project_name: string });
+      // §17.5 has no equipment column: equipment rental is reported with matériel.
+      if (f.cat === 'materiel' || f.cat === 'equipement') s.materiel += f.ht;
+      else if (f.cat === 'deplacement') s.deplacement += f.ht;
+      else if (f.cat === 'sous-traitance') s.sousTraitance += f.ht;
+      else s.divers += f.ht;
+    }
+    const resume = [...summary.values()]
+      .sort((a, b) => a.periode.localeCompare(b.periode) || a.ref.localeCompare(b.ref))
+      .map((s) => [
+        escapeCsvField(s.ref),
+        escapeCsvField(s.name),
+        s.periode,
+        formatHours(s.minutes),
+        formatAmount(s.labour),
+        formatAmount(s.materiel),
+        formatAmount(s.deplacement),
+        formatAmount(s.sousTraitance),
+        formatAmount(s.divers),
+        formatAmount(s.labour + s.materiel + s.deplacement + s.sousTraitance + s.divers),
+      ]);
 
-    return { journalCsv, balanceCsv, clientCsv };
+    const file = (key: FiduciaryFile, columns: readonly string[], rows: string[][]): FiduciaryCsvFile => ({
+      filename: fiduciaryFilename(key, dateFrom, dateTo),
+      content: buildCsv(columns, rows),
+      rowCount: rows.length,
+    });
+
+    return {
+      dateFrom,
+      dateTo,
+      periode: periodLabel(dateFrom, dateTo),
+      scope: ownProjectsOnly ? 'own_projects' : 'all',
+      files: {
+        heures_employes: file('heures_employes', HEURES_COLUMNS, heures.map((h) => h.cells)),
+        frais_debours: file('frais_debours', FRAIS_COLUMNS, frais.map((f) => f.cells)),
+        resume_projets: file('resume_projets', RESUME_COLUMNS, resume),
+      },
+    };
   }
 }
 
-/* ─── CSV helpers ─── */
+/* ─── Fiduciary export types ─── */
 
-function formatSwissDate(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}.${month}.${year}`;
+export interface FiduciaryCaller {
+  id: string;
+  role: string;
 }
 
-function formatAmount(cents: number): string {
-  const abs = Math.abs(cents);
-  const sign = cents < 0 ? '-' : '';
-  const whole = Math.floor(abs / 100);
-  const frac = String(abs % 100).padStart(2, '0');
-  return `${sign}${whole}.${frac}`;
+export interface FiduciaryFilters {
+  dateFrom: string;
+  dateTo: string;
+  projectId?: string;
+  employeeId?: string;
+  category?: FiduciaryCategory;
 }
 
-/**
- * Text cell for the fiduciary CSV. Text that a spreadsheet would read as a formula (=, +, -, @,
- * tab, CR) gets a leading apostrophe so Excel shows it instead of running it (OWASP CSV injection).
- */
-function escapeCsvField(value: string): string {
-  if (/^[=+\-@\t\r]/.test(value)) value = `'${value}`;
-  if (value.includes(';') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
+export interface FiduciaryCsvFile {
+  filename: string;
+  /** UTF-8 BOM + ';'-separated, CRLF-terminated CSV text. */
+  content: string;
+  rowCount: number;
+}
+
+export interface FiduciaryExportResult {
+  dateFrom: string;
+  dateTo: string;
+  periode: string;
+  scope: 'all' | 'own_projects';
+  files: Record<FiduciaryFile, FiduciaryCsvFile>;
+}
+
+interface TimeRow {
+  date: string;
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  project_id: string;
+  project_ref: string;
+  project_name: string;
+  normal_minutes: number | null;
+  overtime_minutes: number | null;
+  travel_minutes: number | null;
+  total_minutes: number | null;
+  rate_cents: string | number | null;
+  cost_cents: string | number | null;
+  notes: string | null;
+}
+
+interface ExpenseRow {
+  date: string;
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  project_id: string | null;
+  project_ref: string | null;
+  project_name: string | null;
+  category: string;
+  description: string;
+  amount_cents: string | number;
+  receipt_url: string | null;
+}
+
+interface ProjectSummary {
+  ref: string;
+  name: string;
+  periode: string;
+  minutes: number;
+  labour: number;
+  materiel: number;
+  deplacement: number;
+  sousTraitance: number;
+  divers: number;
 }
