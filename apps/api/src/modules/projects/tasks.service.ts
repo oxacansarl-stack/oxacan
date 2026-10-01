@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { TaskDependency } from './entities/task-dependency.entity';
 import { Project } from './entities/project.entity';
-import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
+import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
 import { assertProjectExists } from '../../common/util/assert-project';
 import {
   CreateTaskDto,
@@ -149,6 +149,89 @@ export class TasksService {
 
     Object.assign(task, dto);
     return this.taskRepo.save(task);
+  }
+
+  /* ───────────── My tasks (cross-project) ───────────── */
+
+  /**
+   * The signed-in user's assigned tasks across all projects (PRD §3.2 "voir ses tâches du jour").
+   * Views: open (todo + in_progress), today (open minus todo tasks whose window hasn't started),
+   * done (done/validated of the last 30 days). No money fields are selected.
+   */
+  async findMine(
+    companyId: string,
+    userId: string,
+    opts: { view?: string; page?: number; limit?: number } = {},
+  ) {
+    const { view = 'open', page = 1, limit = 50 } = opts;
+    const OVERDUE = `(t.planned_end IS NOT NULL AND t.planned_end < CURRENT_DATE AND t.status IN ('todo', 'in_progress'))`;
+    const VIEWS: Record<string, string> = {
+      open: `t.status IN ('todo', 'in_progress')`,
+      // in progress, overdue, inside the planned window, or not planned at all — not a future todo.
+      today: `t.status IN ('todo', 'in_progress') AND (t.status = 'in_progress' OR ${OVERDUE}
+              OR ((t.planned_start IS NULL OR t.planned_start <= CURRENT_DATE)
+                  AND (t.planned_end IS NULL OR t.planned_end >= CURRENT_DATE)))`,
+      done: `t.status IN ('done', 'validated') AND COALESCE(t.actual_end, t.updated_at::date) >= CURRENT_DATE - 30`,
+    };
+    const where = VIEWS[view];
+    if (!where) throw new ValidationError(`view must be one of ${Object.keys(VIEWS).join(', ')}`);
+
+    const params = [companyId, userId];
+    const rows = await this.taskRepo.query(
+      `SELECT t.id, t.title, t.description, t.status, t.priority,
+              to_char(t.planned_start, 'YYYY-MM-DD') AS "plannedStart",
+              to_char(t.planned_end, 'YYYY-MM-DD') AS "plannedEnd",
+              t.progress_percent AS "progressPercent",
+              t.estimated_hours AS "estimatedHours", t.actual_hours AS "actualHours",
+              ${OVERDUE} AS overdue,
+              p.id AS "projectId", p.name AS "projectName", p.reference AS "projectReference",
+              l.id AS "lotId", l.name AS "lotName"
+         FROM task t
+         JOIN project p ON p.id = t.project_id AND p.company_id = t.company_id
+         LEFT JOIN project_lot l ON l.id = t.lot_id AND l.company_id = t.company_id
+        WHERE t.company_id = $1 AND t.assigned_to = $2 AND (${where})
+        ORDER BY CASE WHEN t.status = 'in_progress' THEN 0 ELSE 1 END,
+                 CASE WHEN ${OVERDUE} THEN 0 ELSE 1 END,
+                 t.planned_end ASC NULLS LAST,
+                 CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                 t.created_at ASC
+        LIMIT $3 OFFSET $4`,
+      [...params, limit, (page - 1) * limit],
+    );
+
+    const [agg] = await this.taskRepo.query(
+      `SELECT COUNT(*) FILTER (WHERE ${VIEWS.open})::int AS open,
+              COUNT(*) FILTER (WHERE ${VIEWS.today})::int AS today,
+              COUNT(*) FILTER (WHERE ${OVERDUE})::int AS overdue,
+              COUNT(*) FILTER (WHERE ${where})::int AS total
+         FROM task t WHERE t.company_id = $1 AND t.assigned_to = $2`,
+      params,
+    );
+
+    return {
+      data: rows.map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        status: r.status,
+        priority: r.priority,
+        plannedStart: r.plannedStart,
+        plannedEnd: r.plannedEnd,
+        progressPercent: r.progressPercent,
+        estimatedHours: r.estimatedHours,
+        actualHours: r.actualHours,
+        overdue: r.overdue,
+        project: { id: r.projectId, name: r.projectName, reference: r.projectReference },
+        lot: r.lotId ? { id: r.lotId, name: r.lotName } : null,
+      })),
+      meta: {
+        page,
+        limit,
+        total: agg.total,
+        totalPages: Math.ceil(agg.total / limit) || 1,
+        counts: { today: agg.today, open: agg.open, overdue: agg.overdue },
+      },
+    };
   }
 
   /** Workers may only report status/progress on tasks assigned to them. */
