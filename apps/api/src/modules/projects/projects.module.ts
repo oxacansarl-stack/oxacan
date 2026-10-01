@@ -14,6 +14,7 @@ import { AccessScopeService } from '../timekeeping/access-scope.service';
 import { ExecutedQuantitiesService } from './executed-quantities.service';
 import { ProjectsService } from './projects.service';
 import { TasksService } from './tasks.service';
+import { MyTasksController } from './my-tasks.controller';
 import { ProjectsController } from './projects.controller';
 import { ContractsModule } from '../contracts/contracts.module';
 
@@ -34,7 +35,7 @@ import { ContractsModule } from '../contracts/contracts.module';
     forwardRef(() => ContractsModule),
   ],
   providers: [ProjectsService, TasksService, AccessScopeService, ExecutedQuantitiesService],
-  controllers: [ProjectsController],
+  controllers: [ProjectsController, MyTasksController],
   exports: [ProjectsService],
 })
 export class ProjectsModule {}
