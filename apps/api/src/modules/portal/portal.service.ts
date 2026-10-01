@@ -9,8 +9,8 @@ import { ProjectMilestone } from '../projects/entities/project-milestone.entity'
 import { Task } from '../projects/entities/task.entity';
 import { DailyReport } from '../timekeeping/entities/daily-report.entity';
 import { NotFoundError, BusinessRuleError } from '@oxacan/shared-types';
-import { runAsSystem, setTenant } from '../../common/tenant/tenant-context';
 import { CreatePortalTokenDto } from './dto/portal-token.dto';
+import type { PortalContext } from './portal-access.guard';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const PORTAL_DEFAULT_DAYS = 90;
@@ -119,42 +119,12 @@ export class PortalService {
     return this.tokenRepo.save(portalToken);
   }
 
-  /* ───────────── Validate Token (Public) ───────────── */
-
-  async validateToken(token: string): Promise<{ valid: boolean; projectId?: string }> {
-    const portalToken = await runAsSystem(() =>
-      this.tokenRepo.findOne({ where: { token } }),
-    );
-
-    if (!portalToken || !portalToken.isActive) {
-      return { valid: false };
-    }
-
-    if (portalToken.expiresAt && portalToken.expiresAt < new Date()) {
-      return { valid: false };
-    }
-
-    setTenant(portalToken.companyId);
-    return { valid: true, projectId: portalToken.projectId };
-  }
-
   /* ───────────── Get Portal Data (Public) ───────────── */
 
-  async getPortalData(token: string) {
-    const validation = await this.validateToken(token);
-    if (!validation.valid || !validation.projectId) {
-      throw new BusinessRuleError(
-        'INVALID_TOKEN',
-        'This portal link is invalid or has expired.',
-      );
-    }
-
-    const portalToken = await this.tokenRepo.findOne({
-      where: { token },
-    });
-
+  /** The link was resolved by PortalAccessGuard, which also scoped the session to its company. */
+  async getPortalData(ctx: PortalContext) {
     const project = await this.projectRepo.findOne({
-      where: { id: validation.projectId },
+      where: { id: ctx.projectId, companyId: ctx.companyId },
       select: [
         'id',
         'reference',
@@ -169,7 +139,7 @@ export class PortalService {
     });
 
     if (!project) {
-      throw new NotFoundError('Project', validation.projectId);
+      throw new NotFoundError('Project', ctx.projectId);
     }
 
     // Lots (no financial data)

@@ -27,8 +27,9 @@ export class PortalToken {
   @Column({ type: 'text', unique: true })
   token: string;
 
-  @Column({ type: 'timestamptz', nullable: true })
-  expiresAt: Date | null;
+  /** Every link expires (90 days by default, at most a year); the column is NOT NULL since migration 028. */
+  @Column({ type: 'timestamptz' })
+  expiresAt: Date;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;

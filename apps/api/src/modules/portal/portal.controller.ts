@@ -13,8 +13,8 @@ import {
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
 import { OFFICE_ROLES, Roles } from '../../common/decorators/roles.decorator';
-import { Public } from '../../common/decorators/public.decorator';
 import { PortalService } from './portal.service';
+import { PortalClientService } from './portal-client.service';
 import { CreatePortalTokenDto } from './dto/portal-token.dto';
 
 function toPositiveInt(value: string | undefined, max?: number): number | undefined {
@@ -24,9 +24,13 @@ function toPositiveInt(value: string | undefined, max?: number): number | undefi
   return max ? Math.min(n, max) : n;
 }
 
+/** Office side of the client portal: links, and what clients did with them. The public routes are in PortalClientController. */
 @Controller('portal')
 export class PortalController {
-  constructor(private readonly service: PortalService) {}
+  constructor(
+    private readonly service: PortalService,
+    private readonly client: PortalClientService,
+  ) {}
 
   @Get('tokens')
   @Roles(...OFFICE_ROLES)
@@ -62,9 +66,23 @@ export class PortalController {
     return this.service.revokeToken(companyId, id);
   }
 
-  @Get('view/:token')
-  @Public()
-  async getPortalData(@Param('token') token: string) {
-    return this.service.getPortalData(token);
+  /** The client's comments left on the project's portal (oldest first), with name, IP and time. */
+  @Get('projects/:projectId/comments')
+  @Roles(...OFFICE_ROLES)
+  async projectComments(
+    @CompanyId() companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return this.client.officeComments(companyId, projectId);
+  }
+
+  /** The signature evidence of the offers the client accepted or refused on the portal. */
+  @Get('projects/:projectId/offer-decisions')
+  @Roles(...OFFICE_ROLES)
+  async projectOfferDecisions(
+    @CompanyId() companyId: string,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+  ) {
+    return this.client.officeOfferDecisions(companyId, projectId);
   }
 }
