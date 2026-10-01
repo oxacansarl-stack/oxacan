@@ -27,12 +27,19 @@ async function main() {
     throw new Error('DB_USERNAME must be a dedicated app role (not the migration role) with DB_PASSWORD set');
   }
 
+  // Supabase's supautils rejects NOSUPERUSER / NOBYPASSRLS clauses from a non-superuser owner, so
+  // the attributes are verified instead of re-asserted: the app role must never bypass RLS.
+  const [existing] = await dataSource.query(
+    'SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1',
+    [appRole],
+  );
+  if (existing && (existing.rolsuper || existing.rolbypassrls)) {
+    throw new Error(`app role ${appRole} must not be SUPERUSER or BYPASSRLS`);
+  }
   await runGenerated(
-    `SELECT format(
-       CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)
-            THEN 'ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS'
-            ELSE 'CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE' END,
-       $1::text, $2::text) AS sql`,
+    existing
+      ? `SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', $1::text, $2::text) AS sql`
+      : `SELECT format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE', $1::text, $2::text) AS sql`,
     [appRole, appPassword],
   );
   const grants = [
@@ -68,13 +75,23 @@ async function main() {
   await dataSource.destroy();
 }
 
-/** DDL can't take bind parameters, so identifiers/literals are quoted by format() in SQL. */
+/**
+ * DDL can't take bind parameters, so identifiers/literals are quoted by format() in SQL. The
+ * generated statement can hold the app role's password, so a failure reports only the error,
+ * never the query.
+ */
 async function runGenerated(generator: string, params: string[]) {
   const [{ sql }] = await dataSource.query(generator, params);
-  await dataSource.query(sql);
+  try {
+    await dataSource.query(sql);
+  } catch (err) {
+    const e = err as { code?: string; message?: string; detail?: string };
+    throw new Error(`${sql.split(' ').slice(0, 2).join(' ')} failed: ${e.code ?? ''} ${e.message ?? ''} ${e.detail ?? ''}`.trim());
+  }
 }
 
 main().catch((err) => {
-  console.error(err);
+  // TypeORM errors carry the failed query (and its parameters); print only the message.
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
