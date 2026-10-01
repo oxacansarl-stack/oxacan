@@ -1,20 +1,14 @@
 import React, { useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { signInWithDevToken, signInWithPassword, supabase } from '../lib/auth';
+import { AuthLayout } from '@/components/auth-layout';
+import { Button } from '@/components/ui/button';
+import { Input, Textarea } from '@/components/ui/input';
 
 interface Props {
   notice?: string;
   onSignedIn: () => void;
 }
-
-const input: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  boxSizing: 'border-box',
-};
 
 export default function Login({ notice, onSignedIn }: Props) {
   const { t } = useTranslation();
@@ -47,114 +41,69 @@ export default function Login({ notice, onSignedIn }: Props) {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f8f9fa',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        padding: 16,
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 380,
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: 10,
-          padding: 28,
-        }}
-      >
-        <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: -0.5 }}>OXACAN</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 24 }}>{t('app.tagline')}</div>
+    <AuthLayout>
+      <h1 className="font-display text-xl font-semibold text-ink">{t('auth:title')}</h1>
 
-        {notice && (
-          <div style={{ background: '#fef3c7', color: '#92400e', padding: 10, borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
-            {notice}
-          </div>
-        )}
+      {notice && (
+        <p className="mt-4 rounded-md bg-warn-bg px-3 py-2.5 text-[13px] leading-snug text-warn">{notice}</p>
+      )}
 
-        {supabase ? (
-          <form onSubmit={submit}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-              {t('auth.email')}
-            </label>
-            <input
+      {supabase ? (
+        <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
+          <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink-2">
+            {t('auth.email')}
+            <Input
               type="email"
               autoComplete="username"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={{ ...input, marginBottom: 14 }}
             />
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-              {t('auth.password')}
-            </label>
-            <input
+          </label>
+          <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink-2">
+            {t('auth.password')}
+            <Input
               type="password"
               autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={{ ...input, marginBottom: 18 }}
             />
-            {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-            <button
-              type="submit"
-              disabled={busy}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                background: busy ? '#93c5fd' : '#2563eb',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 6,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: busy ? 'default' : 'pointer',
-              }}
-            >
-              {busy ? t('auth.signingIn') : t('auth.signIn')}
-            </button>
-          </form>
-        ) : (
-          <div style={{ fontSize: 13, color: '#6b7280' }}>
-            {t('auth.notConfigured')}
-          </div>
-        )}
-
-        {import.meta.env.DEV && (
-          <details style={{ marginTop: 20, fontSize: 13, color: '#6b7280' }}>
-            <summary style={{ cursor: 'pointer' }}>{t('auth.devSignIn')}</summary>
-            <p style={{ margin: '8px 0' }}>
-              <Trans i18nKey="auth.devSignInHelp" values={{ command: 'npm run db:seed -w apps/api' }} components={{ code: <code /> }} />
+          </label>
+          {error && (
+            <p role="alert" className="rounded-md bg-bad-bg px-3 py-2.5 text-[13px] leading-snug text-bad">
+              {error}
             </p>
-            <textarea
-              value={devToken}
-              onChange={(e) => setDevToken(e.target.value)}
-              rows={3}
-              style={{ ...input, fontFamily: 'monospace', fontSize: 11 }}
+          )}
+          <Button type="submit" variant="primary" disabled={busy} className="mt-1 h-10 w-full text-sm">
+            {busy ? t('auth.signingIn') : t('auth.signIn')}
+          </Button>
+        </form>
+      ) : (
+        <p className="mt-6 text-[13px] text-muted">{t('auth.notConfigured')}</p>
+      )}
+
+      {import.meta.env.DEV && (
+        <details className="mt-6 text-[13px] text-muted">
+          <summary className="cursor-pointer select-none hover:text-ink">{t('auth.devSignIn')}</summary>
+          <p className="my-2">
+            <Trans
+              i18nKey="auth.devSignInHelp"
+              values={{ command: 'npm run db:seed -w apps/api' }}
+              components={{ code: <code className="font-mono text-xs" /> }}
             />
-            <button
-              type="button"
-              onClick={useDevToken}
-              style={{
-                marginTop: 8,
-                padding: '6px 12px',
-                background: '#fff',
-                border: '1px solid #d1d5db',
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
-            >
-              {t('auth.useToken')}
-            </button>
-          </details>
-        )}
-      </div>
-    </div>
+          </p>
+          <Textarea
+            value={devToken}
+            onChange={(e) => setDevToken(e.target.value)}
+            rows={3}
+            className="font-mono text-[11px]"
+          />
+          <Button type="button" size="sm" onClick={useDevToken} className="mt-2">
+            {t('auth.useToken')}
+          </Button>
+        </details>
+      )}
+    </AuthLayout>
   );
 }
