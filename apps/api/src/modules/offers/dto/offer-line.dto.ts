@@ -14,19 +14,13 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { IsCents } from '../../../common/validation/decorators';
+import { VARIANT_TYPES } from '../offer-pricing';
 
 /** DB CHECK offer_line.pricing_strategy */
 export const PRICING_STRATEGIES = ['LATEST', 'MEDIAN_N', 'INDEXED', 'COMPOSED', 'MANUAL'] as const;
 
-/** DB CHECK offer_line.variant_type */
-export const VARIANT_TYPES = [
-  'BASE',
-  'VARIANTE',
-  'OPTION',
-  'HYPOTHESE_A_VALIDER',
-  'INFORMATION_MANQUANTE',
-  'EXCLU',
-] as const;
+/** DB CHECK offer_line.variant_type; their meaning for totals and documents is in offer-pricing.ts. */
+export { VARIANT_TYPES };
 
 const SkipIfUndefined = () => ValidateIf((_o, v) => v !== undefined);
 const MAX_QUANTITY = 1_000_000_000;
@@ -43,11 +37,38 @@ class LineTraceabilityFields {
   @MaxLength(100)
   ruleId?: string | null;
 
+  /**
+   * Combined score (0–1). Normally computed by the engine as the weakest of the four dimensions
+   * below (§7.7); when sent, it is stored as sent for this write (the proposer's own overall
+   * confidence, R008).
+   */
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
   @Max(1)
   confidenceScore?: number | null;
+
+  /**
+   * Dimensions a proposer (rule engine, AI) may assess itself, 0–1 (§7.7); computed when absent.
+   * The price dimension is always computed from the price actually stored.
+   */
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  confidenceClassification?: number | null;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  confidenceMapping?: number | null;
+
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @Min(0)
+  @Max(1)
+  confidenceRule?: number | null;
 
   /** Source occurrence ids or references; null is not allowed (send [] to clear). */
   @SkipIfUndefined()

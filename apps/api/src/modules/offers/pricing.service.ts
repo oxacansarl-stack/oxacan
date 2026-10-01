@@ -1,24 +1,44 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { PriceObservation } from '../catalogue/entities/price-observation.entity';
 import { CanonicalArticle } from '../catalogue/entities/canonical-article.entity';
 import { BusinessRule } from './entities/business-rule.entity';
+import { historyPriceConfidence, NO_PRICE, round2 as roundScore, USER_VALIDATED } from './offer-confidence';
 
-interface PriceResult {
+export interface PriceResult {
   unitPriceCents: number;
+  /** Price dimension of the confidence score (§7.7), 0–1. */
   confidence: number;
 }
 
-type PricingStrategy = 'LATEST' | 'MEDIAN_N' | 'INDEXED' | 'COMPOSED' | 'MANUAL';
+export type PricingStrategy = 'LATEST' | 'MEDIAN_N' | 'INDEXED' | 'COMPOSED' | 'MANUAL';
+
+/** Strategies that look the price up in the article's price history (R010). */
+export const HISTORY_STRATEGIES: string[] = ['LATEST', 'MEDIAN_N', 'INDEXED', 'COMPOSED'];
+
+/**
+ * INDEXED default: +2.00 % a year (basis points, like company.default_vat_rate). The PRD names the
+ * index (glossary: SSE-IPB, the Swiss construction price index; §7.4 "ajusté à l'inflation") but
+ * gives no rate, so the engine's historical rate is the default. Each company sets its own in
+ * company.price_index_rate_bp (migration 1727500000033), normally the yearly change of the
+ * construction price index for its trade (OFS/BFS "Indice suisse des prix de la construction",
+ * published every April and October).
+ */
+export const DEFAULT_PRICE_INDEX_RATE_BP = 200;
+
+/** Observations MEDIAN_N takes the median of. */
+const MEDIAN_WINDOW = 10;
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (value: string | null | undefined): value is string => !!value && UUID_RE.test(value);
 
 @Injectable()
 export class PricingService {
   constructor(
     @InjectRepository(PriceObservation)
     private readonly observationRepo: Repository<PriceObservation>,
-    @InjectRepository(CanonicalArticle)
-    private readonly articleRepo: Repository<CanonicalArticle>,
     @InjectRepository(BusinessRule)
     private readonly ruleRepo: Repository<BusinessRule>,
   ) {}
@@ -26,6 +46,7 @@ export class PricingService {
   /**
    * Resolve a unit price for the given article using the specified strategy.
    * Returns { unitPriceCents, confidence } or null if no price is available.
+   * `m` lets a caller holding a transaction (and the offer row lock) run the lookups on it.
    *
    * "Prix a completer" rule: if no price available, returns null (never 0).
    */
@@ -33,16 +54,17 @@ export class PricingService {
     companyId: string,
     articleId: string,
     strategy: PricingStrategy,
+    m: EntityManager = this.observationRepo.manager,
   ): Promise<PriceResult | null> {
     switch (strategy) {
       case 'LATEST':
-        return this.resolveLatest(companyId, articleId);
+        return this.resolveLatest(m, companyId, articleId);
       case 'MEDIAN_N':
-        return this.resolveMedianN(companyId, articleId);
+        return this.resolveMedianN(m, companyId, articleId);
       case 'INDEXED':
-        return this.resolveIndexed(companyId, articleId);
+        return this.resolveIndexed(m, companyId, articleId);
       case 'COMPOSED':
-        return this.resolveComposed(companyId, articleId);
+        return this.resolveComposed(m, companyId, articleId);
       case 'MANUAL':
         return null;
       default:
@@ -50,146 +72,157 @@ export class PricingService {
     }
   }
 
+  /** Yearly INDEXED rate of the company, in basis points (200 = +2.00 %/year). */
+  async priceIndexRateBp(companyId: string, m: EntityManager = this.observationRepo.manager): Promise<number> {
+    // Read straight from the settings column: the company entity belongs to the company module.
+    const [row] = await m.query('SELECT price_index_rate_bp FROM company WHERE id = $1', [companyId]);
+    const rate = row?.price_index_rate_bp;
+    return rate == null ? DEFAULT_PRICE_INDEX_RATE_BP : Number(rate);
+  }
+
+  private latestObservation(m: EntityManager, companyId: string, articleId: string) {
+    return m.getRepository(PriceObservation).findOne({
+      where: { canonicalArticleId: articleId, companyId, isOutlier: false },
+      order: { observationDate: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
   /**
    * LATEST: get the most recent price observation for this article.
    */
-  private async resolveLatest(
-    companyId: string,
-    articleId: string,
-  ): Promise<PriceResult | null> {
-    const latest = await this.observationRepo.findOne({
-      where: {
-        canonicalArticleId: articleId,
-        companyId,
-        isOutlier: false,
-      },
-      order: { observationDate: 'DESC' },
-    });
-
+  private async resolveLatest(m: EntityManager, companyId: string, articleId: string): Promise<PriceResult | null> {
+    const latest = await this.latestObservation(m, companyId, articleId);
     if (!latest) return null;
-
     return {
-      unitPriceCents: latest.unitPriceCents,
-      confidence: 0.7,
+      unitPriceCents: Number(latest.unitPriceCents),
+      confidence: historyPriceConfidence(1, yearsSince(latest.observationDate)),
     };
   }
 
   /**
    * MEDIAN_N: get last 10 observations, return median price.
    */
-  private async resolveMedianN(
-    companyId: string,
-    articleId: string,
-  ): Promise<PriceResult | null> {
-    const observations = await this.observationRepo.find({
-      where: {
-        canonicalArticleId: articleId,
-        companyId,
-        isOutlier: false,
-      },
-      order: { observationDate: 'DESC' },
-      take: 10,
+  private async resolveMedianN(m: EntityManager, companyId: string, articleId: string): Promise<PriceResult | null> {
+    const observations = await m.getRepository(PriceObservation).find({
+      where: { canonicalArticleId: articleId, companyId, isOutlier: false },
+      order: { observationDate: 'DESC', createdAt: 'DESC' },
+      take: MEDIAN_WINDOW,
     });
-
     if (observations.length === 0) return null;
 
-    // Sort by price to compute median
-    const prices = observations
-      .map((o) => o.unitPriceCents)
-      .sort((a, b) => a - b);
-
+    const prices = observations.map((o) => Number(o.unitPriceCents)).sort((a, b) => a - b);
     const mid = Math.floor(prices.length / 2);
-    const medianPrice =
-      prices.length % 2 === 0
-        ? Math.round((prices[mid - 1] + prices[mid]) / 2)
-        : prices[mid];
+    const medianPrice = prices.length % 2 === 0 ? Math.round((prices[mid - 1] + prices[mid]) / 2) : prices[mid];
+    const meanAge = observations.reduce((n, o) => n + yearsSince(o.observationDate), 0) / observations.length;
 
-    // Confidence scales with observation count: more data = more confident
-    const confidence = Math.min(0.9, observations.length * 0.1);
-
-    return {
-      unitPriceCents: medianPrice,
-      confidence,
-    };
+    return { unitPriceCents: medianPrice, confidence: historyPriceConfidence(observations.length, meanAge) };
   }
 
   /**
-   * INDEXED: get latest price, apply 2% annual indexation from observation date to today.
+   * INDEXED: latest price brought forward to today with the company's yearly index, compounded.
    */
-  private async resolveIndexed(
-    companyId: string,
-    articleId: string,
-  ): Promise<PriceResult | null> {
-    const latest = await this.observationRepo.findOne({
-      where: {
-        canonicalArticleId: articleId,
-        companyId,
-        isOutlier: false,
-      },
-      order: { observationDate: 'DESC' },
-    });
-
+  private async resolveIndexed(m: EntityManager, companyId: string, articleId: string): Promise<PriceResult | null> {
+    const latest = await this.latestObservation(m, companyId, articleId);
     if (!latest) return null;
 
-    const observationDate = new Date(latest.observationDate);
-    const now = new Date();
-
-    // Calculate years elapsed (fractional)
-    const msPerYear = 365.25 * 24 * 60 * 60 * 1000;
-    const yearsElapsed =
-      (now.getTime() - observationDate.getTime()) / msPerYear;
-
-    // Apply 2% annual indexation compounded
-    const indexedPrice = Math.round(
-      latest.unitPriceCents * Math.pow(1.02, yearsElapsed),
-    );
-
+    const years = yearsSince(latest.observationDate);
+    const rate = (await this.priceIndexRateBp(companyId, m)) / 10_000;
     return {
-      unitPriceCents: indexedPrice,
-      confidence: 0.5, // Lower confidence due to estimation
+      unitPriceCents: Math.round(Number(latest.unitPriceCents) * Math.pow(1 + rate, years)),
+      confidence: historyPriceConfidence(1, years, true),
     };
   }
 
   /**
-   * COMPOSED: get the article's composed_components JSONB, sum component prices.
+   * COMPOSED: sum of the components of the article's composed_components JSONB. Its confidence is
+   * the mean of the components': a price set in the bundle editor is the user's (1), one taken
+   * from history scores like LATEST, an unpriced component scores 0 (the sum is then too low).
    */
-  private async resolveComposed(
-    companyId: string,
-    articleId: string,
-  ): Promise<PriceResult | null> {
-    const article = await this.articleRepo.findOne({
-      where: { id: articleId, companyId },
-    });
-
-    if (!article || !article.isComposed || !article.composedComponents) {
-      return null;
-    }
+  private async resolveComposed(m: EntityManager, companyId: string, articleId: string): Promise<PriceResult | null> {
+    const article = await m.getRepository(CanonicalArticle).findOne({ where: { id: articleId, companyId } });
+    if (!article || !article.isComposed || !article.composedComponents?.length) return null;
 
     let totalCents = 0;
-    let allResolved = true;
-
+    let confidenceSum = 0;
     for (const component of article.composedComponents) {
-      // Each component has: { articleId, quantity, unitPriceCents }
-      // If the component has a stored price, use it; otherwise try to resolve
       if (component.unitPriceCents != null && component.unitPriceCents > 0) {
         totalCents += Math.round(component.quantity * component.unitPriceCents);
+        confidenceSum += USER_VALIDATED;
+        continue;
+      }
+      const subPrice = await this.resolveLatest(m, companyId, component.articleId);
+      if (subPrice) {
+        totalCents += Math.round(component.quantity * subPrice.unitPriceCents);
+        confidenceSum += subPrice.confidence;
       } else {
-        // Try to get price from observations for the sub-article
-        const subPrice = await this.resolveLatest(companyId, component.articleId);
-        if (subPrice) {
-          totalCents += Math.round(component.quantity * subPrice.unitPriceCents);
-        } else {
-          allResolved = false;
-        }
+        confidenceSum += NO_PRICE;
       }
     }
-
     if (totalCents === 0) return null;
 
-    return {
-      unitPriceCents: totalCents,
-      confidence: allResolved ? 0.8 : 0.4,
-    };
+    return { unitPriceCents: totalCents, confidence: roundScore(confidenceSum / article.composedComponents.length) };
+  }
+
+  /* ───────────── Confidence dimensions (§7.7) ───────────── */
+
+  /**
+   * Classification: mean match confidence of the source lines a proposal cites for this article
+   * (1 = matched on its NPK code, 0.3 = candidate awaiting review). Null when the evidence holds
+   * no matched source line of the article, for the caller to fall back on.
+   */
+  async classificationConfidence(
+    companyId: string,
+    articleId: string,
+    evidence: string[],
+    m: EntityManager = this.observationRepo.manager,
+  ): Promise<number | null> {
+    const ids = evidence.filter(isUuid);
+    if (!ids.length) return null;
+    const [row] = await m.query(
+      `SELECT AVG(match_confidence)::float8 AS confidence FROM source_occurrence
+       WHERE company_id = $1 AND canonical_article_id = $2 AND id = ANY($3::uuid[]) AND match_confidence IS NOT NULL`,
+      [companyId, articleId, ids],
+    );
+    return row?.confidence == null ? null : roundScore(Number(row.confidence));
+  }
+
+  /**
+   * Mapping: share of the company's projects having this room type in which the article appears
+   * there, like the room profile (roomProfile). Null when no project has the room type yet.
+   */
+  async mappingConfidence(
+    companyId: string,
+    articleId: string,
+    roomType: string,
+    m: EntityManager = this.observationRepo.manager,
+  ): Promise<number | null> {
+    const [row] = await m.query(
+      `SELECT COUNT(DISTINCT project)::int AS "roomProjects",
+              (COUNT(DISTINCT project) FILTER (WHERE canonical_article_id = $3))::int AS "articleProjects"
+       FROM (
+         SELECT o.canonical_article_id, COALESCE(NULLIF(d.project_name, ''), d.id::text) AS project
+         FROM source_occurrence o
+         JOIN source_document d ON d.id = o.source_document_id AND d.company_id = o.company_id
+         WHERE o.company_id = $1
+           AND o.canonical_article_id IS NOT NULL
+           AND o.status NOT IN ('unmatched', 'needs_review', 'rejected')
+           AND o.is_variant = false
+           AND lower(o.room_type) = lower($2)
+       ) occ`,
+      [companyId, roomType.trim(), articleId],
+    );
+    return row?.roomProjects ? roundScore(row.articleProjects / row.roomProjects) : null;
+  }
+
+  /** Rule: the confidence of the company's business rule, when ruleId is one. */
+  async ruleConfidence(
+    companyId: string,
+    ruleId: string,
+    m: EntityManager = this.observationRepo.manager,
+  ): Promise<number | null> {
+    if (!isUuid(ruleId)) return null;
+    const rule = await m.getRepository(BusinessRule).findOne({ where: { id: ruleId, companyId } });
+    return rule ? roundScore(Number(rule.confidence)) : null;
   }
 
   /**
@@ -342,4 +375,10 @@ function toNumber(value: unknown): number | null {
 
 function round2(value: number | null): number | null {
   return value == null ? null : Math.round(value * 100) / 100;
+}
+
+/** Years elapsed since a date (fractional, never negative). */
+function yearsSince(value: Date | string): number {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? Math.max(0, (Date.now() - time) / MS_PER_YEAR) : 0;
 }

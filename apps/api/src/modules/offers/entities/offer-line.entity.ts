@@ -53,9 +53,22 @@ export class OfferLine {
   @Column({ type: 'text', nullable: true })
   pricingStrategy: string | null;
 
-  /** 0–1: how reliable the proposed line is (R008, §7.7). */
+  /** 0–1: how reliable the proposed line is (R008, §7.7): the weakest of the four dimensions. */
   @Column({ type: 'real', nullable: true })
   confidenceScore: number | null;
+
+  /** §7.7 dimensions, 0–1, null when not applicable (see offer-confidence.ts). */
+  @Column({ type: 'real', nullable: true })
+  confidenceClassification: number | null;
+
+  @Column({ type: 'real', nullable: true })
+  confidenceMapping: number | null;
+
+  @Column({ type: 'real', nullable: true })
+  confidencePrice: number | null;
+
+  @Column({ type: 'real', nullable: true })
+  confidenceRule: number | null;
 
   /** Rule that proposed the line (business rule id or rule code), if any (§11.2). */
   @Column({ type: 'text', nullable: true })
