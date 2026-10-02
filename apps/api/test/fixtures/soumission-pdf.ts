@@ -48,14 +48,17 @@ export type SoumissionLine =
   | { kind: 'location'; code: string; text: string }
   | { kind: 'subtotal'; text: string; total: string }
   | { kind: 'note'; text: string }
-  | { kind: 'pageBreak' }
+  /** Some sheets reprint the column header on every page, some only on the first. */
+  | { kind: 'pageBreak'; repeatHeader?: boolean }
   | {
       kind: 'position';
-      code: string;
+      /** Sub-items are printed under the position above without a number of their own. */
+      code?: string;
       text: string;
       ci?: string;
-      qte: string;
-      unite: string;
+      /** A forfait line often carries no quantity, and some sheets leave the unit implicit. */
+      qte?: string;
+      unite?: string;
       pu?: string;
       total?: string;
     };
@@ -168,7 +171,7 @@ export async function buildSoumissionPdf(opts: SoumissionOptions): Promise<Buffe
     if (line.kind === 'pageBreak') {
       doc.addPage();
       y = 40;
-      printHeader();
+      if (line.repeatHeader !== false) printHeader();
       continue;
     }
     if (y > 760) { doc.addPage(); y = 40; printHeader(); }
@@ -190,17 +193,20 @@ export async function buildSoumissionPdf(opts: SoumissionOptions): Promise<Buffe
         doc.text(line.text, COL.texte, y, { width: 190 });
         y += 10;
         break;
-      case 'position':
-        doc.text(line.code, COL.num, y);
+      case 'position': {
+        // A wrapped description takes more than one printed line; the row has to grow with it.
+        const height = doc.heightOfString(line.text, { width: 190 });
+        if (line.code) doc.text(line.code, COL.num, y);
         doc.text(line.text, COL.texte, y, { width: 190 });
         if (line.ci && header.ci) doc.text(line.ci, COL.ci, y);
-        doc.text(line.qte, COL.qte, y, { width: COL.qteWidth, align: 'right' });
-        doc.text(line.unite, COL.unite, y);
+        if (line.qte) doc.text(line.qte, COL.qte, y, { width: COL.qteWidth, align: 'right' });
+        if (line.unite) doc.text(line.unite, COL.unite, y);
         // Dot leaders are what a soumission prints where a price is still to be filled in.
         doc.text(line.pu ?? '............', COL.pu, y, { width: COL.puWidth, align: 'right' });
         doc.text(line.total ?? '............', COL.total, y, { width: COL.totalWidth, align: 'right' });
-        y += 14;
+        y += Math.max(height, 12) + 2;
         break;
+      }
     }
   }
 

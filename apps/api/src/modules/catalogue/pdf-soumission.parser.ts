@@ -294,7 +294,28 @@ export function parseSoumission(pages: PdfTextItem[][]): ParsedSoumission {
     for (const line of lines.slice(headerAt + 1)) {
       lineNumber++;
       const cells = readCells(line, cols);
-      const isPosition = cells.quantity !== undefined && cells.unit !== undefined;
+      /*
+       * A line that carries a measured or priced cell is a position. Requiring both a quantity and
+       * a unit loses the ones that print only one of them — a forfait with no quantity, a line
+       * whose unit is left implicit — and those were not merely skipped: their text was taken for
+       * the continuation of the position above, corrupting its description too.
+       *
+       * Two things are still not positions however many figures they carry: a subtotal, and a
+       * section or room heading printed with its running total (that one shares the shape of a
+       * position number, so it is told apart by having nothing but a total).
+       */
+      const headingCode =
+        !!cells.code &&
+        (SECTION_CODE.test(cells.code) || ROOM_CODE.test(cells.code) || LOCATION_CODE.test(cells.code));
+      const onlyTotal =
+        cells.total !== undefined &&
+        cells.quantity === undefined &&
+        cells.unitPrice === undefined &&
+        cells.unit === undefined;
+      const isPosition =
+        (cells.quantity !== undefined || cells.unitPrice !== undefined || cells.total !== undefined) &&
+        !SUBTOTAL.test(cells.text) &&
+        !(onlyTotal && headingCode);
 
       if (isPosition) {
         close();
@@ -307,7 +328,7 @@ export function parseSoumission(pages: PdfTextItem[][]): ParsedSoumission {
             rawText: '',
             page: p + 1,
             npkNumber: cells.code ? clip(cells.code, MAX.npkNumber) : undefined,
-            unit: clip(cells.unit!, MAX.unit),
+            unit: cells.unit ? clip(cells.unit, MAX.unit) : undefined,
             quantity: cells.quantity,
             unitPriceCents: toCents(cells.unitPrice),
             // A variant total is never part of the base sum: kept negative, like the CSV exports.

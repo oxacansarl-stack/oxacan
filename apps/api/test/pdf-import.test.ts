@@ -146,6 +146,86 @@ describe('Reading a soumission PDF', () => {
     expect(parsed.rows.at(-1)).toMatchObject({ npkNumber: '573.148', page: 2, sectionCode: '232.1' });
   });
 
+  it('keeps a position that prints only some of its cells', async () => {
+    // Real sheets leave cells out: a forfait with no quantity, a unit left implicit, a lump sum
+    // with no unit price. Each of these used to be dropped AND glued onto the position above,
+    // so one missing cell cost two positions.
+    const parsed = await parse({
+      lines: [
+        { kind: 'position', code: '571.201', text: 'Tube TT 20 mm', qte: '100.00', unite: 'm', pu: '4.85', total: '485.00' },
+        { kind: 'position', code: '579.310', text: 'Mise à terre, liaison équipotentielle', unite: 'forfait', pu: '639.20', total: '639.20' },
+        { kind: 'position', code: '573.112', text: 'Prise T13', qte: '48.00', pu: '46.50', total: "2'232.00" },
+        { kind: 'position', code: '590.001', text: 'Installation de chantier', qte: '1.00', unite: 'forfait', total: "3'500.00" },
+      ],
+    });
+    expect(parsed.rows).toHaveLength(4);
+    expect(parsed.rows[1]).toMatchObject({ npkNumber: '579.310', unit: 'forfait', unitPriceCents: 63920 });
+    expect(parsed.rows[1].quantity).toBeUndefined();
+    expect(parsed.rows[2]).toMatchObject({ npkNumber: '573.112', quantity: 48 });
+    expect(parsed.rows[2].unit).toBeUndefined();
+    expect(parsed.rows[3]).toMatchObject({ npkNumber: '590.001', totalPriceCents: 350000 });
+    expect(parsed.rows[3].unitPriceCents).toBeUndefined();
+    // The first position keeps its own description rather than absorbing the ones below it.
+    expect(parsed.rows[0].description).toBe('Tube TT 20 mm');
+  });
+
+  it('still treats a heading printed with its running total as a heading, not a position', async () => {
+    const parsed = await parse({
+      lines: [
+        { kind: 'subtotal', text: 'Total Installations électriques', total: "12'734.50" },
+        { kind: 'position', code: '571.201', text: 'Tube TT 20 mm', qte: '100.00', unite: 'm', pu: '4.85', total: '485.00' },
+      ],
+    });
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0].npkNumber).toBe('571.201');
+  });
+
+  it('reads a sub-item printed without a number of its own', async () => {
+    const parsed = await parse({
+      lines: [
+        { kind: 'position', code: '573.112', text: 'Prise T13 complète', qte: '48.00', unite: 'pce', pu: '46.50', total: "2'232.00" },
+        { kind: 'position', text: 'idem, mais étanche IP44', qte: '6.00', unite: 'pce', pu: '58.00', total: '348.00' },
+      ],
+    });
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows[1]).toMatchObject({ quantity: 6, unit: 'pce', unitPriceCents: 5800 });
+    expect(parsed.rows[1].npkNumber).toBeUndefined();
+  });
+
+  it('keeps a wrapped description whole and the figures with it', async () => {
+    const long =
+      'Tube TT 20 mm, posé encastré sous crépi, y compris boîtes de dérivation, colliers de ' +
+      'fixation, percements et rebouchage selon directives SIA';
+    const parsed = await parse({ lines: [{ kind: 'position', code: '571.201', text: long, qte: "1'250.00", unite: 'm', pu: '4.85', total: "6'062.50" }] });
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]).toMatchObject({ quantity: 1250, unit: 'm', unitPriceCents: 485 });
+    expect(parsed.rows[0].description).toMatch(/^Tube TT 20 mm/);
+    expect(parsed.rows[0].description).toMatch(/directives SIA$/);
+  });
+
+  it('reads amounts carrying a currency, and a discount as a negative', async () => {
+    const parsed = await parse({
+      lines: [
+        { kind: 'position', code: '575.021', text: 'Luminaire LED', qte: '24.00', unite: 'pce', pu: 'CHF 185.00', total: "CHF 4'440.00" },
+        { kind: 'position', code: '999.001', text: 'Rabais de quantité', qte: '1.00', unite: 'forfait', pu: '-250.00', total: '-250.00' },
+      ],
+    });
+    expect(parsed.rows[0]).toMatchObject({ unitPriceCents: 18500, totalPriceCents: 444000 });
+    expect(parsed.rows[1]).toMatchObject({ unitPriceCents: -25000, totalPriceCents: -25000 });
+  });
+
+  it('carries the columns onto a continuation page that does not reprint the header', async () => {
+    const parsed = await parse({
+      lines: [
+        { kind: 'position', code: '571.201', text: 'Tube TT', qte: '100.00', unite: 'm', pu: '4.85', total: '485.00' },
+        { kind: 'pageBreak', repeatHeader: false },
+        { kind: 'position', code: '573.112', text: 'Prise T13', qte: '48.00', unite: 'pce', pu: '46.50', total: "2'232.00" },
+      ],
+    });
+    expect(parsed.rows.map((r) => r.npkNumber)).toEqual(['571.201', '573.112']);
+    expect(parsed.rows[1].page).toBe(2);
+  });
+
   it('finds nothing in a scanned soumission rather than inventing positions', async () => {
     const parsed = await parse({ lines: SAMPLE_LINES, scanned: true });
     expect(parsed.rows).toHaveLength(0);
