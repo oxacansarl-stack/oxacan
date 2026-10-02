@@ -40,6 +40,7 @@ import { PortalModule } from './modules/portal/portal.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { AlertsModule } from './modules/alerts/alerts.module';
     NotificationsModule,
     DocumentsModule,
     AlertsModule,
+    AiModule,
   ],
   providers: [
     TenantConnectionHook,

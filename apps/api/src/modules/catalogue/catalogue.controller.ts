@@ -14,13 +14,29 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { CompanyId, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles, OFFICE_ROLES, SITE_LEAD_ROLES } from '../../common/decorators/roles.decorator';
 import { CatalogueService } from './catalogue.service';
+import { MatchingService } from './matching.service';
 import { hidesMoneyFor, stripMoney } from '../../common/util/strip-money';
 import { CreateArticleDto, UpdateArticleDto, ImportCsvDto, ImportPdfDto } from './dto/catalogue.dto';
 import { PDF_LIMITS } from './pdf-text.extractor';
 
 @Controller('catalogue')
 export class CatalogueController {
-  constructor(private readonly catalogueService: CatalogueService) {}
+  constructor(
+    private readonly catalogueService: CatalogueService,
+    private readonly matching: MatchingService,
+  ) {}
+
+  /**
+   * Candidate articles for the imported lines the catalogue could not place by code. Suggestions
+   * only: nothing is written and a project manager confirms each one (PRD §18.6). Answers
+   * `enabled: false` when no AI provider is configured, which is the default.
+   */
+  @Get('unmatched/suggestions')
+  @Roles(...OFFICE_ROLES)
+  async suggestMatches(@CompanyId() companyId: string, @Query('limit') limit?: string) {
+    const n = limit ? parseInt(limit, 10) : NaN;
+    return this.matching.suggestForUnmatched(companyId, Number.isInteger(n) && n >= 1 ? n : undefined);
+  }
 
   // Catalogue reads show unit prices, so workers are excluded (product decision 2026-10-01);
   // team leaders still read it with prices stripped by the financial redaction.

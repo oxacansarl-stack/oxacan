@@ -7,6 +7,7 @@ import { SourceOccurrence } from './entities/source-occurrence.entity';
 import { PriceObservation } from './entities/price-observation.entity';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueController } from './catalogue.controller';
+import { MatchingService } from './matching.service';
 
 @Module({
   imports: [
@@ -18,8 +19,8 @@ import { CatalogueController } from './catalogue.controller';
       PriceObservation,
     ]),
   ],
-  providers: [CatalogueService],
+  providers: [CatalogueService, MatchingService],
   controllers: [CatalogueController],
-  exports: [CatalogueService],
+  exports: [CatalogueService, MatchingService],
 })
 export class CatalogueModule {}
