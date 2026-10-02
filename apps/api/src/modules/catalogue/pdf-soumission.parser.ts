@@ -73,16 +73,48 @@ const toCents = (n: number | undefined) => {
   return Math.abs(c) <= 100_000_000_000 ? c : undefined;
 };
 
-interface Columns {
-  textX: number;
-  /** Left edge of the first numeric column (CI or Quantité): text starting before it is text. */
-  numericX: number;
-  ciX: number | null;
-  qtyRight: number;
-  unitX: number;
-  unitPriceRight: number;
-  totalRight: number;
+/** The horizontal span of one printed column heading. */
+interface Label {
+  x: number;
+  right: number;
 }
+
+interface Columns {
+  numero: Label | null;
+  texte: Label;
+  ci: Label | null;
+  qty: Label;
+  unit: Label;
+  unitPrice: Label;
+  total: Label;
+  /** Left of this nothing is read as a figure, so "20" in a description stays description. */
+  numericFloor: number;
+}
+
+/** Distance from a point to a column heading's span; 0 when the point sits under it. */
+const distance = (l: Label, p: number) => (p < l.x ? l.x - p : p > l.right ? p - l.right : 0);
+
+/** The heading nearest a point, out of the ones given. */
+function nearest<K extends string>(point: number, labels: [K, Label | null][]): K | null {
+  let best: K | null = null;
+  let bestDistance = Infinity;
+  for (const [key, label] of labels) {
+    if (!label) continue;
+    const d = distance(label, point);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = key;
+    }
+  }
+  return best;
+}
+
+/**
+ * How far a figure may sit from its own heading before the line is given up on. Generous on
+ * purpose: a heading printed at the left of a column of right-aligned figures is several
+ * centimetres from them, and the alternative to a slightly wrong column is no position at all.
+ */
+const NUMERIC_SLACK = 24;
 
 interface Line {
   y: number;
@@ -102,26 +134,36 @@ function toLines(items: PdfTextItem[]): Line[] {
   return lines;
 }
 
-/** The printed column header ("Numéro Texte CI Quantité Unité Prix unitaire Prix total"). */
+/**
+ * The printed column header, in any of the three languages a Swiss soumission is issued in
+ * ("Numéro Texte CI Quantité Unité Prix unitaire Prix total" and its German and Italian
+ * equivalents). Only the headings are matched by wording; where the columns actually sit is read
+ * off the page, because a heading may be printed left or right over its figures.
+ */
 function readHeader(line: Line): Columns | null {
-  const find = (...keys: string[]) => line.items.find((i) => keys.includes(norm(i.str)));
-  const text = find('texte', 'designation', 'description', 'libelle');
-  const qty = find('quantite', 'qte', 'quantity');
-  const unit = find('unite', 'unit', 'ut');
-  const pu = find('prixunitaire', 'pu', 'unitprice', 'prixunit');
-  const total = find('prixtotal', 'total', 'montant');
-  if (!text || !qty || !unit || !pu || !total) return null;
-  const ci = find('ci');
+  const find = (...keys: string[]) => {
+    const it = line.items.find((i) => keys.includes(norm(i.str)));
+    return it ? { x: it.x, right: it.x + it.width } : null;
+  };
+  const texte = find('texte', 'designation', 'description', 'libelle', 'text', 'bezeichnung', 'descrizione', 'designazione');
+  const qty = find('quantite', 'qte', 'quantity', 'menge', 'anzahl', 'quantita', 'qta');
+  const unit = find('unite', 'unit', 'ut', 'einheit', 'eh', 'unita', 'um');
+  const unitPrice = find('prixunitaire', 'pu', 'unitprice', 'prixunit', 'einheitspreis', 'ehpreis', 'prezzounitario', 'prezzounit');
+  const total = find('prixtotal', 'total', 'montant', 'gesamtpreis', 'gesamtbetrag', 'betrag', 'importo', 'totale');
+  if (!texte || !qty || !unit || !unitPrice || !total) return null;
   return {
-    textX: text.x,
-    numericX: Math.min(ci?.x ?? Infinity, qty.x),
-    ciX: ci?.x ?? null,
-    qtyRight: qty.x + qty.width,
-    unitX: unit.x,
-    unitPriceRight: pu.x + pu.width,
-    totalRight: total.x + total.width,
+    numero: find('numero', 'nummer', 'n', 'no', 'pos', 'position', 'npk', 'can', 'code', 'artikel'),
+    texte,
+    ci: find('ci'),
+    qty,
+    unit,
+    unitPrice,
+    total,
+    numericFloor: Math.min(ci0(find('ci')), qty.x) - NUMERIC_SLACK,
   };
 }
+
+const ci0 = (l: Label | null) => l?.x ?? Infinity;
 
 interface Cells {
   code: string;
@@ -134,31 +176,53 @@ interface Cells {
   raw: string;
 }
 
-/** Places each run of a line in its column. */
+/**
+ * Places each run of a line in its column.
+ *
+ * Figures are right-aligned in their column and text is left-aligned, so a figure is placed by
+ * where it ends and text by where it starts — each joining the column whose heading is nearest.
+ * Measuring against the heading's span rather than one of its edges is what lets the same code
+ * read a sheet whose headings are printed left of their figures and one whose are right-aligned
+ * over them; both are ordinary, and keying off a single edge silently loses every figure on the
+ * layout it was not written for.
+ */
 function readCells(line: Line, c: Columns): Cells {
   const code: string[] = [];
   const text: string[] = [];
   const cells: Cells = { code: '', text: '', totalInParentheses: false, raw: '' };
-  const near = (a: number, b: number, tol: number) => Math.abs(a - b) <= tol;
   for (const it of line.items) {
     const s = it.str.trim();
     const right = it.x + it.width;
-    if (it.x < c.textX - 3) { code.push(s); continue; }
-    if (it.x < c.numericX - 3) { text.push(s); continue; }
     if (/^[.\s…_]+$/.test(s)) continue; // dot leaders where prices are to be filled in
+
+    // The CI index is a bare one-to-three-digit number under its own heading, not a quantity.
+    if (c.ci && /^\d{1,3}$/.test(s) && distance(c.ci, it.x) === 0) continue;
+
     const amount = parseAmount(s);
-    if (c.ciX !== null && near(it.x, c.ciX, 6) && /^\d{1,3}$/.test(s)) continue; // CI index
-    if (amount === undefined && near(it.x, c.unitX, 8) && s.length <= MAX.unit) { cells.unit = s; continue; }
-    if (amount !== undefined) {
-      const slots: [keyof Cells, number][] = [['quantity', c.qtyRight], ['unitPrice', c.unitPriceRight], ['total', c.totalRight]];
-      const [slot, edge] = slots.reduce((best, cur) => (Math.abs(cur[1] - right) < Math.abs(best[1] - right) ? cur : best));
-      if (near(right, edge, 15)) {
-        (cells as any)[slot] = amount;
-        if (slot === 'total') cells.totalInParentheses = /^\(.*\)$/.test(s);
+    if (amount !== undefined && right >= c.numericFloor) {
+      const slot = nearest<'quantity' | 'unitPrice' | 'total'>(right, [
+        ['quantity', c.qty],
+        ['unitPrice', c.unitPrice],
+        ['total', c.total],
+      ]);
+      if (slot === 'quantity') { cells.quantity = amount; continue; }
+      if (slot === 'unitPrice') { cells.unitPrice = amount; continue; }
+      if (slot === 'total') {
+        cells.total = amount;
+        cells.totalInParentheses = /^\(.*\)$/.test(s);
         continue;
       }
     }
-    text.push(s);
+
+    // Not a figure: the number, the description or the unit, whichever heading it starts under.
+    const column = c.numero
+      ? nearest(it.x, [['numero', c.numero], ['texte', c.texte], ['unit', c.unit]])
+      : it.x < c.texte.x - 3
+        ? 'numero'
+        : nearest(it.x, [['texte', c.texte], ['unit', c.unit]]);
+    if (column === 'numero') code.push(s);
+    else if (column === 'unit' && amount === undefined && s.length <= MAX.unit && distance(c.unit, it.x) <= 10) cells.unit = s;
+    else text.push(s);
   }
   cells.code = squash(code.join(' '));
   cells.text = squash(text.join(' '));
@@ -169,7 +233,8 @@ function readCells(line: Line, c: Columns): Cells {
 const SECTION_CODE = /^\d{3}(\.\d{1,3})?$/; // 231.2, 232.12
 const ROOM_CODE = /^\d{1,3}\.$/; // 1.
 const LOCATION_CODE = /^[A-Z][A-Z0-9]{0,7}$/; // A, PARK, ASCE
-const SUBTOTAL = /^(total|sous-total|report|a reporter|à reporter|transport)\b/i;
+const SUBTOTAL =
+  /^(total|sous-total|report|a reporter|à reporter|transport|zwischentotal|zwischensumme|summe|übertrag|ubertrag|totale|riporto)\b/i;
 const DATE = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
 
 function readMeta(firstPage: Line[]) {
@@ -255,7 +320,7 @@ export function parseSoumission(pages: PdfTextItem[][]): ParsedSoumission {
           text: cells.text ? [cells.text] : [],
           raw: [cells.raw],
           lastY: line.y,
-          lineGap: lineHeight * 1.6,
+          lineGap: Math.max(lineHeight * 2.4, 15),
         };
         continue;
       }

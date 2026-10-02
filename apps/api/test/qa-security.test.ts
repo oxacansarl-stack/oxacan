@@ -293,12 +293,14 @@ describe('G privacy between users of the same company', () => {
 
   it('G4 a submitted time entry or expense can no longer be edited by the worker', async () => {
     const problems: string[] = [];
-    const t = await must(worker1.post('/timekeeping/clock-in', { projectId: fx.project, occurredAt: '2026-09-25T07:00:00Z' }));
-    await must(worker1.post(`/timekeeping/clock-out/${t.id}`, { occurredAt: '2026-09-25T16:00:00Z' }));
+    // Relative to today: clocking in is refused beyond 7 days back, so a fixed date rots.
+    const workedDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    const t = await must(worker1.post('/timekeeping/clock-in', { projectId: fx.project, occurredAt: `${workedDay}T07:00:00Z` }));
+    await must(worker1.post(`/timekeeping/clock-out/${t.id}`, { occurredAt: `${workedDay}T16:00:00Z` }));
     await must(worker1.post('/timekeeping/submit', { entryIds: [t.id] }));
     const edit = await worker1.put(`/timekeeping/${t.id}`, { notes: 'changed after submit' });
     if (edit.status < 400) problems.push(`edit submitted time entry → ${edit.status}`);
-    const e = await must(worker1.post('/expenses', { projectId: fx.project, date: '2026-09-25', category: 'material', description: 'x', amountCents: 100 }));
+    const e = await must(worker1.post('/expenses', { projectId: fx.project, date: workedDay, category: 'material', description: 'x', amountCents: 100 }));
     await must(worker1.post('/expenses/submit', { expenseIds: [e.id] }));
     const editE = await worker1.put(`/expenses/${e.id}`, { amountCents: 999999 });
     if (editE.status < 400) problems.push(`edit submitted expense → ${editE.status}`);
