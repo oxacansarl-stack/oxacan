@@ -6,20 +6,23 @@
     "pendingInvoices": "Factures en attente",
     "monthRevenue": "Chiffre d'affaires du mois",
     "loginRequired": "Connexion requise",
-    "unavailable": "Indisponible"
+    "unavailable": "Indisponible",
+    "label": "Indicateurs"
   },
   "quickActions": {
     "title": "Actions rapides",
-    "newOffer": "+ Nouvelle offre",
-    "newInvoice": "+ Nouvelle facture",
+    "newOffer": "Nouvelle offre",
+    "newInvoice": "Nouvelle facture",
     "clockIn": "Timbrer l'arrivée",
-    "newReport": "+ Nouveau rapport journalier"
+    "newReport": "Nouveau rapport journalier"
   },
   "financial": {
     "title": "Aperçu financier",
     "totalInvoiced": "Total facturé",
     "totalPaid": "Total encaissé",
-    "outstanding": "Solde ouvert"
+    "outstanding": "Solde ouvert",
+    "loadFailed": "Impossible de charger l'aperçu financier.",
+    "basis": "Exercice {{year}} · toutes les factures émises"
   },
   "recent": {
     "title": "Activité récente",
@@ -27,10 +30,24 @@
     "invoices": "Factures récentes",
     "timeEntries": "Timbrages récents",
     "noOffers": "Aucune offre pour le moment",
+    "noOffersHelp": "Les dernières offres créées apparaîtront ici.",
     "noInvoices": "Aucune facture pour le moment",
+    "noInvoicesHelp": "Les dernières factures établies apparaîtront ici.",
     "noTimeEntries": "Aucun timbrage pour le moment",
+    "noTimeEntriesHelp": "Les derniers timbrages saisis apparaîtront ici.",
+    "offersFailed": "Impossible de charger les offres récentes.",
+    "invoicesFailed": "Impossible de charger les factures récentes.",
+    "timeEntriesFailed": "Impossible de charger les timbrages récents.",
     "draftInvoice": "Brouillon",
     "project": "Projet",
-    "openEntry": "En cours"
+    "openEntry": "En cours",
+    "table": {
+      "project": "Projet",
+      "number": "Numéro",
+      "status": "Statut",
+      "amount": "Montant TTC",
+      "date": "Date",
+      "duration": "Durée"
+    }
   }
 }

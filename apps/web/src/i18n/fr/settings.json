@@ -21,22 +21,33 @@
     "marginFactorHint": "Enregistré en nombre entier (120 = 1.20×)",
     "geolocation": "Activer la géolocalisation",
     "geolocationHint": "Enregistrer les coordonnées GPS pour le timbrage et les rapports journaliers",
-    "save": "Enregistrer les valeurs par défaut"
+    "save": "Enregistrer les valeurs par défaut",
+    "readOnly": "Seul un administrateur peut modifier ces valeurs."
   },
   "subscription": {
     "title": "Abonnement",
+    "tierLabel": "Formule",
+    "statusLabel": "Statut",
     "seatUsage_one": "Utilisation des licences : {{used}} sur {{count}} licence utilisée",
     "seatUsage_other": "Utilisation des licences : {{used}} sur {{count}} licences utilisées",
+    "seatPct": "{{pct}} %",
     "periodStart": "Début de la période en cours",
     "periodEnd": "Fin de la période en cours",
     "trialEnd": "Fin de l'essai",
     "cancel": "Résilier l'abonnement",
+    "cancelShort": "Résilier",
+    "cancelling": "Résiliation…",
     "cancelHint": "Cette action est irréversible",
-    "confirmCancel": "Voulez-vous vraiment résilier votre abonnement ? Cette action est irréversible."
+    "confirmCancel": "Voulez-vous vraiment résilier votre abonnement ? Cette action est irréversible.",
+    "empty": "Aucun abonnement",
+    "emptyHelp": "Aucun abonnement n'est associé à cette entreprise."
   },
   "billing": {
     "title": "Historique de facturation",
     "empty": "Aucun événement de facturation",
+    "emptyHelp": "Les paiements et les changements de formule apparaîtront ici.",
+    "count_one": "{{count}} événement",
+    "count_other": "{{count}} événements",
     "table": {
       "date": "Date",
       "type": "Type",
@@ -45,6 +56,7 @@
     },
     "iban": "IBAN ou QR-IBAN pour les QR-factures",
     "ibanHint": "Compte suisse ou liechtensteinois imprimé sur la section paiement des factures.",
+    "ibanPlaceholder": "CH44 3199 9123 0008 8901 2",
     "paymentTerms": "Délai de paiement (jours)",
     "paymentTermsHint": "Échéance par défaut des factures."
   },
@@ -54,6 +66,8 @@
     "saved": "Paramètres enregistrés.",
     "invalidRates": "Veuillez saisir des nombres valides pour tous les taux.",
     "subscriptionCancelled": "Abonnement résilié.",
-    "cancelFailed": "Impossible de résilier l'abonnement."
+    "cancelFailed": "Impossible de résilier l'abonnement.",
+    "subscriptionLoadFailed": "Impossible de charger l'abonnement.",
+    "billingLoadFailed": "Impossible de charger l'historique de facturation."
   }
 }

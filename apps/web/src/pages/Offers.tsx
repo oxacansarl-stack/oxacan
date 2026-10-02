@@ -276,7 +276,7 @@ export default function Offers() {
                 onChange={(e) => setForm({ ...form, reference: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field label={t('form.marginFactor')} htmlFor="offer-margin" hint={t('form.marginFactorHint')}>
                 <Input
                   id="offer-margin"

@@ -1,77 +1,158 @@
 {
+  "title": "Offre",
   "loginRequired": "Connexion requise",
   "notFound": "Offre introuvable",
+  "notFoundHelp": "Cette offre n'existe plus, ou le lien utilisé est incorrect.",
+  "loadFailed": "Impossible de charger l'offre.",
+  "actionFailed": "L'action n'a pas abouti. Réessayez.",
   "back": "Retour aux offres",
   "header": {
-    "reference": "Réf. : {{reference}}"
+    "noClient": "Client non renseigné",
+    "noReference": "Sans référence",
+    "version": "v{{version}}",
+    "created": "Créée le {{date}}",
+    "moreActions": "Autres actions"
   },
   "actions": {
-    "recalculate": "Recalculer les totaux",
-    "recalculating": "Calcul…",
-    "duplicate": "Dupliquer l'offre",
-    "duplicating": "Duplication…",
-    "submit": "Soumettre l'offre",
-    "submitBlocked": "Toutes les lignes doivent avoir un prix avant la soumission",
+    "pdf": "PDF",
     "downloadPdf": "Télécharger le PDF",
     "generatingPdf": "Génération du PDF…",
-    "submitPending": "{{count}} point(s) à décider (hypothèse à valider / information manquante) avant l’envoi"
+    "recalculate": "Recalculer les totaux",
+    "recalculating": "Calcul en cours…",
+    "duplicate": "Dupliquer en nouvelle version",
+    "duplicating": "Duplication…",
+    "submit": "Soumettre",
+    "submitting": "Envoi…",
+    "submitBlocked_one": "{{count}} ligne comptée dans le total n'a pas de prix : complétez-la avant de soumettre.",
+    "submitBlocked_other": "{{count}} lignes comptées dans le total n'ont pas de prix : complétez-les avant de soumettre.",
+    "submitPending_one": "{{count}} point reste à décider (hypothèse à valider ou information manquante) avant l'envoi.",
+    "submitPending_other": "{{count}} points restent à décider (hypothèses à valider ou informations manquantes) avant l'envoi.",
+    "submitStatusBlocked": "Offre {{status}} : la soumission n'est plus possible.",
+    "setStatus": "Marquer comme {{status}}",
+    "archive": "Archiver l'offre"
+  },
+  "archive": {
+    "confirmTitle": "Archiver cette offre ?",
+    "confirmBody": "L'offre restera consultable, mais elle ne pourra plus changer de statut.",
+    "confirmAction": "Archiver"
+  },
+  "lifecycle": {
+    "title": "Cycle de vie",
+    "editable": "Modifiable",
+    "locked": "Verrouillée",
+    "next": "Prochaine étape : {{status}}",
+    "lockedHint": "Cette offre ne peut plus être modifiée.",
+    "noNext": "Aucune suite possible : l'offre est au bout de son cycle."
   },
   "summary": {
-    "totalHt": "Total HT",
-    "vat": "TVA",
+    "title": "Récapitulatif",
     "totalTtc": "Total TTC",
+    "totalTtcHint": "Prix de vente remis au client, TVA comprise.",
+    "countedCost": "Coût des lignes comptées",
+    "countedCostHint_one": "{{count}} ligne comptée : base et hypothèse à valider.",
+    "countedCostHint_other": "{{count}} lignes comptées : base et hypothèses à valider.",
     "marginFactor": "Coefficient de marge",
-    "vatRate": "Taux de TVA",
-    "stored": "valeur enregistrée : {{value}}",
-    "storedBps": "valeur enregistrée : {{value}} pb"
+    "marginValue": "× {{value}}",
+    "totalHt": "Total HT",
+    "vat": "TVA {{rate}} %",
+    "validity": "Validité",
+    "validityValue_one": "{{count}} jour",
+    "validityValue_other": "{{count}} jours",
+    "costNotice": "Les prix de ligne sont des coûts internes. Le total HT applique le coefficient de marge : ce n'est pas une remise."
+  },
+  "checklist": {
+    "title": "Avant soumission",
+    "readyTag": "Prête",
+    "blockedTag": "Bloquée",
+    "ready": "Tout est en ordre : l'offre peut être soumise.",
+    "priced": {
+      "ok": "Toutes les lignes comptées dans le total sont chiffrées.",
+      "blocked_one": "{{count}} ligne comptée dans le total reste à chiffrer (« Prix à compléter »).",
+      "blocked_other": "{{count}} lignes comptées dans le total restent à chiffrer (« Prix à compléter »)."
+    },
+    "decided": {
+      "ok": "Aucune hypothèse à valider ni information manquante ouverte.",
+      "blocked_one": "{{count}} point à décider : confirmez, modifiez ou excluez-le.",
+      "blocked_other": "{{count}} points à décider : confirmez, modifiez ou excluez-les."
+    },
+    "status": {
+      "ok": "Le statut actuel permet la soumission.",
+      "blocked": "Offre {{status}} : la soumission n'est plus possible."
+    },
+    "hint": "Une offre ne part que lorsque chaque ligne comptée a un prix et que plus rien n'attend de décision."
   },
   "lines": {
-    "title": "Lignes ({{count}})",
-    "add": "+ Ajouter une ligne",
+    "tab": "Lignes",
+    "add": "Ajouter une ligne",
     "newTitle": "Nouvelle ligne",
     "editTitle": "Modifier la ligne",
+    "formHelp": "Les montants saisis sont des coûts internes en CHF. Laissez le coût vide pour une ligne encore à chiffrer.",
     "submitAdd": "Ajouter la ligne",
-    "submitUpdate": "Mettre à jour la ligne",
-    "cancelEdit": "Annuler la modification",
+    "submitUpdate": "Enregistrer la ligne",
     "priceToComplete": "Prix à compléter",
+    "notCounted": "hors total",
+    "blocking": "Bloque l'envoi",
     "empty": "Aucune ligne pour le moment",
-    "confirmDelete": "Supprimer cette ligne ?",
+    "emptyHelp": "Ajoutez les postes de l'offre : base, variantes, options, hypothèses et exclusions.",
+    "rowActions": "Actions de la ligne",
+    "confirmDeleteTitle": "Supprimer cette ligne ?",
+    "confirmDeleteBody": "La position {{position}} sera retirée de l'offre. Pensez à recalculer les totaux ensuite.",
+    "saveFailed": "Impossible d'enregistrer la ligne.",
+    "footerCounted_one": "{{count}} ligne comptée dans le total",
+    "footerCounted_other": "{{count}} lignes comptées dans le total",
+    "footerCost": "Coût des lignes comptées : {{amount}}",
     "form": {
-      "description": "Description *",
-      "unit": "Unité (pce, m2, ml…)",
+      "description": "Description",
+      "unit": "Unité",
+      "unitHint": "pce, m2, ml…",
       "quantity": "Quantité",
-      "unitPrice": "Prix unitaire (CHF)"
+      "unitCost": "Coût unitaire (CHF)",
+      "unitCostHint": "Vide = prix à compléter",
+      "pricingStrategy": "Tarification",
+      "pricingStrategyNone": "Aucune",
+      "variantType": "Type de ligne",
+      "variantTypeHint": "Seules Base et Hypothèse à valider comptent dans les totaux."
     },
     "table": {
       "position": "Pos.",
       "description": "Description",
+      "variant": "Type",
       "unit": "Unité",
       "quantity": "Qté",
-      "unitPrice": "Prix unitaire (CHF)",
-      "total": "Total (CHF)",
+      "unitCost": "Coût unitaire (CHF)",
+      "totalCost": "Coût total (CHF)",
       "pricing": "Tarification",
-      "variant": "Variante",
       "actions": "Actions"
     }
   },
   "assumptions": {
-    "title": "Hypothèses ({{count}})",
-    "add": "+ Ajouter une hypothèse",
+    "tab": "Hypothèses",
+    "add": "Ajouter une hypothèse",
+    "newTitle": "Nouvelle hypothèse",
+    "formHelp": "Une hypothèse à valider ou une information manquante bloque l'envoi de l'offre jusqu'à sa décision.",
     "submit": "Ajouter l'hypothèse",
-    "adding": "Ajout…",
+    "submitting": "Ajout…",
     "empty": "Aucune hypothèse",
+    "emptyHelp": "Notez ici ce qui reste à confirmer avec le client et ce qui est exclu de l'offre.",
+    "blocking": "Bloque l'envoi",
+    "confirm": "Confirmer",
+    "reject": "Rejeter",
+    "footerOpen_one": "{{count}} point ouvert bloque l'envoi",
+    "footerOpen_other": "{{count}} points ouverts bloquent l'envoi",
+    "footerClear": "Aucun point ouvert",
     "form": {
-      "description": "Description *",
-      "impact": "Impact (CHF)"
+      "type": "Type",
+      "description": "Description",
+      "impact": "Impact (CHF)",
+      "impactHint": "Montant estimé, positif ou négatif. Facultatif."
     },
     "table": {
       "type": "Type",
       "description": "Description",
       "impact": "Impact (CHF)",
-      "status": "Statut"
-    },
-    "confirm": "Confirmer",
-    "reject": "Rejeter"
+      "status": "Statut",
+      "actions": "Actions"
+    }
   },
   "locked": {
     "message": "Offre {{status}} : elle ne peut plus être modifiée. Créez une nouvelle version pour la changer.",

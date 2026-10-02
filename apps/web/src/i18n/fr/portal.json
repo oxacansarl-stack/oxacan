@@ -1,13 +1,17 @@
 {
   "title": "Portail client",
   "subtitle": "Gérez les liens d'accès au portail pour partager un projet avec le maître d'ouvrage",
-  "newToken": "+ Nouveau lien d'accès",
+  "card": {
+    "title": "Liens d'accès"
+  },
   "form": {
     "title": "Créer un lien d'accès au portail",
-    "project": "Projet *",
+    "help": "Le client consulte l'avancement du projet depuis ce lien, sans compte ni mot de passe.",
+    "project": "Projet",
     "selectProject": "Sélectionner un projet",
-    "expiresAt": "Date d'expiration (par défaut : 90 jours, maximum 1 an)",
-    "submit": "Créer le lien"
+    "projectsFailed": "Impossible de charger la liste des projets. Fermez cette fenêtre puis réessayez.",
+    "expiresAt": "Date d'expiration",
+    "expiresAtHint": "Par défaut : 90 jours. Maximum : 1 an. Le lien reste valable jusqu'à la fin de la journée choisie."
   },
   "table": {
     "project": "Projet",
@@ -18,23 +22,41 @@
     "actions": "Actions"
   },
   "state": {
-    "loading": "Chargement des liens d'accès…",
-    "empty": "Aucun lien d'accès. Créez-en un pour partager les données d'un projet avec le client.",
     "never": "Jamais",
     "active": "Actif",
     "revoked": "Révoqué"
   },
+  "empty": {
+    "title": "Aucun lien d'accès",
+    "text": "Créez un lien pour partager les données d'un projet avec le client, sans lui créer de compte."
+  },
+  "summary": {
+    "count_one": "{{count}} lien sur {{total}}",
+    "count_other": "{{count}} liens sur {{total}}",
+    "sortedBy": "Triés par date de création"
+  },
   "actions": {
-    "copy": "Copier",
+    "new": "Nouveau lien d'accès",
+    "create": "Créer le lien",
+    "creating": "Création…",
     "copied": "Copié !",
     "copyUrl": "Copier l'URL",
-    "revoke": "Révoquer"
+    "copyToken": "Copier le jeton",
+    "revoke": "Révoquer",
+    "dismiss": "Masquer",
+    "rowActions": "Actions du lien d'accès"
+  },
+  "revoke": {
+    "title": "Révoquer ce lien d'accès ?",
+    "description": "Le lien du portail ne fonctionnera plus. Le client devra recevoir un nouveau lien pour consulter le projet."
   },
   "messages": {
     "projectRequired": "Le projet est obligatoire",
     "created": "Lien d'accès au portail créé",
     "revoked": "Lien d'accès révoqué",
-    "confirmRevoke": "Voulez-vous vraiment révoquer ce lien d'accès ? Le lien du portail ne fonctionnera plus.",
+    "urlCopied": "Lien du portail copié dans le presse-papiers",
+    "tokenCopied": "Jeton copié dans le presse-papiers",
+    "copyFailed": "Impossible de copier dans le presse-papiers. Sélectionnez le texte puis copiez-le manuellement.",
     "loadFailed": "Impossible de charger les liens d'accès au portail",
     "createFailed": "Impossible de créer le lien d'accès",
     "revokeFailed": "Impossible de révoquer le lien d'accès"

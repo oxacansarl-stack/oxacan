@@ -1,8 +1,20 @@
-import React, { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
+import { Database, Download, FileJson, ListChecks, ShieldCheck } from 'lucide-react';
 import { apiGet, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
+import { formatNumber } from '../lib/format';
 import type { PageProps } from '../lib/page-props';
+import { PageBody, PageHeader } from '@/components/page-header';
+import {
+  Card,
+  CardContent,
+  CardCount,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { DataState, EmptyState, LoadingState } from '@/components/states';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -19,33 +31,34 @@ interface ExportData {
   [key: string]: unknown;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
+/** What `/settings/export` returns, in the order the user sees it listed. */
+const SECTION_KEYS = [
+  'company',
+  'users',
+  'clients',
+  'offers',
+  'projects',
+  'timekeeping',
+  'expenses',
+  'invoices',
+  'accounting',
+  'dailyReports',
+  'notifications',
+] as const;
 
-const buttonStyle: React.CSSProperties = {
-  padding: '10px 20px',
-  background: '#2563eb',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 14,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
+/** The preview is a sample, not the file: past this the user downloads instead of reading. */
+const PREVIEW_LIMIT = 5000;
 
-const cardStyle: React.CSSProperties = {
-  background: '#f9fafb',
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: 20,
-  marginBottom: 16,
-};
+const PRIVACY_EMAIL = 'privacy@oxacan.ch';
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The LPD/nLPD and RGPD data export (§24). Rendered as the "Données" tab of Administration,
+ * so it honours `embedded` and lets the host page own the title.
+ */
 export default function DataExport({ embedded = false }: PageProps) {
   const { t } = useTranslation('dataExport');
   const [exportData, setExportData] = useState<ExportData | null>(null);
@@ -87,177 +100,129 @@ export default function DataExport({ embedded = false }: PageProps) {
     URL.revokeObjectURL(url);
   };
 
-  const dataSections = [
-    'company',
-    'users',
-    'clients',
-    'offers',
-    'projects',
-    'timekeeping',
-    'expenses',
-    'invoices',
-    'accounting',
-    'dailyReports',
-    'notifications',
-  ].map((key) => ({ label: t(`sections.${key}.label`), description: t(`sections.${key}.description`) }));
+  const sections = SECTION_KEYS.map((key) => ({
+    key,
+    label: t(`sections.${key}.label`),
+    description: t(`sections.${key}.description`),
+  }));
+
+  const json = useMemo(
+    () => (exportData ? JSON.stringify(exportData, null, 2) : ''),
+    [exportData],
+  );
+  const ready = exported && exportData !== null;
+
+  const actions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="primary" onClick={fetchExport} disabled={loading}>
+        <Database />
+        {loading ? t('actions.preparing') : t('actions.exportAll')}
+      </Button>
+      {ready ? (
+        <Button onClick={downloadJSON}>
+          <Download />
+          {t('actions.downloadJson')}
+        </Button>
+      ) : null}
+    </div>
+  );
 
   return (
-    <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
-        {t('title')}
-      </h1>
-      <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 24, maxWidth: 640 }}>
-        {t('intro')}
-      </p>
-
-      {/* What will be exported */}
-      <div style={cardStyle}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 16, marginTop: 0 }}>
-          {t('included')}
-        </h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {dataSections.map((section) => (
-            <div
-              key={section.label}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                padding: '8px 0',
-              }}
-            >
-              <div
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: '#2563eb',
-                  marginTop: 6,
-                  flexShrink: 0,
-                }}
-              />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>
-                  {section.label}
-                </div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{section.description}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Error state */}
-      {error && (
-        <div
-          style={{
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: 8,
-            padding: '12px 16px',
-            marginBottom: 16,
-            fontSize: 14,
-            color: '#dc2626',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span>{error}</span>
-          <button
-            onClick={() => setError('')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#dc2626',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 14,
-            }}
-          >
-            {t('actions.dismiss')}
-          </button>
-        </div>
+    <PageBody>
+      {embedded ? null : (
+        <PageHeader title={t('title')} kicker={t('common:nav.admin')} actions={actions} />
       )}
 
-      {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-        <button
-          style={{
-            ...buttonStyle,
-            opacity: loading ? 0.6 : 1,
-          }}
-          onClick={fetchExport}
-          disabled={loading}
-        >
-          {loading ? t('actions.preparing') : t('actions.exportAll')}
-        </button>
+      {/* The right the export answers to — kept verbatim from the LPD/RGPD notice. */}
+      <p className="max-w-[86ch] text-[13.5px] text-muted">{t('intro')}</p>
 
-        {exported && exportData && (
-          <button
-            style={{
-              ...buttonStyle,
-              background: '#16a34a',
-            }}
-            onClick={downloadJSON}
-          >
-            {t('actions.downloadJson')}
-          </button>
-        )}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <ListChecks aria-hidden className="size-4 text-muted" />
+            {t('included')}
+            <CardCount>({sections.length})</CardCount>
+          </CardTitle>
+          {/* Embedded as a tab of Administration, whose header carries no actions — so this one does. */}
+          {embedded ? actions : null}
+        </CardHeader>
+        <CardContent>
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-x-5 gap-y-3.5">
+            {sections.map((section) => (
+              <li key={section.key} className="flex items-start gap-2.5">
+                <span
+                  aria-hidden
+                  className="mt-[7px] size-1.5 shrink-0 rounded-full bg-copper"
+                />
+                <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-0.5">
+                  <span className="text-[13.5px] font-medium text-ink">{section.label}</span>
+                  <span className="text-xs text-muted">{section.description}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
 
-      {/* Export result preview */}
-      {exported && exportData && (
-        <div style={cardStyle}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginTop: 0, marginBottom: 12 }}>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <FileJson aria-hidden className="size-4 text-muted" />
             {t('preview.title')}
-          </h3>
-          <div
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: 6,
-              padding: 16,
-              maxHeight: 400,
-              overflow: 'auto',
-              fontSize: 12,
-              fontFamily: 'monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              color: '#374151',
-            }}
-          >
-            {JSON.stringify(exportData, null, 2).slice(0, 5000)}
-            {JSON.stringify(exportData, null, 2).length > 5000 && `\n\n${t('preview.truncated')}`}
-          </div>
-        </div>
-      )}
+          </CardTitle>
+          {ready ? (
+            <span className="tnum text-xs text-muted">
+              {t('preview.characters', { count: json.length, chars: formatNumber(json.length) })}
+            </span>
+          ) : null}
+        </CardHeader>
 
-      {/* Privacy notice */}
-      <div
-        style={{
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: 8,
-          padding: 16,
-          fontSize: 13,
-          color: '#1e40af',
-          lineHeight: 1.6,
-        }}
-      >
-        <Trans
-          t={t}
-          i18nKey="privacy"
-          values={{ email: 'privacy@oxacan.ch' }}
-          components={{ strong: <strong />, email: <span style={{ fontWeight: 600 }} /> }}
-        />
+        <DataState
+          isLoading={loading}
+          error={error || null}
+          onRetry={fetchExport}
+          isEmpty={!ready}
+          loading={<LoadingState label={t('actions.preparing')} />}
+          empty={
+            <EmptyState
+              icon={<Database className="size-5" />}
+              title={t('preview.empty')}
+              description={t('preview.emptyHelp')}
+              action={
+                <Button variant="ghost" size="sm" onClick={fetchExport} disabled={loading}>
+                  <Database />
+                  {t('actions.exportAll')}
+                </Button>
+              }
+            />
+          }
+        >
+          <CardContent>
+            {/* Focusable: a scrollable region must be reachable without a pointer. */}
+            <pre
+              role="region"
+              tabIndex={0}
+              aria-label={t('preview.title')}
+              className="max-h-[400px] overflow-auto whitespace-pre-wrap break-all rounded-md border border-line-soft bg-paper-2 p-3.5 font-mono text-xs leading-relaxed text-ink-2"
+            >
+              {json.slice(0, PREVIEW_LIMIT)}
+              {json.length > PREVIEW_LIMIT ? `\n\n${t('preview.truncated')}` : null}
+            </pre>
+          </CardContent>
+        </DataState>
+      </Card>
+
+      <div className="flex items-start gap-3 rounded-card border border-line bg-info-bg px-4 py-3.5 text-[13px] leading-relaxed text-info">
+        <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <p className="min-w-0">
+          <Trans
+            t={t}
+            i18nKey="privacy"
+            values={{ email: PRIVACY_EMAIL }}
+            components={{ strong: <strong className="font-semibold" />, email: <span className="font-semibold" /> }}
+          />
+        </p>
       </div>
-    </div>
+    </PageBody>
   );
 }

@@ -1,12 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, type SyntheticEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { apiList, apiPost, apiPut, apiDelete } from '../lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { MoreHorizontal, Pencil, Plus, Search, Trash2, Truck } from 'lucide-react';
+import { apiDelete, apiList, apiPost, apiPut, ApiError, type PageMeta } from '../lib/api';
 import { errorMessage } from '../lib/errors';
 import type { PageProps } from '../lib/page-props';
-
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardFooter } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, SearchInput, Textarea } from '@/components/ui/input';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
 
 interface Supplier {
   id: string;
@@ -28,45 +48,7 @@ interface SupplierForm {
   paymentTermsDays: number;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = { ...btnPrimary, background: '#dc2626' };
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const emptyForm: SupplierForm = {
+const EMPTY_FORM: SupplierForm = {
   name: '',
   contactPerson: '',
   email: '',
@@ -75,86 +57,102 @@ const emptyForm: SupplierForm = {
   paymentTermsDays: 30,
 };
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                          */
-/* ------------------------------------------------------------------ */
+/**
+ * Create drops the optional fields left empty: the API validates `email` and rejects "".
+ * `paymentTermsDays` is always sent, so the server default never overrides what was typed.
+ */
+function toCreateBody(form: SupplierForm): Record<string, unknown> {
+  const body: Record<string, unknown> = { name: form.name.trim() };
+  if (form.contactPerson.trim()) body.contactPerson = form.contactPerson.trim();
+  if (form.email.trim()) body.email = form.email.trim();
+  if (form.phone.trim()) body.phone = form.phone.trim();
+  if (form.address.trim()) body.address = form.address.trim();
+  body.paymentTermsDays = form.paymentTermsDays;
+  return body;
+}
+
+/** Update sends `null` for a cleared field, which is how the API erases it. */
+function toUpdateBody(form: SupplierForm): Record<string, unknown> {
+  return {
+    name: form.name.trim(),
+    contactPerson: form.contactPerson.trim() || null,
+    email: form.email.trim() || null,
+    phone: form.phone.trim() || null,
+    address: form.address.trim() || null,
+    paymentTermsDays: form.paymentTermsDays,
+  };
+}
+
+const DASH = <span className="text-muted">—</span>;
+
+/** Keeps a control inside a clickable row from also opening the row's edit dialog. */
+const stopRowActivation = (event: SyntheticEvent) => event.stopPropagation();
 
 export default function Suppliers({ embedded = false }: PageProps) {
   const { t } = useTranslation('suppliers');
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const queryClient = useQueryClient();
+
   const [search, setSearch] = useState('');
-
-  // Create form
-  const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState<SupplierForm>({ ...emptyForm });
-  const [creating, setCreating] = useState(false);
-
-  // Inline edit
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<SupplierForm>({ ...emptyForm });
-  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<SupplierForm>(EMPTY_FORM);
+  const [actionAlert, setActionAlert] = useState<string | null>(null);
 
-  // Delete
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // `search` is a server-side filter (name and contact person), so it belongs in the query key.
+  const suppliers = useQuery<{ items: Supplier[]; meta: PageMeta }, ApiError>({
+    queryKey: ['suppliers', search],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      const qs = params.toString();
+      return apiList<Supplier>(`/suppliers${qs ? `?${qs}` : ''}`);
+    },
+    retry: false,
+  });
 
-  // Hover
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const save = useMutation<Supplier, ApiError, { id: string | null; values: SupplierForm }>({
+    mutationFn: ({ id, values }) =>
+      id
+        ? apiPut<Supplier>(`/suppliers/${id}`, toUpdateBody(values))
+        : apiPost<Supplier>('/suppliers', toCreateBody(values)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      closeForm();
+    },
+  });
 
-  /* ---- Fetch ---- */
+  const remove = useMutation<unknown, ApiError, string>({
+    mutationFn: (id) => apiDelete(`/suppliers/${id}`),
+    onSuccess: () => {
+      setActionAlert(null);
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+    onError: (err) => setActionAlert(errorMessage(err, t('messages.deleteFailed'))),
+  });
 
-  const fetchSuppliers = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    const qs = params.toString();
-    apiList<Supplier>(`/suppliers${qs ? `?${qs}` : ''}`)
-      .then(({ items, meta }) => {
-        setSuppliers(items);
-        setTotal(meta?.total ?? items.length);
-      })
-      .catch((err) => {
-        setError(errorMessage(err, t('messages.loadFailed')));
-      })
-      .finally(() => setLoading(false));
-  }, [search, t]);
+  const rows = suppliers.data?.items ?? [];
+  const total = suppliers.data?.meta?.total ?? rows.length;
+  const searching = search.trim().length > 0;
+  const formValid = form.name.trim().length > 0;
 
-  useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+  }
 
-  /* ---- Create ---- */
-
-  const handleCreate = () => {
-    if (!createForm.name.trim()) return;
-    setCreating(true);
-    const body: Record<string, unknown> = { name: createForm.name.trim() };
-    if (createForm.contactPerson.trim()) body.contactPerson = createForm.contactPerson.trim();
-    if (createForm.email.trim()) body.email = createForm.email.trim();
-    if (createForm.phone.trim()) body.phone = createForm.phone.trim();
-    if (createForm.address.trim()) body.address = createForm.address.trim();
-    body.paymentTermsDays = createForm.paymentTermsDays;
-
-    apiPost<Supplier>('/suppliers', body)
-      .then(() => {
-        setCreateForm({ ...emptyForm });
-        setShowCreate(false);
-        fetchSuppliers();
-      })
-      .catch((err) => {
-        setError(errorMessage(err, t('messages.createFailed')));
-      })
-      .finally(() => setCreating(false));
+  const openCreate = () => {
+    save.reset();
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setFormOpen(true);
   };
 
-  /* ---- Edit ---- */
-
-  const startEdit = (supplier: Supplier) => {
+  const openEdit = (supplier: Supplier) => {
+    save.reset();
     setEditingId(supplier.id);
-    setEditForm({
+    setForm({
       name: supplier.name,
       contactPerson: supplier.contactPerson ?? '',
       email: supplier.email ?? '',
@@ -162,413 +160,264 @@ export default function Suppliers({ embedded = false }: PageProps) {
       address: supplier.address ?? '',
       paymentTermsDays: supplier.paymentTermsDays,
     });
+    setFormOpen(true);
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditForm({ ...emptyForm });
+  const handleDelete = async (supplier: Supplier) => {
+    if (
+      !(await confirm({
+        title: t('delete.title', { name: supplier.name }),
+        description: t('delete.description'),
+      }))
+    ) {
+      return;
+    }
+    remove.mutate(supplier.id);
   };
 
-  const handleSave = () => {
-    if (!editingId || !editForm.name.trim()) return;
-    setSaving(true);
-    const body: Record<string, unknown> = { name: editForm.name.trim() };
-    body.contactPerson = editForm.contactPerson.trim() || null;
-    body.email = editForm.email.trim() || null;
-    body.phone = editForm.phone.trim() || null;
-    body.address = editForm.address.trim() || null;
-    body.paymentTermsDays = editForm.paymentTermsDays;
-
-    apiPut<Supplier>(`/suppliers/${editingId}`, body)
-      .then(() => {
-        setEditingId(null);
-        setEditForm({ ...emptyForm });
-        fetchSuppliers();
-      })
-      .catch((err) => {
-        setError(errorMessage(err, t('messages.updateFailed')));
-      })
-      .finally(() => setSaving(false));
-  };
-
-  /* ---- Delete ---- */
-
-  const handleDelete = (id: string) => {
-    apiDelete(`/suppliers/${id}`)
-      .then(() => {
-        setDeletingId(null);
-        fetchSuppliers();
-      })
-      .catch((err) => {
-        setError(errorMessage(err, t('messages.deleteFailed')));
-        setDeletingId(null);
-      });
-  };
-
-  /* ---- Render ---- */
+  const newButton = (
+    <Button variant="primary" onClick={openCreate}>
+      <Plus />
+      {t('actions.new')}
+    </Button>
+  );
 
   return (
-    <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-            {t('title')}
-          </h1>
-          {!loading && (
-            <span style={{ fontSize: 14, color: '#6b7280' }}>
-              {t('count', { count: total })}
-            </span>
-          )}
-        </div>
-        <button
-          style={btnPrimary}
-          onClick={() => setShowCreate((v) => !v)}
-        >
-          {showCreate ? t('common:actions.cancel') : t('actions.new')}
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div
-          style={{
-            padding: '12px 16px',
-            marginBottom: 16,
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: 8,
-            color: '#991b1b',
-            fontSize: 14,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span>{error}</span>
-          <button
-            onClick={() => setError(null)}
-            style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}
-          >
-            {t('actions.dismiss')}
-          </button>
-        </div>
+    <PageBody>
+      {embedded ? null : (
+        <PageHeader
+          title={t('title')}
+          kicker={t('common:navGroup.procurement')}
+          meta={suppliers.isSuccess ? <span>{t('count', { count: total })}</span> : undefined}
+          actions={newButton}
+        />
       )}
 
-      {/* Search */}
-      <div style={{ marginBottom: 20 }}>
-        <input
-          type="text"
-          placeholder={t('search.placeholder')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inputStyle, maxWidth: 400 }}
-        />
-      </div>
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+          <SearchInput
+            icon={<Search className="size-4" />}
+            placeholder={t('filters.search')}
+            aria-label={t('filters.searchLabel')}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {/* Embedded as a tab of Achats, the host header carries no actions — so this one does. */}
+          {embedded ? newButton : null}
+        </div>
 
-      {/* Create form */}
-      {showCreate && (
-        <div
-          style={{
-            marginBottom: 24,
-            padding: 20,
-            background: '#f8f9fa',
-            borderRadius: 8,
-            border: '1px solid #e5e7eb',
-          }}
-        >
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            {t('form.title')}
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.name')} <span style={{ color: '#dc2626' }}>*</span>
-              </label>
-              <input
-                style={inputStyle}
-                value={createForm.name}
-                onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder={t('form.namePlaceholder')}
+        {actionAlert ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-soft px-3.5 py-2.5">
+            <p role="alert" className="text-[13px] text-bad">
+              {actionAlert}
+            </p>
+            <Button variant="quiet" size="sm" onClick={() => setActionAlert(null)}>
+              {t('actions.dismiss')}
+            </Button>
+          </div>
+        ) : null}
+
+        <DataState
+          isLoading={suppliers.isPending}
+          error={
+            suppliers.isError
+              ? suppliers.error.status === 401
+                ? t('common:auth.sessionExpired')
+                : errorMessage(suppliers.error, t('messages.loadFailed'))
+              : null
+          }
+          onRetry={() => suppliers.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<TableSkeleton rows={6} cols={6} />}
+          empty={
+            searching ? (
+              <EmptyState
+                icon={<Truck className="size-5" />}
+                title={t('empty.search', { search })}
+                description={t('empty.searchHelp')}
               />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.contactPerson')}
-              </label>
-              <input
-                style={inputStyle}
-                value={createForm.contactPerson}
-                onChange={(e) => setCreateForm((f) => ({ ...f, contactPerson: e.target.value }))}
-                placeholder={t('form.contactPersonPlaceholder')}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.email')}
-              </label>
-              <input
-                type="email"
-                style={inputStyle}
-                value={createForm.email}
-                onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder={t('form.emailPlaceholder')}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.phone')}
-              </label>
-              <input
-                type="tel"
-                style={inputStyle}
-                value={createForm.phone}
-                onChange={(e) => setCreateForm((f) => ({ ...f, phone: e.target.value }))}
-                placeholder={t('form.phonePlaceholder')}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.paymentTermsDays')}
-              </label>
-              <input
-                type="number"
-                min={0}
-                style={inputStyle}
-                value={createForm.paymentTermsDays}
-                onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, paymentTermsDays: parseInt(e.target.value, 10) || 0 }))
+            ) : (
+              <EmptyState
+                icon={<Truck className="size-5" />}
+                title={t('empty.none')}
+                description={t('empty.noneHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={openCreate}>
+                    <Plus />
+                    {t('actions.new')}
+                  </Button>
                 }
               />
-            </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.address')}
-              </label>
-              <textarea
-                style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }}
-                value={createForm.address}
-                onChange={(e) => setCreateForm((f) => ({ ...f, address: e.target.value }))}
-                placeholder={t('form.addressPlaceholder')}
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('table.name')}</TH>
+                  <TH>{t('table.contactPerson')}</TH>
+                  <TH>{t('table.email')}</TH>
+                  <TH>{t('table.phone')}</TH>
+                  <TH>{t('table.paymentTerms')}</TH>
+                  <TH className="w-11">
+                    <span className="sr-only">{t('table.actions')}</span>
+                  </TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((supplier) => (
+                  <TR key={supplier.id} onActivate={() => openEdit(supplier)}>
+                    <TD className="font-medium">{supplier.name}</TD>
+                    <TD>{supplier.contactPerson || DASH}</TD>
+                    <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                      {supplier.email ? (
+                        <a href={`mailto:${supplier.email}`} className="text-copper hover:underline">
+                          {supplier.email}
+                        </a>
+                      ) : (
+                        DASH
+                      )}
+                    </TD>
+                    <TD className="tnum">{supplier.phone || DASH}</TD>
+                    <TD className="tnum text-muted">
+                      {t('table.days', { count: supplier.paymentTermsDays })}
+                    </TD>
+                    <TD onClick={stopRowActivation} onKeyDown={stopRowActivation}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="quiet" size="iconSm" aria-label={t('actions.rowActions')}>
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuItem onSelect={() => openEdit(supplier)}>
+                            <Pencil />
+                            {t('common:actions.edit')}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-bad"
+                            disabled={remove.isPending}
+                            onSelect={() => {
+                              void handleDelete(supplier);
+                            }}
+                          >
+                            <Trash2 />
+                            {t('common:actions.delete')}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: rows.length, total })}</span>
+            <span>{t('summary.sortedBy')}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      <Dialog open={formOpen} onOpenChange={(open) => (open ? setFormOpen(true) : closeForm())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingId ? t('form.editTitle') : t('form.title')}</DialogTitle>
+            <DialogDescription>{editingId ? t('form.editHelp') : t('form.help')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('form.name')} htmlFor="supplier-name" required>
+              <Input
+                id="supplier-name"
+                value={form.name}
+                placeholder={t('form.namePlaceholder')}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
+            </Field>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+              <Field label={t('form.contactPerson')} htmlFor="supplier-contact">
+                <Input
+                  id="supplier-contact"
+                  value={form.contactPerson}
+                  placeholder={t('form.contactPersonPlaceholder')}
+                  onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
+                />
+              </Field>
+              <Field label={t('form.email')} htmlFor="supplier-email">
+                <Input
+                  id="supplier-email"
+                  type="email"
+                  inputMode="email"
+                  value={form.email}
+                  placeholder={t('form.emailPlaceholder')}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                />
+              </Field>
+              <Field label={t('form.phone')} htmlFor="supplier-phone">
+                <Input
+                  id="supplier-phone"
+                  type="tel"
+                  inputMode="tel"
+                  value={form.phone}
+                  placeholder={t('form.phonePlaceholder')}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
+              </Field>
+              <Field
+                label={t('form.paymentTermsDays')}
+                htmlFor="supplier-terms"
+                hint={t('form.paymentTermsHint')}
+              >
+                <Input
+                  id="supplier-terms"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={form.paymentTermsDays}
+                  onChange={(e) =>
+                    setForm({ ...form, paymentTermsDays: parseInt(e.target.value, 10) || 0 })
+                  }
+                />
+              </Field>
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button
-              style={{ ...btnPrimary, opacity: creating || !createForm.name.trim() ? 0.6 : 1 }}
-              disabled={creating || !createForm.name.trim()}
-              onClick={handleCreate}
-            >
-              {creating ? t('actions.creating') : t('actions.create')}
-            </button>
-            <button
-              style={btnOutline}
-              onClick={() => {
-                setShowCreate(false);
-                setCreateForm({ ...emptyForm });
-              }}
-            >
+            <Field label={t('form.address')} htmlFor="supplier-address">
+              <Textarea
+                id="supplier-address"
+                value={form.address}
+                placeholder={t('form.addressPlaceholder')}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+              />
+            </Field>
+            {save.isError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {errorMessage(
+                  save.error,
+                  t(editingId ? 'messages.updateFailed' : 'messages.createFailed'),
+                )}
+              </p>
+            ) : null}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeForm}>
               {t('common:actions.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 15 }}>
-          {t('state.loading')}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && !error && suppliers.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 15 }}>
-          {search
-            ? t('empty.search', { search })
-            : t('empty.none')}
-        </div>
-      )}
-
-      {/* Table */}
-      {!loading && suppliers.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 14,
-              background: '#fff',
-              borderRadius: 8,
-              overflow: 'hidden',
-              border: '1px solid #e5e7eb',
-            }}
-          >
-            <thead>
-              <tr style={{ background: '#f8f9fa', textAlign: 'left' }}>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('table.name')}
-                </th>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('table.contactPerson')}
-                </th>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('table.email')}
-                </th>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('table.phone')}
-                </th>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('table.paymentTerms')}
-                </th>
-                <th style={{ padding: '10px 14px', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb', width: 180 }}>
-                  {t('table.actions')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((supplier) => {
-                const isEditing = editingId === supplier.id;
-                const isDeleting = deletingId === supplier.id;
-
-                return (
-                  <tr
-                    key={supplier.id}
-                    style={{
-                      borderBottom: '1px solid #e5e7eb',
-                      background: isEditing ? '#f0f4ff' : hoveredId === supplier.id ? '#f9fafb' : '#fff',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={() => setHoveredId(supplier.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                  >
-                    {isEditing ? (
-                      <>
-                        <td style={{ padding: '8px 14px' }}>
-                          <input
-                            style={{ ...inputStyle, width: '100%' }}
-                            value={editForm.name}
-                            onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                          />
-                        </td>
-                        <td style={{ padding: '8px 14px' }}>
-                          <input
-                            style={{ ...inputStyle, width: '100%' }}
-                            value={editForm.contactPerson}
-                            onChange={(e) => setEditForm((f) => ({ ...f, contactPerson: e.target.value }))}
-                          />
-                        </td>
-                        <td style={{ padding: '8px 14px' }}>
-                          <input
-                            type="email"
-                            style={{ ...inputStyle, width: '100%' }}
-                            value={editForm.email}
-                            onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-                          />
-                        </td>
-                        <td style={{ padding: '8px 14px' }}>
-                          <input
-                            type="tel"
-                            style={{ ...inputStyle, width: '100%' }}
-                            value={editForm.phone}
-                            onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
-                          />
-                        </td>
-                        <td style={{ padding: '8px 14px' }}>
-                          <input
-                            type="number"
-                            min={0}
-                            style={{ ...inputStyle, width: 80 }}
-                            value={editForm.paymentTermsDays}
-                            onChange={(e) =>
-                              setEditForm((f) => ({ ...f, paymentTermsDays: parseInt(e.target.value, 10) || 0 }))
-                            }
-                          />
-                        </td>
-                        <td style={{ padding: '8px 14px' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              style={{ ...btnPrimary, padding: '6px 12px', fontSize: 13, opacity: saving || !editForm.name.trim() ? 0.6 : 1 }}
-                              disabled={saving || !editForm.name.trim()}
-                              onClick={handleSave}
-                            >
-                              {saving ? t('common:actions.saving') : t('common:actions.save')}
-                            </button>
-                            <button
-                              style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                              onClick={cancelEdit}
-                            >
-                              {t('common:actions.cancel')}
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td style={{ padding: '10px 14px', color: '#111827', fontWeight: 500 }}>
-                          {supplier.name}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {supplier.contactPerson || <span style={{ color: '#9ca3af' }}>--</span>}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {supplier.email ? (
-                            <a href={`mailto:${supplier.email}`} style={{ color: '#2563eb', textDecoration: 'none' }}>
-                              {supplier.email}
-                            </a>
-                          ) : (
-                            <span style={{ color: '#9ca3af' }}>--</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {supplier.phone || <span style={{ color: '#9ca3af' }}>--</span>}
-                        </td>
-                        <td style={{ padding: '10px 14px', color: '#374151' }}>
-                          {t('table.days', { count: supplier.paymentTermsDays })}
-                        </td>
-                        <td style={{ padding: '10px 14px' }}>
-                          {isDeleting ? (
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 13, color: '#991b1b' }}>{t('delete.question')}</span>
-                              <button
-                                style={{ ...btnDanger, padding: '6px 12px', fontSize: 13 }}
-                                onClick={() => handleDelete(supplier.id)}
-                              >
-                                {t('common:actions.confirm')}
-                              </button>
-                              <button
-                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                                onClick={() => setDeletingId(null)}
-                              >
-                                {t('common:actions.no')}
-                              </button>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              <button
-                                style={{ ...btnOutline, padding: '6px 12px', fontSize: 13 }}
-                                onClick={() => startEdit(supplier)}
-                              >
-                                {t('common:actions.edit')}
-                              </button>
-                              <button
-                                style={{ ...btnDanger, padding: '6px 12px', fontSize: 13 }}
-                                onClick={() => setDeletingId(supplier.id)}
-                              >
-                                {t('common:actions.delete')}
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!formValid || save.isPending}
+              onClick={() => save.mutate({ id: editingId, values: form })}
+            >
+              {editingId
+                ? save.isPending
+                  ? t('common:actions.saving')
+                  : t('common:actions.save')
+                : save.isPending
+                  ? t('actions.creating')
+                  : t('actions.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }

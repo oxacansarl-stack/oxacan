@@ -1,8 +1,49 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiPost, apiPut, apiDelete, apiDownload } from '../lib/api';
+import {
+  CalendarDays,
+  Check,
+  CircleCheck,
+  Download,
+  FileText,
+  ListChecks,
+  MoreHorizontal,
+  NotebookPen,
+  Plus,
+  Save,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
+import { ApiError, apiDelete, apiDownload, apiGet, apiPost, apiPut } from '../lib/api';
 import { formatDate, statusLabel } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardContent, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select, Textarea } from '@/components/ui/input';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, Skeleton, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -21,12 +62,14 @@ interface Attendee {
   organization?: string;
 }
 
+type ActionStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
+
 interface ActionItem {
   id: string;
   description: string;
   responsible: string;
   dueDate?: string;
-  status: 'open' | 'in_progress' | 'done' | 'cancelled';
+  status: ActionStatus;
 }
 
 interface Meeting {
@@ -44,77 +87,48 @@ interface Meeting {
   createdAt: string;
 }
 
+interface CreateForm {
+  projectId: string;
+  meetingDate: string;
+  location: string;
+  agenda: string;
+}
+
+interface AttendeeForm {
+  name: string;
+  role: string;
+  organization: string;
+}
+
+interface ActionForm {
+  description: string;
+  responsible: string;
+  dueDate: string;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  scheduled: { bg: '#dbeafe', fg: '#1d4ed8' },
-  completed: { bg: '#dcfce7', fg: '#166534' },
-};
+/** The statuses the list can be filtered by; '' is "all". `in_progress` is transient. */
+const STATUS_FILTERS = ['', 'scheduled', 'completed'] as const;
 
-const ACTION_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  open: { bg: '#fee2e2', fg: '#991b1b' },
-  in_progress: { bg: '#fef3c7', fg: '#92400e' },
-  done: { bg: '#dcfce7', fg: '#166534' },
-};
+/** The statuses an action item can be moved to from this page. */
+const ACTION_STATUSES = ['open', 'in_progress', 'done'] as const;
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
+/** An action still waiting on someone. */
+const OPEN_ACTION_STATUSES = new Set<ActionStatus>(['open', 'in_progress']);
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
+const emptyCreateForm = (): CreateForm => ({
+  projectId: '',
+  meetingDate: '',
+  location: '',
+  agenda: '',
+});
 
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
+const emptyAttendeeForm = (): AttendeeForm => ({ name: '', role: '', organization: '' });
 
-const btnDanger: React.CSSProperties = { ...btnPrimary, background: '#dc2626' };
-
-const btnSuccess: React.CSSProperties = { ...btnPrimary, background: '#16a34a' };
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '10px 12px',
-  borderBottom: '2px solid #e5e7eb',
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-  letterSpacing: 0.5,
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderBottom: '1px solid #f3f4f6',
-  fontSize: 14,
-};
+const emptyActionForm = (): ActionForm => ({ description: '', responsible: '', dueDate: '' });
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -127,29 +141,37 @@ function isPastDue(iso?: string): boolean {
   return due < new Date();
 }
 
+/** "2026-004 — Villa Dubois"; plain data, so it needs no translation. */
+function projectOption(project: Project | { name: string; reference?: string }): string {
+  return project.reference ? `${project.reference} — ${project.name}` : project.name;
+}
+
+function openActions(actions: ActionItem[] | undefined): number {
+  return (actions ?? []).filter((action) => OPEN_ACTION_STATUSES.has(action.status)).length;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function Meetings() {
   const { t } = useTranslation('meetings');
+  const confirm = useConfirm();
+
   /* ----- list state ----- */
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsError, setProjectsError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
-  /* ----- create form state ----- */
+  /* ----- create dialog state ----- */
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    projectId: '',
-    meetingDate: '',
-    location: '',
-    agenda: '',
-  });
+  const [createForm, setCreateForm] = useState<CreateForm>(emptyCreateForm);
   const [creating, setCreating] = useState(false);
+  const [createAlert, setCreateAlert] = useState('');
 
   /* ----- detail state ----- */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -158,19 +180,23 @@ export default function Meetings() {
   const [detailError, setDetailError] = useState('');
 
   /* ----- attendee form ----- */
-  const [attendeeForm, setAttendeeForm] = useState({ name: '', role: '', organization: '' });
+  const [attendeeForm, setAttendeeForm] = useState<AttendeeForm>(emptyAttendeeForm);
   const [addingAttendee, setAddingAttendee] = useState(false);
+  const [attendeeAlert, setAttendeeAlert] = useState('');
 
   /* ----- action form ----- */
-  const [actionForm, setActionForm] = useState({ description: '', responsible: '', dueDate: '' });
+  const [actionForm, setActionForm] = useState<ActionForm>(emptyActionForm);
   const [addingAction, setAddingAction] = useState(false);
+  const [actionAlert, setActionAlert] = useState('');
 
   /* ----- minutes ----- */
   const [minutesDraft, setMinutesDraft] = useState('');
   const [savingMinutes, setSavingMinutes] = useState(false);
+  const [minutesAlert, setMinutesAlert] = useState('');
 
-  /* ----- completing ----- */
+  /* ----- meeting-level actions (PV, clôture) ----- */
   const [completing, setCompleting] = useState(false);
+  const [meetingAlert, setMeetingAlert] = useState('');
 
   /* ---------------------------------------------------------------- */
   /*  Data fetching                                                    */
@@ -178,7 +204,7 @@ export default function Meetings() {
 
   const fetchMeetings = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setLoadError('');
     try {
       const params = new URLSearchParams();
       if (projectFilter) params.set('projectId', projectFilter);
@@ -186,45 +212,54 @@ export default function Meetings() {
       const qs = params.toString() ? `?${params.toString()}` : '';
       setMeetings(await apiGet<Meeting[]>(`/meetings${qs}`));
     } catch (err: unknown) {
-      setError(errorMessage(err, t('messages.loadFailed')));
+      setLoadError(
+        err instanceof ApiError && err.status === 401
+          ? t('loginRequired')
+          : errorMessage(err, t('messages.loadFailed')),
+      );
     } finally {
       setLoading(false);
     }
   }, [projectFilter, statusFilter, t]);
 
   const fetchProjects = useCallback(async () => {
+    setProjectsError('');
     try {
       setProjects(await apiGet<Project[]>('/projects?limit=100'));
-    } catch {
-      /* projects dropdown is best-effort */
-    }
-  }, []);
-
-  const fetchDetail = useCallback(async (id: string) => {
-    setDetailLoading(true);
-    setDetailError('');
-    try {
-      const res = await apiGet<Meeting>(`/meetings/${id}`);
-      setDetail(res);
-      setMinutesDraft(res.minutes ?? '');
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.detailFailed')));
-    } finally {
-      setDetailLoading(false);
+      // The dropdown is best-effort, but a failed load must not read as "no project".
+      setProjectsError(errorMessage(err, t('messages.projectsLoadFailed')));
     }
   }, [t]);
 
+  const fetchDetail = useCallback(
+    async (id: string) => {
+      setDetailLoading(true);
+      setDetailError('');
+      try {
+        const res = await apiGet<Meeting>(`/meetings/${id}`);
+        setDetail(res);
+        setMinutesDraft(res.minutes ?? '');
+      } catch (err: unknown) {
+        setDetailError(errorMessage(err, t('messages.detailFailed')));
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [t],
+  );
+
   useEffect(() => {
-    fetchProjects();
+    void fetchProjects();
   }, [fetchProjects]);
 
   useEffect(() => {
-    fetchMeetings();
+    void fetchMeetings();
   }, [fetchMeetings]);
 
   useEffect(() => {
     if (selectedId) {
-      fetchDetail(selectedId);
+      void fetchDetail(selectedId);
     } else {
       setDetail(null);
     }
@@ -234,9 +269,28 @@ export default function Meetings() {
   /*  Handlers                                                         */
   /* ---------------------------------------------------------------- */
 
+  /** A row opens its meeting below the list, and closes it when clicked again. */
+  const handleSelect = (id: string) => {
+    setDetail(null);
+    setDetailError('');
+    setAttendeeAlert('');
+    setActionAlert('');
+    setMinutesAlert('');
+    setMeetingAlert('');
+    setSelectedId((current) => (current === id ? null : id));
+  };
+
+  const closeCreate = () => {
+    setShowCreate(false);
+    setCreateAlert('');
+    setCreateForm(emptyCreateForm());
+  };
+
   const handleCreate = async () => {
+    if (creating) return;
     if (!createForm.projectId || !createForm.meetingDate) return;
     setCreating(true);
+    setCreateAlert('');
     try {
       const body: Record<string, string> = {
         projectId: createForm.projectId,
@@ -245,11 +299,11 @@ export default function Meetings() {
       if (createForm.location.trim()) body.location = createForm.location.trim();
       if (createForm.agenda.trim()) body.agenda = createForm.agenda;
       await apiPost('/meetings', body);
-      setCreateForm({ projectId: '', meetingDate: '', location: '', agenda: '' });
+      setCreateForm(emptyCreateForm());
       setShowCreate(false);
       await fetchMeetings();
     } catch (err: unknown) {
-      setError(errorMessage(err, t('messages.createFailed')));
+      setCreateAlert(errorMessage(err, t('messages.createFailed')));
     } finally {
       setCreating(false);
     }
@@ -258,15 +312,16 @@ export default function Meetings() {
   const handleAddAttendee = async () => {
     if (!detail || !attendeeForm.name) return;
     setAddingAttendee(true);
+    setAttendeeAlert('');
     try {
       const body: Record<string, string> = { name: attendeeForm.name };
       if (attendeeForm.role) body.role = attendeeForm.role;
       if (attendeeForm.organization) body.organization = attendeeForm.organization;
       await apiPost(`/meetings/${detail.id}/attendees`, body);
-      setAttendeeForm({ name: '', role: '', organization: '' });
+      setAttendeeForm(emptyAttendeeForm());
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.addAttendeeFailed')));
+      setAttendeeAlert(errorMessage(err, t('messages.addAttendeeFailed')));
     } finally {
       setAddingAttendee(false);
     }
@@ -274,17 +329,19 @@ export default function Meetings() {
 
   const handleRemoveAttendee = async (attendeeId: string) => {
     if (!detail) return;
+    setAttendeeAlert('');
     try {
       await apiDelete(`/meetings/${detail.id}/attendees/${attendeeId}`);
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.removeAttendeeFailed')));
+      setAttendeeAlert(errorMessage(err, t('messages.removeAttendeeFailed')));
     }
   };
 
   const handleAddAction = async () => {
     if (!detail || !actionForm.description || !actionForm.responsible) return;
     setAddingAction(true);
+    setActionAlert('');
     try {
       const body: Record<string, string> = {
         description: actionForm.description,
@@ -292,10 +349,10 @@ export default function Meetings() {
       };
       if (actionForm.dueDate) body.dueDate = actionForm.dueDate;
       await apiPost(`/meetings/${detail.id}/actions`, body);
-      setActionForm({ description: '', responsible: '', dueDate: '' });
+      setActionForm(emptyActionForm());
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.addActionFailed')));
+      setActionAlert(errorMessage(err, t('messages.addActionFailed')));
     } finally {
       setAddingAction(false);
     }
@@ -303,22 +360,24 @@ export default function Meetings() {
 
   const handleUpdateActionStatus = async (actionId: string, status: string) => {
     if (!detail) return;
+    setActionAlert('');
     try {
       await apiPut(`/meetings/${detail.id}/actions/${actionId}`, { status });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.updateActionFailed')));
+      setActionAlert(errorMessage(err, t('messages.updateActionFailed')));
     }
   };
 
   const handleSaveMinutes = async () => {
     if (!detail) return;
     setSavingMinutes(true);
+    setMinutesAlert('');
     try {
       await apiPut(`/meetings/${detail.id}`, { minutes: minutesDraft });
       await fetchDetail(detail.id);
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.saveMinutesFailed')));
+      setMinutesAlert(errorMessage(err, t('messages.saveMinutesFailed')));
     } finally {
       setSavingMinutes(false);
     }
@@ -326,601 +385,858 @@ export default function Meetings() {
 
   const handleComplete = async () => {
     if (!detail) return;
-    if (!window.confirm(t('messages.confirmComplete'))) return;
+    const ok = await confirm({
+      title: t('messages.confirmComplete'),
+      description: t('messages.confirmCompleteHelp'),
+      confirmLabel: t('detail.complete'),
+      tone: 'default',
+    });
+    if (!ok) return;
     setCompleting(true);
+    setMeetingAlert('');
     try {
       await apiPost(`/meetings/${detail.id}/complete`);
       await fetchDetail(detail.id);
       await fetchMeetings();
     } catch (err: unknown) {
-      setDetailError(errorMessage(err, t('messages.completeFailed')));
+      setMeetingAlert(errorMessage(err, t('messages.completeFailed')));
     } finally {
       setCompleting(false);
     }
   };
 
+  const handleDownloadPdf = () => {
+    if (!detail) return;
+    setMeetingAlert('');
+    void apiDownload(`/meetings/${detail.id}/pdf`).catch((err: unknown) =>
+      setMeetingAlert(errorMessage(err, t('messages.pdfFailed'))),
+    );
+  };
+
   /* ---------------------------------------------------------------- */
-  /*  Render                                                           */
+  /*  Derived                                                          */
   /* ---------------------------------------------------------------- */
+
+  const filtersActive = Boolean(projectFilter || statusFilter);
+  const createValid = Boolean(createForm.projectId && createForm.meetingDate);
+
+  // Only meaningful on the unfiltered view, where every status is present.
+  const scheduled = statusFilter ? null : meetings.filter((m) => m.status === 'scheduled').length;
+  const openActionTotal = meetings.reduce((sum, m) => sum + openActions(m.actions), 0);
+
+  const resetFilters = () => {
+    setProjectFilter('');
+    setStatusFilter('');
+  };
+
+  const detailPanel = detail ? (
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
+        {detail.agenda ? <AgendaCard agenda={detail.agenda} /> : null}
+
+        <AttendeesCard
+          attendees={detail.attendees ?? []}
+          form={attendeeForm}
+          setForm={setAttendeeForm}
+          adding={addingAttendee}
+          alert={attendeeAlert}
+          onAdd={() => void handleAddAttendee()}
+          onRemove={(id) => void handleRemoveAttendee(id)}
+        />
+
+        <ActionsCard
+          actions={detail.actions ?? []}
+          form={actionForm}
+          setForm={setActionForm}
+          adding={addingAction}
+          alert={actionAlert}
+          onAdd={() => void handleAddAction()}
+          onChangeStatus={(actionId, status) => void handleUpdateActionStatus(actionId, status)}
+        />
+
+        <MinutesCard
+          value={minutesDraft}
+          onChange={setMinutesDraft}
+          dirty={minutesDraft !== (detail.minutes ?? '')}
+          saving={savingMinutes}
+          alert={minutesAlert}
+          onSave={() => void handleSaveMinutes()}
+        />
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-5 lg:self-start">
+        <MeetingSummaryCard
+          meeting={detail}
+          alert={meetingAlert}
+          completing={completing}
+          onComplete={() => void handleComplete()}
+          onDownloadPdf={handleDownloadPdf}
+          onClose={() => setSelectedId(null)}
+        />
+      </div>
+    </div>
+  ) : null;
 
   return (
-    <div>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 20,
-        }}
-      >
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: 0 }}>
-          {t('title')}
-        </h1>
-        <button
-          style={btnPrimary}
-          onClick={() => setShowCreate((prev) => !prev)}
-        >
-          {t('newMeeting')}
-        </button>
-      </div>
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        kicker={t('common:navGroup.sites')}
+        meta={
+          <>
+            <span>{t('subtitle')}</span>
+            {scheduled ? (
+              <>
+                <MetaDivider />
+                <span>{t('meta.scheduled', { count: scheduled })}</span>
+              </>
+            ) : null}
+            {openActionTotal > 0 ? (
+              <>
+                <MetaDivider />
+                <span>{t('meta.openActions', { count: openActionTotal })}</span>
+              </>
+            ) : null}
+          </>
+        }
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setCreateAlert('');
+              setShowCreate(true);
+            }}
+          >
+            <Plus />
+            {t('actions.new')}
+          </Button>
+        }
+      />
 
-      {/* Filter row */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select
-          style={{ ...inputStyle, maxWidth: 260 }}
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-        >
-          <option value="">{t('filters.allProjects')}</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.reference ? `${p.reference} - ` : ''}{p.name}
-            </option>
-          ))}
-        </select>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['', 'scheduled', 'completed'] as const).map((s) => {
-            const label = s === '' ? t('filters.allStatuses') : statusLabel('meeting', s);
-            const active = statusFilter === s;
-            return (
-              <button
-                key={s}
-                style={{
-                  ...btnOutline,
-                  background: active ? '#2563eb' : '#fff',
-                  color: active ? '#fff' : '#374151',
-                  borderColor: active ? '#2563eb' : '#d1d5db',
-                }}
-                onClick={() => setStatusFilter(s)}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div style={{ color: '#dc2626', padding: '8px 0', fontSize: 14, marginBottom: 8 }}>
-          {error}
-        </div>
-      )}
-
-      {/* Create form */}
-      {showCreate && (
-        <div
-          style={{
-            background: '#f8f9fa',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            padding: 20,
-            marginBottom: 20,
-          }}
-        >
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            {t('form.title')}
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                {t('form.project')}
-              </label>
-              <select
-                style={inputStyle}
-                value={createForm.projectId}
-                onChange={(e) => setCreateForm((f) => ({ ...f, projectId: e.target.value }))}
-              >
-                <option value="">{t('form.selectProject')}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.reference ? `${p.reference} - ` : ''}{p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                {t('form.date')}
-              </label>
-              <input
-                type="date"
-                style={inputStyle}
-                value={createForm.meetingDate}
-                onChange={(e) => setCreateForm((f) => ({ ...f, meetingDate: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                {t('form.location')}
-              </label>
-              <input
-                style={inputStyle}
-                placeholder={t('form.locationPlaceholder')}
-                value={createForm.location}
-                onChange={(e) => setCreateForm((f) => ({ ...f, location: e.target.value }))}
-              />
-            </div>
-          </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-              {t('form.agenda')}
-            </label>
-            <textarea
-              style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder={t('form.agendaPlaceholder')}
-              value={createForm.agenda}
-              onChange={(e) => setCreateForm((f) => ({ ...f, agenda: e.target.value }))}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              style={btnPrimary}
-              onClick={handleCreate}
-              disabled={creating || !createForm.projectId || !createForm.meetingDate}
+      <Card>
+        <div className="flex flex-wrap items-end gap-3 border-b border-line-soft p-3">
+          <Field
+            label={t('filters.project')}
+            htmlFor="meeting-filter-project"
+            className="w-full sm:w-[260px]"
+          >
+            <Select
+              id="meeting-filter-project"
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
             >
-              {creating ? t('form.creating') : t('form.submit')}
-            </button>
-            <button style={btnOutline} onClick={() => setShowCreate(false)}>
-              {t('common:actions.cancel')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Meetings table */}
-      {loading ? (
-        <div style={{ color: '#6b7280', padding: 20 }}>{t('common:state.loading')}</div>
-      ) : meetings.length === 0 ? (
-        <div style={{ color: '#9ca3af', padding: 20, textAlign: 'center' }}>
-          {t('empty')}
-        </div>
-      ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              {(['number', 'date', 'project', 'location', 'status', 'actions', 'created'] as const).map((h) => (
-                <th key={h} style={thStyle}>{t(`table.${h}`)}</th>
+              <option value="">{t('filters.allProjects')}</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {projectOption(project)}
+                </option>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {meetings.map((m) => {
-              const colors = STATUS_COLORS[m.status] ?? STATUS_COLORS.scheduled;
-              const isSelected = selectedId === m.id;
-              return (
-                <React.Fragment key={m.id}>
-                  <tr
-                    onClick={() => setSelectedId(isSelected ? null : m.id)}
-                    style={{
-                      cursor: 'pointer',
-                      background: isSelected ? '#f0f4ff' : undefined,
-                    }}
-                    onMouseOver={(e) => {
-                      if (!isSelected) (e.currentTarget as HTMLElement).style.background = '#f9fafb';
-                    }}
-                    onMouseOut={(e) => {
-                      if (!isSelected) (e.currentTarget as HTMLElement).style.background = '';
-                    }}
-                  >
-                    <td style={{ ...tdStyle, fontWeight: 500 }}>
-                      {m.meetingNumber ?? m.id.slice(0, 8)}
-                    </td>
-                    <td style={tdStyle}>{formatDate(m.meetingDate)}</td>
-                    <td style={tdStyle}>{m.project?.name ?? '-'}</td>
-                    <td style={tdStyle}>{m.location ?? '-'}</td>
-                    <td style={tdStyle}>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '2px 10px',
-                          borderRadius: 12,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          background: colors.bg,
-                          color: colors.fg,
-                        }}
-                      >
-                        {statusLabel('meeting', m.status)}
-                      </span>
-                    </td>
-                    <td style={{ ...tdStyle, fontVariantNumeric: 'tabular-nums' }}>
-                      {m.actions?.length ?? 0}
-                    </td>
-                    <td style={{ ...tdStyle, fontSize: 13, color: '#6b7280' }}>
-                      {formatDate(m.createdAt)}
-                    </td>
-                  </tr>
+            </Select>
+          </Field>
 
-                  {/* Detail row */}
-                  {isSelected && (
-                    <tr>
-                      <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid #e5e7eb' }}>
-                        {detailLoading ? (
-                          <div style={{ padding: 24, color: '#6b7280' }}>{t('detail.loading')}</div>
-                        ) : detailError ? (
-                          <div style={{ padding: 24, color: '#dc2626' }}>{detailError}</div>
-                        ) : detail ? (
-                          <MeetingDetail
-                            detail={detail}
-                            attendeeForm={attendeeForm}
-                            setAttendeeForm={setAttendeeForm}
-                            addingAttendee={addingAttendee}
-                            onAddAttendee={handleAddAttendee}
-                            onRemoveAttendee={handleRemoveAttendee}
-                            actionForm={actionForm}
-                            setActionForm={setActionForm}
-                            addingAction={addingAction}
-                            onAddAction={handleAddAction}
-                            onUpdateActionStatus={handleUpdateActionStatus}
-                            minutesDraft={minutesDraft}
-                            setMinutesDraft={setMinutesDraft}
-                            savingMinutes={savingMinutes}
-                            onSaveMinutes={handleSaveMinutes}
-                            completing={completing}
-                            onComplete={handleComplete}
-                            onDownloadPdf={() =>
-                              apiDownload(`/meetings/${detail.id}/pdf`).catch((err) =>
-                                setDetailError(errorMessage(err, t('messages.pdfFailed'))),
-                              )
-                            }
-                          />
-                        ) : null}
-                      </td>
-                    </tr>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+            <span className="text-[13px] font-medium text-ink-2">{t('filters.status')}</span>
+            <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('filters.status')}>
+              {STATUS_FILTERS.map((value) => (
+                <button
+                  key={value || 'all'}
+                  type="button"
+                  aria-pressed={statusFilter === value}
+                  onClick={() => setStatusFilter(value)}
+                  className={cn(
+                    'rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-ink',
+                    statusFilter === value && 'bg-chalk font-medium text-ink',
                   )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+                >
+                  {value ? statusLabel('meeting', value) : t('filters.allStatuses')}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filtersActive ? (
+            <Button variant="quiet" size="sm" className="ml-auto" onClick={resetFilters}>
+              {t('filters.reset')}
+            </Button>
+          ) : null}
+        </div>
+
+        {projectsError ? (
+          <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+            {projectsError}
+          </p>
+        ) : null}
+
+        <DataState
+          isLoading={loading}
+          error={loadError || null}
+          onRetry={() => void fetchMeetings()}
+          isEmpty={meetings.length === 0}
+          loading={<TableSkeleton rows={6} cols={7} />}
+          empty={
+            filtersActive ? (
+              <EmptyState
+                icon={<CalendarDays className="size-5" />}
+                title={t('noMatch')}
+                description={t('noMatchHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={resetFilters}>
+                    {t('filters.reset')}
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<CalendarDays className="size-5" />}
+                title={t('empty')}
+                description={t('emptyHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={() => setShowCreate(true)}>
+                    <Plus />
+                    {t('actions.new')}
+                  </Button>
+                }
+              />
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('table.number')}</TH>
+                  <TH>{t('table.date')}</TH>
+                  <TH>{t('table.project')}</TH>
+                  <TH>{t('table.location')}</TH>
+                  <TH>{t('table.status')}</TH>
+                  <TH numeric>{t('table.actions')}</TH>
+                  <TH>{t('table.created')}</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {meetings.map((meeting) => {
+                  const isSelected = selectedId === meeting.id;
+                  const actionCount = meeting.actions?.length ?? 0;
+                  return (
+                    <TR
+                      key={meeting.id}
+                      onActivate={() => handleSelect(meeting.id)}
+                      aria-expanded={isSelected}
+                      aria-controls={isSelected ? 'meeting-detail' : undefined}
+                      className={cn(isSelected && '[&>td]:bg-chalk')}
+                    >
+                      <TD>
+                        <Ref>{meeting.meetingNumber ?? meeting.id.slice(0, 8)}</Ref>
+                      </TD>
+                      <TD className="tnum whitespace-nowrap">{formatDate(meeting.meetingDate)}</TD>
+                      <TD className={cn('font-medium', !meeting.project?.name && 'text-muted')}>
+                        {meeting.project?.name || '—'}
+                      </TD>
+                      <TD className={cn(!meeting.location && 'text-muted')}>
+                        {meeting.location || '—'}
+                      </TD>
+                      <TD>
+                        <StatusBadge domain="meeting" value={meeting.status} />
+                      </TD>
+                      <TD numeric className={cn(actionCount === 0 && 'text-muted')}>
+                        {actionCount}
+                      </TD>
+                      <TD className="tnum whitespace-nowrap text-muted">
+                        {formatDate(meeting.createdAt)}
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: meetings.length })}</span>
+            <span>{t('summary.sortedBy')}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      {/* The selected meeting: participants, actions, PV. */}
+      {selectedId ? (
+        <section
+          id="meeting-detail"
+          aria-label={t('detail.region')}
+          aria-busy={detailLoading || undefined}
+          className="grid grid-cols-[minmax(0,1fr)] gap-5"
+        >
+          <DataState
+            isLoading={!detail && !detailError}
+            error={detailError || null}
+            onRetry={() => void fetchDetail(selectedId)}
+            isEmpty={!detail}
+            loading={
+              <Card>
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3" role="status" aria-live="polite" aria-busy="true">
+                  <span className="sr-only">{t('detail.loading')}</span>
+                  <Skeleton className="h-3 w-44" />
+                  <Skeleton className="h-3 w-64" />
+                  <Skeleton className="h-24 w-full" />
+                </CardContent>
+              </Card>
+            }
+            empty={
+              <Card>
+                <EmptyState
+                  icon={<CalendarDays className="size-5" />}
+                  title={t('detail.unavailable')}
+                  description={t('detail.unavailableHelp')}
+                />
+              </Card>
+            }
+          >
+            {detailPanel}
+          </DataState>
+        </section>
+      ) : null}
+
+      {/* Create a meeting */}
+      <Dialog open={showCreate} onOpenChange={(open) => (open ? setShowCreate(true) : closeCreate())}>
+        <DialogContent>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreate();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{t('form.title')}</DialogTitle>
+              <DialogDescription>{t('form.help')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field label={t('form.project')} htmlFor="meeting-project" required>
+                <Select
+                  id="meeting-project"
+                  value={createForm.projectId}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, projectId: e.target.value }))}
+                >
+                  <option value="">{t('form.selectProject')}</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {projectOption(project)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+                <Field label={t('form.date')} htmlFor="meeting-date" required>
+                  <Input
+                    id="meeting-date"
+                    type="date"
+                    value={createForm.meetingDate}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, meetingDate: e.target.value }))}
+                  />
+                </Field>
+                <Field label={t('form.location')} htmlFor="meeting-location">
+                  <Input
+                    id="meeting-location"
+                    placeholder={t('form.locationPlaceholder')}
+                    value={createForm.location}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, location: e.target.value }))}
+                  />
+                </Field>
+              </div>
+              <Field label={t('form.agenda')} htmlFor="meeting-agenda">
+                <Textarea
+                  id="meeting-agenda"
+                  placeholder={t('form.agendaPlaceholder')}
+                  value={createForm.agenda}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, agenda: e.target.value }))}
+                />
+              </Field>
+              {projectsError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {projectsError}
+                </p>
+              ) : null}
+              {createAlert ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {createAlert}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={closeCreate}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={creating}
+                blockedReason={createValid ? undefined : t('form.incomplete')}
+              >
+                {creating ? t('form.creating') : t('form.submit')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Detail sub-component                                               */
+/*  Detail cards                                                       */
 /* ------------------------------------------------------------------ */
 
-interface MeetingDetailProps {
-  detail: Meeting;
-  attendeeForm: { name: string; role: string; organization: string };
-  setAttendeeForm: React.Dispatch<React.SetStateAction<{ name: string; role: string; organization: string }>>;
-  addingAttendee: boolean;
-  onAddAttendee: () => void;
-  onRemoveAttendee: (id: string) => void;
-  actionForm: { description: string; responsible: string; dueDate: string };
-  setActionForm: React.Dispatch<React.SetStateAction<{ description: string; responsible: string; dueDate: string }>>;
-  addingAction: boolean;
-  onAddAction: () => void;
-  onUpdateActionStatus: (actionId: string, status: string) => void;
-  minutesDraft: string;
-  setMinutesDraft: (v: string) => void;
-  savingMinutes: boolean;
-  onSaveMinutes: () => void;
-  completing: boolean;
-  onComplete: () => void;
-  onDownloadPdf: () => void;
+function AgendaCard({ agenda }: { agenda: string }) {
+  const { t } = useTranslation('meetings');
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <FileText aria-hidden className="size-4 text-muted" />
+          {t('detail.agenda')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="whitespace-pre-wrap break-words text-[13.5px] text-ink-2">{agenda}</p>
+      </CardContent>
+    </Card>
+  );
 }
 
-function MeetingDetail({
-  detail,
-  attendeeForm,
-  setAttendeeForm,
-  addingAttendee,
-  onAddAttendee,
-  onRemoveAttendee,
-  actionForm,
-  setActionForm,
-  addingAction,
-  onAddAction,
-  onUpdateActionStatus,
-  minutesDraft,
-  setMinutesDraft,
-  savingMinutes,
-  onSaveMinutes,
+function AttendeesCard({
+  attendees,
+  form,
+  setForm,
+  adding,
+  alert,
+  onAdd,
+  onRemove,
+}: {
+  attendees: Attendee[];
+  form: AttendeeForm;
+  setForm: Dispatch<SetStateAction<AttendeeForm>>;
+  adding: boolean;
+  alert: string;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const { t } = useTranslation('meetings');
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <Users aria-hidden className="size-4 text-muted" />
+          {t('detail.attendees.title')}
+          <CardCount>({attendees.length})</CardCount>
+        </CardTitle>
+      </CardHeader>
+
+      {attendees.length === 0 ? (
+        <EmptyState
+          icon={<Users className="size-5" />}
+          title={t('detail.attendees.empty')}
+          description={t('detail.attendees.emptyHelp')}
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <THead>
+              <tr>
+                <TH>{t('detail.attendees.name')}</TH>
+                <TH>{t('detail.attendees.role')}</TH>
+                <TH>{t('detail.attendees.organization')}</TH>
+                <TH className="w-11">
+                  <span className="sr-only">{t('detail.attendees.remove')}</span>
+                </TH>
+              </tr>
+            </THead>
+            <TBody>
+              {attendees.map((attendee) => (
+                <TR key={attendee.id}>
+                  <TD className="font-medium">{attendee.name}</TD>
+                  <TD className={cn(!attendee.role && 'text-muted')}>{attendee.role || '—'}</TD>
+                  <TD className={cn(!attendee.organization && 'text-muted')}>
+                    {attendee.organization || '—'}
+                  </TD>
+                  <TD className="w-11">
+                    <Button
+                      variant="quiet"
+                      size="iconSm"
+                      aria-label={t('detail.attendees.removeNamed', { name: attendee.name })}
+                      title={t('detail.attendees.remove')}
+                      onClick={() => onRemove(attendee.id)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </TableWrap>
+      )}
+
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t border-line-soft">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
+          <Field label={t('detail.attendees.nameLabel')} htmlFor="meeting-attendee-name" required>
+            <Input
+              id="meeting-attendee-name"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            />
+          </Field>
+          <Field label={t('detail.attendees.roleLabel')} htmlFor="meeting-attendee-role">
+            <Input
+              id="meeting-attendee-role"
+              value={form.role}
+              onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
+            />
+          </Field>
+          <Field
+            label={t('detail.attendees.organizationLabel')}
+            htmlFor="meeting-attendee-organization"
+          >
+            <Input
+              id="meeting-attendee-organization"
+              value={form.organization}
+              onChange={(e) => setForm((f) => ({ ...f, organization: e.target.value }))}
+            />
+          </Field>
+        </div>
+        {alert ? (
+          <p role="alert" className="text-[13px] text-bad">
+            {alert}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap">
+          <Button
+            variant="ghost"
+            onClick={onAdd}
+            disabled={adding}
+            blockedReason={form.name ? undefined : t('detail.attendees.nameRequired')}
+          >
+            <UserPlus />
+            {adding ? t('detail.attendees.adding') : t('detail.attendees.add')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ActionsCard({
+  actions,
+  form,
+  setForm,
+  adding,
+  alert,
+  onAdd,
+  onChangeStatus,
+}: {
+  actions: ActionItem[];
+  form: ActionForm;
+  setForm: Dispatch<SetStateAction<ActionForm>>;
+  adding: boolean;
+  alert: string;
+  onAdd: () => void;
+  onChangeStatus: (actionId: string, status: string) => void;
+}) {
+  const { t } = useTranslation('meetings');
+  const open = openActions(actions);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <ListChecks aria-hidden className="size-4 text-muted" />
+          {t('detail.actions.title')}
+          <CardCount>({actions.length})</CardCount>
+        </CardTitle>
+        {open > 0 ? (
+          <span className="text-[13px] text-muted">{t('detail.actions.open', { count: open })}</span>
+        ) : null}
+      </CardHeader>
+
+      {actions.length === 0 ? (
+        <EmptyState
+          icon={<ListChecks className="size-5" />}
+          title={t('detail.actions.empty')}
+          description={t('detail.actions.emptyHelp')}
+        />
+      ) : (
+        <TableWrap>
+          <Table>
+            <THead>
+              <tr>
+                <TH>{t('detail.actions.description')}</TH>
+                <TH>{t('detail.actions.responsible')}</TH>
+                <TH>{t('detail.actions.dueDate')}</TH>
+                <TH>{t('detail.actions.status')}</TH>
+                <TH className="w-11">
+                  <span className="sr-only">{t('detail.actions.rowActions')}</span>
+                </TH>
+              </tr>
+            </THead>
+            <TBody>
+              {actions.map((action) => {
+                const overdue = action.status !== 'done' && isPastDue(action.dueDate);
+                return (
+                  <TR key={action.id}>
+                    <TD className="font-medium">{action.description}</TD>
+                    <TD>{action.responsible}</TD>
+                    <TD className={cn('tnum whitespace-nowrap', overdue && 'font-medium text-bad')}>
+                      {action.dueDate ? formatDate(action.dueDate) : '—'}
+                      {overdue ? (
+                        <span className="ml-1.5 text-xs font-medium text-bad">
+                          {t('detail.actions.overdue')}
+                        </span>
+                      ) : null}
+                    </TD>
+                    <TD>
+                      <StatusBadge domain="meetingAction" value={action.status} />
+                    </TD>
+                    <TD className="w-11">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="quiet"
+                            size="iconSm"
+                            aria-label={t('detail.actions.rowActions')}
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuLabel>{t('detail.actions.changeStatus')}</DropdownMenuLabel>
+                          {ACTION_STATUSES.map((status) => (
+                            <DropdownMenuItem
+                              key={status}
+                              disabled={action.status === status}
+                              onSelect={() => onChangeStatus(action.id, status)}
+                            >
+                              {action.status === status ? (
+                                <Check />
+                              ) : (
+                                <span aria-hidden className="size-4" />
+                              )}
+                              {statusLabel('meetingAction', status)}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        </TableWrap>
+      )}
+
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t border-line-soft">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_150px]">
+          <Field
+            label={t('detail.actions.descriptionLabel')}
+            htmlFor="meeting-action-description"
+            required
+          >
+            <Input
+              id="meeting-action-description"
+              placeholder={t('detail.actions.descriptionPlaceholder')}
+              value={form.description}
+              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            />
+          </Field>
+          <Field
+            label={t('detail.actions.responsibleLabel')}
+            htmlFor="meeting-action-responsible"
+            required
+          >
+            <Input
+              id="meeting-action-responsible"
+              value={form.responsible}
+              onChange={(e) => setForm((f) => ({ ...f, responsible: e.target.value }))}
+            />
+          </Field>
+          <Field label={t('detail.actions.dueDateLabel')} htmlFor="meeting-action-due">
+            <Input
+              id="meeting-action-due"
+              type="date"
+              value={form.dueDate}
+              onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+            />
+          </Field>
+        </div>
+        {alert ? (
+          <p role="alert" className="text-[13px] text-bad">
+            {alert}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap">
+          <Button
+            variant="ghost"
+            onClick={onAdd}
+            disabled={adding}
+            blockedReason={
+              form.description && form.responsible ? undefined : t('detail.actions.required')
+            }
+          >
+            <Plus />
+            {adding ? t('detail.actions.adding') : t('detail.actions.add')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MinutesCard({
+  value,
+  onChange,
+  dirty,
+  saving,
+  alert,
+  onSave,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  dirty: boolean;
+  saving: boolean;
+  alert: string;
+  onSave: () => void;
+}) {
+  const { t } = useTranslation('meetings');
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <NotebookPen aria-hidden className="size-4 text-muted" />
+          {t('detail.minutes.title')}
+        </CardTitle>
+        {dirty ? (
+          <span className="text-[13px] text-muted">{t('detail.minutes.unsaved')}</span>
+        ) : null}
+      </CardHeader>
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
+        <Field label={t('detail.minutes.label')} htmlFor="meeting-minutes">
+          <Textarea
+            id="meeting-minutes"
+            className="min-h-[140px]"
+            placeholder={t('detail.minutes.placeholder')}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </Field>
+        {alert ? (
+          <p role="alert" className="text-[13px] text-bad">
+            {alert}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap">
+          <Button variant="ghost" onClick={onSave} disabled={saving}>
+            <Save />
+            {saving ? t('common:actions.saving') : t('detail.minutes.save')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="text-[13.5px] text-ink">{children}</dd>
+    </div>
+  );
+}
+
+function MeetingSummaryCard({
+  meeting,
+  alert,
   completing,
   onComplete,
   onDownloadPdf,
-}: MeetingDetailProps) {
+  onClose,
+}: {
+  meeting: Meeting;
+  alert: string;
+  completing: boolean;
+  onComplete: () => void;
+  onDownloadPdf: () => void;
+  onClose: () => void;
+}) {
   const { t } = useTranslation('meetings');
-  const attendees = detail.attendees ?? [];
-  const actions = detail.actions ?? [];
-  const colors = STATUS_COLORS[detail.status] ?? STATUS_COLORS.scheduled;
-
-  const sectionStyle: React.CSSProperties = {
-    marginBottom: 24,
-  };
-
-  const sectionTitle: React.CSSProperties = {
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#111827',
-    margin: '0 0 10px',
-  };
+  const attendees = meeting.attendees ?? [];
+  const actions = meeting.actions ?? [];
+  const open = openActions(actions);
 
   return (
-    <div style={{ padding: 24, background: '#fafbfc' }}>
-      {/* Meeting info */}
-      <div style={sectionStyle}>
-        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-          <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.project')}</span>
-            <span style={{ fontWeight: 500, color: '#111827' }}>
-              {detail.project?.name ?? '-'}
-              {detail.project?.reference ? ` (${detail.project.reference})` : ''}
-            </span>
-          </div>
-          <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.date')}</span>
-            <span style={{ fontWeight: 500, color: '#111827' }}>{formatDate(detail.meetingDate)}</span>
-          </div>
-          <div>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>{t('detail.location')}</span>
-            <span style={{ fontWeight: 500, color: '#111827' }}>{detail.location ?? '-'}</span>
-          </div>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '2px 10px',
-              borderRadius: 12,
-              fontSize: 12,
-              fontWeight: 600,
-              background: colors.bg,
-              color: colors.fg,
-            }}
-          >
-            {statusLabel('meeting', detail.status)}
-          </span>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <CalendarDays aria-hidden className="size-4 text-muted" />
+          {meeting.meetingNumber != null
+            ? t('detail.headingNumbered', { number: meeting.meetingNumber })
+            : t('detail.heading')}
+        </CardTitle>
+        <div className="flex items-center gap-2">
+          <StatusBadge domain="meeting" value={meeting.status} />
+          <Button variant="quiet" size="iconSm" aria-label={t('detail.close')} onClick={onClose}>
+            <X />
+          </Button>
         </div>
-      </div>
+      </CardHeader>
 
-      {/* Agenda */}
-      {detail.agenda && (
-        <div style={sectionStyle}>
-          <h4 style={sectionTitle}>{t('detail.agenda')}</h4>
-          <pre
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: 6,
-              padding: 12,
-              fontSize: 14,
-              color: '#374151',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              margin: 0,
-              fontFamily: 'inherit',
-            }}
-          >
-            {detail.agenda}
-          </pre>
-        </div>
-      )}
+      <CardContent>
+        <dl className="grid grid-cols-[minmax(0,1fr)] gap-3">
+          <SummaryRow label={t('detail.project')}>
+            <span className="font-medium">{meeting.project?.name ?? '—'}</span>
+            {meeting.project?.reference ? (
+              <>
+                {' '}
+                <Ref>{meeting.project.reference}</Ref>
+              </>
+            ) : null}
+          </SummaryRow>
+          <SummaryRow label={t('detail.date')}>
+            <span className="tnum">{formatDate(meeting.meetingDate)}</span>
+          </SummaryRow>
+          <SummaryRow label={t('detail.location')}>
+            {meeting.location || <span className="text-muted">—</span>}
+          </SummaryRow>
+          <SummaryRow label={t('detail.created')}>
+            <span className="tnum">{formatDate(meeting.createdAt)}</span>
+          </SummaryRow>
+          <SummaryRow label={t('detail.attendees.title')}>
+            <span className="tnum">{attendees.length}</span>
+          </SummaryRow>
+          <SummaryRow label={t('detail.actions.title')}>
+            <span className="tnum">{actions.length}</span>
+            {open > 0 ? (
+              <span className="text-muted"> · {t('detail.actions.open', { count: open })}</span>
+            ) : null}
+          </SummaryRow>
+        </dl>
+      </CardContent>
 
-      {/* Attendees */}
-      <div style={sectionStyle}>
-        <h4 style={sectionTitle}>{t('detail.attendees.title', { count: attendees.length })}</h4>
-        {attendees.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
-            <thead>
-              <tr>
-                {(['name', 'role', 'organization', ''] as const).map((h) => (
-                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{h ? t(`detail.attendees.${h}`) : ''}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {attendees.map((a) => (
-                <tr key={a.id}>
-                  <td style={tdStyle}>{a.name}</td>
-                  <td style={tdStyle}>{a.role ?? '-'}</td>
-                  <td style={tdStyle}>{a.organization ?? '-'}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>
-                    <button
-                      style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}
-                      onClick={() => onRemoveAttendee(a.id)}
-                    >
-                      {t('detail.attendees.remove')}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {attendees.length === 0 && (
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>{t('detail.attendees.empty')}</div>
-        )}
-        {/* Add attendee inline form */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.nameLabel')}</label>
-            <input
-              style={{ ...inputStyle, width: 180 }}
-              placeholder={t('detail.attendees.name')}
-              value={attendeeForm.name}
-              onChange={(e) => setAttendeeForm((f) => ({ ...f, name: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.roleLabel')}</label>
-            <input
-              style={{ ...inputStyle, width: 150 }}
-              placeholder={t('detail.attendees.role')}
-              value={attendeeForm.role}
-              onChange={(e) => setAttendeeForm((f) => ({ ...f, role: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.attendees.organizationLabel')}</label>
-            <input
-              style={{ ...inputStyle, width: 180 }}
-              placeholder={t('detail.attendees.organization')}
-              value={attendeeForm.organization}
-              onChange={(e) => setAttendeeForm((f) => ({ ...f, organization: e.target.value }))}
-            />
-          </div>
-          <button
-            style={{ ...btnPrimary, padding: '8px 12px', fontSize: 13 }}
-            onClick={onAddAttendee}
-            disabled={addingAttendee || !attendeeForm.name}
-          >
-            {addingAttendee ? t('detail.attendees.adding') : t('detail.attendees.add')}
-          </button>
-        </div>
-      </div>
+      {alert ? (
+        <p role="alert" className="border-t border-line-soft px-4 py-2.5 text-[13px] text-bad">
+          {alert}
+        </p>
+      ) : null}
 
-      {/* Action Items */}
-      <div style={sectionStyle}>
-        <h4 style={sectionTitle}>{t('detail.actions.title', { count: actions.length })}</h4>
-        {actions.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
-            <thead>
-              <tr>
-                {(['description', 'responsible', 'dueDate', 'status'] as const).map((h) => (
-                  <th key={h} style={{ ...thStyle, fontSize: 12 }}>{t(`detail.actions.${h}`)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {actions.map((a) => {
-                const ac = ACTION_STATUS_COLORS[a.status] ?? ACTION_STATUS_COLORS.open;
-                const overdue = a.status !== 'done' && isPastDue(a.dueDate);
-                return (
-                  <tr key={a.id}>
-                    <td style={tdStyle}>{a.description}</td>
-                    <td style={tdStyle}>{a.responsible}</td>
-                    <td style={{ ...tdStyle, color: overdue ? '#dc2626' : undefined, fontWeight: overdue ? 600 : undefined }}>
-                      {a.dueDate ? formatDate(a.dueDate) : '-'}
-                      {overdue && <span style={{ fontSize: 11, marginLeft: 4 }}>{t('detail.actions.overdue')}</span>}
-                    </td>
-                    <td style={tdStyle}>
-                      <select
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: 10,
-                          border: 'none',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          background: ac.bg,
-                          color: ac.fg,
-                          cursor: 'pointer',
-                          outline: 'none',
-                        }}
-                        value={a.status}
-                        onChange={(e) => onUpdateActionStatus(a.id, e.target.value)}
-                      >
-                        <option value="open">{statusLabel('meetingAction', 'open')}</option>
-                        <option value="in_progress">{statusLabel('meetingAction', 'in_progress')}</option>
-                        <option value="done">{statusLabel('meetingAction', 'done')}</option>
-                      </select>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-        {actions.length === 0 && (
-          <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 12 }}>{t('detail.actions.empty')}</div>
-        )}
-        {/* Add action inline form */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.descriptionLabel')}</label>
-            <input
-              style={{ ...inputStyle, width: 240 }}
-              placeholder={t('detail.actions.descriptionPlaceholder')}
-              value={actionForm.description}
-              onChange={(e) => setActionForm((f) => ({ ...f, description: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.responsibleLabel')}</label>
-            <input
-              style={{ ...inputStyle, width: 160 }}
-              placeholder={t('detail.actions.responsiblePlaceholder')}
-              value={actionForm.responsible}
-              onChange={(e) => setActionForm((f) => ({ ...f, responsible: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 2 }}>{t('detail.actions.dueDateLabel')}</label>
-            <input
-              type="date"
-              style={{ ...inputStyle, width: 160 }}
-              value={actionForm.dueDate}
-              onChange={(e) => setActionForm((f) => ({ ...f, dueDate: e.target.value }))}
-            />
-          </div>
-          <button
-            style={{ ...btnPrimary, padding: '8px 12px', fontSize: 13 }}
-            onClick={onAddAction}
-            disabled={addingAction || !actionForm.description || !actionForm.responsible}
-          >
-            {addingAction ? t('detail.actions.adding') : t('detail.actions.add')}
-          </button>
-        </div>
-      </div>
-
-      {/* Minutes */}
-      <div style={sectionStyle}>
-        <h4 style={sectionTitle}>{t('detail.minutes.title')}</h4>
-        <textarea
-          style={{ ...inputStyle, minHeight: 120, resize: 'vertical', marginBottom: 8 }}
-          placeholder={t('detail.minutes.placeholder')}
-          value={minutesDraft}
-          onChange={(e) => setMinutesDraft(e.target.value)}
-        />
-        <div>
-          <button
-            style={btnPrimary}
-            onClick={onSaveMinutes}
-            disabled={savingMinutes}
-          >
-            {savingMinutes ? t('common:actions.saving') : t('detail.minutes.save')}
-          </button>
-        </div>
-      </div>
-
-      {/* Complete meeting */}
-      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 16, display: 'flex', gap: 8 }}>
-        <button style={btnOutline} onClick={onDownloadPdf}>
+      <CardContent className="flex flex-wrap gap-2 border-t border-line-soft">
+        <Button variant="ghost" onClick={onDownloadPdf}>
+          <Download />
           {t('detail.downloadPdf')}
-        </button>
-        {detail.status === 'scheduled' && (
-          <button
-            style={btnSuccess}
-            onClick={onComplete}
-            disabled={completing}
-          >
+        </Button>
+        {meeting.status === 'scheduled' ? (
+          <Button variant="ghost" onClick={onComplete} disabled={completing}>
+            <CircleCheck />
             {completing ? t('detail.completing') : t('detail.complete')}
-          </button>
-        )}
-      </div>
-    </div>
+          </Button>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

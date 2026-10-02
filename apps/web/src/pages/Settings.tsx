@@ -1,10 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiPut, apiPost, apiList } from '../lib/api';
+import { CreditCard, Receipt, X } from 'lucide-react';
+import { apiGet, apiList, apiPost, apiPut } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
-import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { enumLabel, formatDate, formatMoney } from '../lib/format';
 import { errorMessage } from '../lib/errors';
 import type { PageProps } from '../lib/page-props';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tag } from '@/components/ui/badge';
+import { Field, Input } from '@/components/ui/input';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, LoadingState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -48,119 +59,56 @@ interface BillingEvent {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#dc2626',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  textAlign: 'left',
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  fontSize: 14,
-  color: '#111827',
-  borderTop: '1px solid #f3f4f6',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  display: 'block',
-  marginBottom: 4,
-  fontWeight: 600,
-};
-
-const sectionStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: 24,
-  marginBottom: 24,
-};
-
-/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
+/** Swiss 5-centime rounding, as the invoice total is rounded before it is charged. */
 const displayCHF = (cents: number): string => formatMoney(Math.round(cents / 5) * 5);
-
-const TIER_COLORS: Record<string, { bg: string; fg: string }> = {
-  solo: { bg: '#dbeafe', fg: '#1d4ed8' },
-  equipe: { bg: '#ede9fe', fg: '#7c3aed' },
-  entreprise: { bg: '#fef3c7', fg: '#92400e' },
-};
-
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  active: { bg: '#dcfce7', fg: '#166534' },
-  trialing: { bg: '#fef3c7', fg: '#92400e' },
-  cancelled: { bg: '#fee2e2', fg: '#dc2626' },
-  past_due: { bg: '#fee2e2', fg: '#dc2626' },
-};
-
-/* ------------------------------------------------------------------ */
-/*  Component                                                          */
-/* ------------------------------------------------------------------ */
 
 /** "CH4431999123000889012" → "CH44 3199 9123 0008 8901 2" (as printed by banks). */
 function formatIban(value: string): string {
   return value.replace(/\s+/g, '').replace(/(.{4})/g, '$1 ').trim();
 }
 
+/** One read-only label/value pair in a details grid. */
+function Detail({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
+      <dt className="text-xs font-medium text-muted">{label}</dt>
+      <dd className="min-w-0 break-words text-[13.5px] text-ink">{children}</dd>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
+
 export default function Settings({ embedded = false }: PageProps) {
   const { t } = useTranslation('settings');
+  const confirm = useConfirm();
   // Project managers may view the defaults; changing them and the subscription is admin-only.
   const isAdmin = useCurrentUser().role === 'ADMIN';
+
   const [settings, setSettings] = useState<CompanySettings>({});
   const [subscription, setSubscription] = useState<Subscription>({});
   const [seats, setSeats] = useState<SeatInfo>({ used: 0, total: 0 });
   const [billingEvents, setBillingEvents] = useState<BillingEvent[]>([]);
   const [billingPage, setBillingPage] = useState(1);
   const [billingTotalPages, setBillingTotalPages] = useState(1);
+
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [subLoading, setSubLoading] = useState(true);
+  const [subError, setSubError] = useState('');
+  const [billingLoading, setBillingLoading] = useState(true);
+  const [billingError, setBillingError] = useState('');
+
+  const [notice, setNotice] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [cancelError, setCancelError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   // Form state for editable defaults
   const [vatRate, setVatRate] = useState('');
@@ -180,29 +128,44 @@ export default function Settings({ embedded = false }: PageProps) {
       setGeoEnabled(data.geolocationEnabled ?? false);
       setIban(formatIban(data.iban ?? ''));
       setPaymentTermsDays(String(data.defaultPaymentTermsDays ?? 30));
+      setLoadError('');
     } catch (e: any) {
-      setError(errorMessage(e, t('messages.loadFailed')));
+      setLoadError(errorMessage(e, t('messages.loadFailed')));
     }
   }, [t]);
 
   const fetchSubscription = useCallback(async () => {
+    setSubLoading(true);
     try {
       const [sub, s] = await Promise.all([
         apiGet<Subscription>('/subscription'),
         apiGet<Partial<SeatInfo>>('/subscription/seats'),
       ]);
+      // A company without a subscription gets `null`, which the empty state covers; a real
+      // failure must not read as "no subscription", so it is reported instead of swallowed.
       setSubscription(sub ?? {});
       setSeats({ used: s?.used ?? 0, total: s?.total ?? 0 });
-    } catch { /* subscription may not exist */ }
-  }, []);
+      setSubError('');
+    } catch (e: any) {
+      setSubError(errorMessage(e, t('messages.subscriptionLoadFailed')));
+    } finally {
+      setSubLoading(false);
+    }
+  }, [t]);
 
   const fetchBilling = useCallback(async () => {
+    setBillingLoading(true);
     try {
       const { items, meta } = await apiList<BillingEvent>(`/subscription/billing?page=${billingPage}`);
       setBillingEvents(items);
       setBillingTotalPages(Math.max(1, meta?.totalPages ?? 1));
-    } catch { /* ignore */ }
-  }, [billingPage]);
+      setBillingError('');
+    } catch (e: any) {
+      setBillingError(errorMessage(e, t('messages.billingLoadFailed')));
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [billingPage, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -213,8 +176,8 @@ export default function Settings({ embedded = false }: PageProps) {
 
   const handleSaveDefaults = async () => {
     setSaving(true);
-    setError('');
-    setSuccess('');
+    setSaveError('');
+    setNotice('');
     // Percentages → basis points, factor → hundredths (integers, as the API expects).
     const toHundredths = (v: string) => Math.round(parseFloat(v) * 100);
     const payload = {
@@ -226,317 +189,400 @@ export default function Settings({ embedded = false }: PageProps) {
       defaultPaymentTermsDays: parseInt(paymentTermsDays, 10),
     };
     if (![payload.defaultVatRate, payload.defaultRetentionRate, payload.defaultMarginFactor, payload.defaultPaymentTermsDays].every(Number.isFinite)) {
-      setError(t('messages.invalidRates'));
+      setSaveError(t('messages.invalidRates'));
       setSaving(false);
       return;
     }
     try {
       await apiPut('/settings', payload);
-      setSuccess(t('messages.saved'));
+      setNotice(t('messages.saved'));
       fetchSettings();
     } catch (e: any) {
-      setError(errorMessage(e, t('messages.saveFailed')));
+      setSaveError(errorMessage(e, t('messages.saveFailed')));
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancelSubscription = async () => {
-    if (!confirm(t('subscription.confirmCancel'))) return;
+    const confirmed = await confirm({
+      title: t('subscription.cancel'),
+      description: t('subscription.confirmCancel'),
+      confirmLabel: t('subscription.cancelShort'),
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    setCancelling(true);
+    setCancelError('');
+    setNotice('');
     try {
       await apiPost('/subscription/cancel');
-      setSuccess(t('messages.subscriptionCancelled'));
+      setNotice(t('messages.subscriptionCancelled'));
       fetchSubscription();
     } catch (e: any) {
-      setError(errorMessage(e, t('messages.cancelFailed')));
+      setCancelError(errorMessage(e, t('messages.cancelFailed')));
+    } finally {
+      setCancelling(false);
     }
   };
 
-  if (loading) {
-    return <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loading')}</p>;
-  }
-
   const seatPct = seats.total > 0 ? Math.min(100, Math.round((seats.used / seats.total) * 100)) : 0;
+  const hasSubscription = Boolean(subscription.tier || subscription.status);
+  const canCancel = Boolean(subscription.status) && subscription.status !== 'cancelled';
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>{t('title')}</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
-      </div>
-
-      {error && (
-        <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
-        </div>
+    <PageBody>
+      {embedded ? null : (
+        <PageHeader
+          title={t('title')}
+          kicker={t('common:nav.admin')}
+          meta={<span>{t('subtitle')}</span>}
+        />
       )}
 
-      {success && (
-        <div style={{ background: '#dcfce7', color: '#166534', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {success}
-          <button onClick={() => setSuccess('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontWeight: 600 }} aria-label={t('common:actions.close')} title={t('common:actions.close')}>x</button>
+      {notice ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2.5 rounded-card border border-line bg-ok-bg px-3.5 py-2 text-[13px] text-ok"
+        >
+          <span>{notice}</span>
+          <Button
+            variant="quiet"
+            size="iconSm"
+            className="text-current"
+            aria-label={t('common:actions.close')}
+            onClick={() => setNotice('')}
+          >
+            <X />
+          </Button>
         </div>
-      )}
+      ) : null}
 
-      {/* Company Info */}
-      <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('company.title')}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <label style={labelStyle}>{t('company.name')}</label>
-            <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.companyName || '-'}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('company.legalName')}</label>
-            <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.legalName || '-'}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('company.address')}</label>
-            <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.address || '-'}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('company.vatNumber')}</label>
-            <div style={{ fontSize: 14, color: '#111827', padding: '8px 0' }}>{settings.vatNumber || '-'}</div>
-          </div>
-        </div>
-      </div>
+      {/* ---------------------------------------------------------------- */}
+      {/*  Company — read-only; the API has no edit endpoint for these.     */}
+      {/* ---------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('company.title')}</CardTitle>
+        </CardHeader>
+        <DataState
+          isLoading={loading}
+          error={loadError || null}
+          onRetry={() => void fetchSettings()}
+          loading={<LoadingState label={t('state.loading')} />}
+        >
+          <CardContent>
+            <dl className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
+              <Detail label={t('company.name')}>{settings.companyName || '—'}</Detail>
+              <Detail label={t('company.legalName')}>{settings.legalName || '—'}</Detail>
+              <Detail label={t('company.address')}>{settings.address || '—'}</Detail>
+              <Detail label={t('company.vatNumber')}>
+                {settings.vatNumber ? <Ref className="text-[13.5px] text-ink">{settings.vatNumber}</Ref> : '—'}
+              </Detail>
+            </dl>
+          </CardContent>
+        </DataState>
+      </Card>
 
-      {/* Defaults */}
-      <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('defaults.title')}</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 16 }}>
-          <div>
-            <label style={labelStyle}>{t('defaults.vatRate')}</label>
-            <input
-              type="number"
-              step="0.01"
-              style={inputStyle}
-              value={vatRate}
-              onChange={e => setVatRate(e.target.value)}
-              placeholder="8.10"
-            />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.vatRateHint')}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('defaults.retentionRate')}</label>
-            <input
-              type="number"
-              step="0.01"
-              style={inputStyle}
-              value={retentionRate}
-              onChange={e => setRetentionRate(e.target.value)}
-              placeholder="5.00"
-            />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.retentionRateHint')}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('defaults.marginFactor')}</label>
-            <input
-              type="number"
-              step="0.01"
-              style={inputStyle}
-              value={marginFactor}
-              onChange={e => setMarginFactor(e.target.value)}
-              placeholder="1.20"
-            />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('defaults.marginFactorHint')}</div>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16, marginBottom: 16 }}>
-          <div>
-            <label style={labelStyle}>{t('billing.iban')}</label>
-            <input
-              style={inputStyle}
-              value={iban}
-              onChange={e => setIban(e.target.value)}
-              placeholder="CH44 3199 9123 0008 8901 2"
-              disabled={!isAdmin}
-            />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('billing.ibanHint')}</div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('billing.paymentTerms')}</label>
-            <input
-              type="number"
-              min={0}
-              max={365}
-              style={inputStyle}
-              value={paymentTermsDays}
-              onChange={e => setPaymentTermsDays(e.target.value)}
-              disabled={!isAdmin}
-            />
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{t('billing.paymentTermsHint')}</div>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 14, color: '#111827' }}>
-            <input
-              type="checkbox"
-              checked={geoEnabled}
-              onChange={e => setGeoEnabled(e.target.checked)}
-              style={{ width: 16, height: 16 }}
-            />
-            {t('defaults.geolocation')}
-          </label>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, marginLeft: 24 }}>{t('defaults.geolocationHint')}</div>
-        </div>
-
-        {isAdmin && (
-          <button style={btnPrimary} onClick={handleSaveDefaults} disabled={saving}>
-            {saving ? t('common:actions.saving') : t('defaults.save')}
-          </button>
-        )}
-      </div>
-
-      {/* Subscription */}
-      {isAdmin && (
-      <div style={sectionStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, color: '#111827', margin: '0 0 16px' }}>{t('subscription.title')}</h2>
-
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 }}>
-          {subscription.tier && (
-            <span style={{
-              display: 'inline-block',
-              padding: '4px 14px',
-              borderRadius: 9999,
-              fontSize: 13,
-              fontWeight: 600,
-              background: (TIER_COLORS[subscription.tier] || TIER_COLORS.solo).bg,
-              color: (TIER_COLORS[subscription.tier] || TIER_COLORS.solo).fg,
-            }}>
-              {enumLabel('subscriptionTier', subscription.tier)}
-            </span>
-          )}
-          {subscription.status && (
-            <span style={{
-              display: 'inline-block',
-              padding: '4px 14px',
-              borderRadius: 9999,
-              fontSize: 13,
-              fontWeight: 500,
-              background: (STATUS_COLORS[subscription.status] || STATUS_COLORS.active).bg,
-              color: (STATUS_COLORS[subscription.status] || STATUS_COLORS.active).fg,
-            }}>
-              {statusLabel('subscription', subscription.status)}
-            </span>
-          )}
-        </div>
-
-        {/* Seat usage */}
-        {seats.total > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
-              <span>{t('subscription.seatUsage', { used: seats.used, count: seats.total })}</span>
-              <span>{seatPct}%</span>
-            </div>
-            <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
-              <div style={{
-                width: `${seatPct}%`,
-                height: '100%',
-                background: seatPct >= 90 ? '#dc2626' : seatPct >= 70 ? '#f59e0b' : '#2563eb',
-                borderRadius: 4,
-                transition: 'width 0.3s',
-              }} />
-            </div>
-          </div>
-        )}
-
-        {/* Period and trial info */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
-          <div>
-            <label style={labelStyle}>{t('subscription.periodStart')}</label>
-            <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.currentPeriodStart ? formatDate(subscription.currentPeriodStart) : '-'}
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('subscription.periodEnd')}</label>
-            <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.currentPeriodEnd ? formatDate(subscription.currentPeriodEnd) : '-'}
-            </div>
-          </div>
-          <div>
-            <label style={labelStyle}>{t('subscription.trialEnd')}</label>
-            <div style={{ fontSize: 14, color: '#111827' }}>
-              {subscription.trialEnd ? formatDate(subscription.trialEnd) : '-'}
-            </div>
-          </div>
-        </div>
-
-        {/* Billing history */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('billing.title')}</h3>
-        {billingEvents.length === 0 ? (
-          <p style={{ color: '#9ca3af', fontSize: 14, padding: '12px 0' }}>{t('billing.empty')}</p>
-        ) : (
-          <>
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f9fafb' }}>
-                  <tr>
-                    <th style={thStyle}>{t('billing.table.date')}</th>
-                    <th style={thStyle}>{t('billing.table.type')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('billing.table.amount')}</th>
-                    <th style={thStyle}>{t('billing.table.stripeEventId')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {billingEvents.map(evt => (
-                    <tr key={evt.id}>
-                      <td style={tdStyle}>{formatDate(evt.createdAt)}</td>
-                      <td style={tdStyle}>
-                        <span>{enumLabel('billingEvent', evt.type)}</span>
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                        {displayCHF(evt.amountCents)}
-                      </td>
-                      <td style={{ ...tdStyle, fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>
-                        {evt.stripeEventId || '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* ---------------------------------------------------------------- */}
+      {/*  Defaults — a project manager reads them, an admin edits them.    */}
+      {/* ---------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('defaults.title')}</CardTitle>
+        </CardHeader>
+        <DataState
+          isLoading={loading}
+          error={loadError || null}
+          onRetry={() => void fetchSettings()}
+          loading={<LoadingState label={t('state.loading')} />}
+        >
+          <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Field label={t('defaults.vatRate')} htmlFor="settings-vat" hint={t('defaults.vatRateHint')}>
+                <Input
+                  id="settings-vat"
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  className="tnum"
+                  placeholder="8.10"
+                  value={vatRate}
+                  onChange={(e) => setVatRate(e.target.value)}
+                  disabled={!isAdmin}
+                />
+              </Field>
+              <Field
+                label={t('defaults.retentionRate')}
+                htmlFor="settings-retention"
+                hint={t('defaults.retentionRateHint')}
+              >
+                <Input
+                  id="settings-retention"
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  className="tnum"
+                  placeholder="5.00"
+                  value={retentionRate}
+                  onChange={(e) => setRetentionRate(e.target.value)}
+                  disabled={!isAdmin}
+                />
+              </Field>
+              <Field
+                label={t('defaults.marginFactor')}
+                htmlFor="settings-margin"
+                hint={t('defaults.marginFactorHint')}
+              >
+                <Input
+                  id="settings-margin"
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  className="tnum"
+                  placeholder="1.20"
+                  value={marginFactor}
+                  onChange={(e) => setMarginFactor(e.target.value)}
+                  disabled={!isAdmin}
+                />
+              </Field>
             </div>
 
-            {billingTotalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
-                <button
-                  style={btnOutline}
-                  disabled={billingPage <= 1}
-                  onClick={() => setBillingPage(p => Math.max(1, p - 1))}
-                >
-                  {t('common:actions.previous')}
-                </button>
-                <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                  {t('common:state.page', { page: billingPage, total: billingTotalPages })}
-                </span>
-                <button
-                  style={btnOutline}
-                  disabled={billingPage >= billingTotalPages}
-                  onClick={() => setBillingPage(p => p + 1)}
-                >
-                  {t('common:actions.next')}
-                </button>
-              </div>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <Field label={t('billing.iban')} htmlFor="settings-iban" hint={t('billing.ibanHint')}>
+                <Input
+                  id="settings-iban"
+                  className="tnum"
+                  placeholder={t('billing.ibanPlaceholder')}
+                  value={iban}
+                  onChange={(e) => setIban(e.target.value)}
+                  disabled={!isAdmin}
+                />
+              </Field>
+              <Field
+                label={t('billing.paymentTerms')}
+                htmlFor="settings-terms"
+                hint={t('billing.paymentTermsHint')}
+              >
+                <Input
+                  id="settings-terms"
+                  type="number"
+                  min={0}
+                  max={365}
+                  inputMode="numeric"
+                  className="tnum"
+                  value={paymentTermsDays}
+                  onChange={(e) => setPaymentTermsDays(e.target.value)}
+                  disabled={!isAdmin}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+              <label
+                htmlFor="settings-geo"
+                className={cn(
+                  'flex items-center gap-2 text-[13.5px] text-ink',
+                  isAdmin ? 'cursor-pointer' : 'cursor-not-allowed',
+                )}
+              >
+                <input
+                  id="settings-geo"
+                  type="checkbox"
+                  className="size-3.5 shrink-0 accent-graphite disabled:cursor-not-allowed"
+                  checked={geoEnabled}
+                  onChange={(e) => setGeoEnabled(e.target.checked)}
+                  disabled={!isAdmin}
+                />
+                {t('defaults.geolocation')}
+              </label>
+              <p className="pl-[22px] text-xs text-muted">{t('defaults.geolocationHint')}</p>
+            </div>
+
+            {saveError ? (
+              <p role="alert" className="text-[13px] text-bad">
+                {saveError}
+              </p>
+            ) : null}
+          </CardContent>
+
+          <CardFooter>
+            {isAdmin ? (
+              <Button variant="primary" onClick={() => void handleSaveDefaults()} disabled={saving}>
+                {saving ? t('common:actions.saving') : t('defaults.save')}
+              </Button>
+            ) : (
+              <span>{t('defaults.readOnly')}</span>
             )}
-          </>
-        )}
+          </CardFooter>
+        </DataState>
+      </Card>
 
-        {/* Cancel subscription */}
-        {subscription.status && subscription.status !== 'cancelled' && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
-            <button style={btnDanger} onClick={handleCancelSubscription}>
-              {t('subscription.cancel')}
-            </button>
-            <span style={{ fontSize: 12, color: '#9ca3af', marginLeft: 12 }}>{t('subscription.cancelHint')}</span>
-          </div>
-        )}
-      </div>
-      )}
-    </div>
+      {/* ---------------------------------------------------------------- */}
+      {/*  Subscription — admin-only, read-only plus cancel; the company        */}
+      {/*  cannot edit tier, seats or dates, so nothing here is a form.         */}
+      {/* ---------------------------------------------------------------- */}
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('subscription.title')}</CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={subLoading}
+            error={subError || null}
+            onRetry={() => void fetchSubscription()}
+            isEmpty={!hasSubscription}
+            loading={<LoadingState label={t('state.loading')} />}
+            empty={
+              <EmptyState
+                icon={<CreditCard className="size-5" />}
+                title={t('subscription.empty')}
+                description={t('subscription.emptyHelp')}
+              />
+            }
+          >
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-5">
+              <dl className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Detail label={t('subscription.tierLabel')}>
+                  {subscription.tier ? <Tag>{enumLabel('subscriptionTier', subscription.tier)}</Tag> : '—'}
+                </Detail>
+                <Detail label={t('subscription.statusLabel')}>
+                  <StatusBadge domain="subscription" value={subscription.status} />
+                </Detail>
+                <Detail label={t('subscription.trialEnd')}>
+                  <span className="tnum">{formatDate(subscription.trialEnd)}</span>
+                </Detail>
+                <Detail label={t('subscription.periodStart')}>
+                  <span className="tnum">{formatDate(subscription.currentPeriodStart)}</span>
+                </Detail>
+                <Detail label={t('subscription.periodEnd')}>
+                  <span className="tnum">{formatDate(subscription.currentPeriodEnd)}</span>
+                </Detail>
+              </dl>
+
+              {seats.total > 0 ? (
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
+                    <span className="text-muted">
+                      {t('subscription.seatUsage', { used: seats.used, count: seats.total })}
+                    </span>
+                    <span className="tnum font-medium">{t('subscription.seatPct', { pct: seatPct })}</span>
+                  </div>
+                  <div aria-hidden className="h-2.5 overflow-hidden rounded-full bg-line-soft">
+                    {/* A bar's width is a runtime value — the one inline style the conventions allow. */}
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-[width] duration-300',
+                        seatPct >= 90 ? 'bg-bad' : seatPct >= 70 ? 'bg-warn' : 'bg-graphite',
+                      )}
+                      style={{ width: `${seatPct}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {cancelError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {cancelError}
+                </p>
+              ) : null}
+            </CardContent>
+
+            {canCancel ? (
+              <CardFooter>
+                <Button
+                  variant="danger"
+                  disabled={cancelling}
+                  onClick={() => void handleCancelSubscription()}
+                >
+                  {cancelling ? t('subscription.cancelling') : t('subscription.cancel')}
+                </Button>
+                <span>{t('subscription.cancelHint')}</span>
+              </CardFooter>
+            ) : null}
+          </DataState>
+        </Card>
+      ) : null}
+
+      {/* ---------------------------------------------------------------- */}
+      {/*  Billing history — admin-only, read-only.                        */}
+      {/* ---------------------------------------------------------------- */}
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('billing.title')}</CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={billingLoading}
+            error={billingError || null}
+            onRetry={() => void fetchBilling()}
+            isEmpty={billingEvents.length === 0}
+            loading={<TableSkeleton rows={4} cols={4} />}
+            empty={
+              <EmptyState
+                icon={<Receipt className="size-5" />}
+                title={t('billing.empty')}
+                description={t('billing.emptyHelp')}
+              />
+            }
+          >
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>{t('billing.table.date')}</TH>
+                    <TH>{t('billing.table.type')}</TH>
+                    <TH numeric>{t('billing.table.amount')}</TH>
+                    <TH>{t('billing.table.stripeEventId')}</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {billingEvents.map((evt) => (
+                    <TR key={evt.id}>
+                      <TD className="tnum whitespace-nowrap">{formatDate(evt.createdAt)}</TD>
+                      <TD>
+                        <Tag>{enumLabel('billingEvent', evt.type)}</Tag>
+                      </TD>
+                      <TD numeric className="font-medium">
+                        {displayCHF(evt.amountCents)}
+                      </TD>
+                      <TD>
+                        <Ref className="text-muted">{evt.stripeEventId || '—'}</Ref>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </TableWrap>
+            <CardFooter>
+              <span>{t('billing.count', { count: billingEvents.length })}</span>
+              {billingTotalPages > 1 ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={billingPage <= 1}
+                    onClick={() => setBillingPage((p) => Math.max(1, p - 1))}
+                  >
+                    {t('common:actions.previous')}
+                  </Button>
+                  <span className="tnum">
+                    {t('common:state.page', { page: billingPage, total: billingTotalPages })}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={billingPage >= billingTotalPages}
+                    onClick={() => setBillingPage((p) => Math.min(billingTotalPages, p + 1))}
+                  >
+                    {t('common:actions.next')}
+                  </Button>
+                </div>
+              ) : null}
+            </CardFooter>
+          </DataState>
+        </Card>
+      ) : null}
+    </PageBody>
   );
 }

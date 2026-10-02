@@ -4,18 +4,28 @@
   "unreadCount_other": "{{count}} notifications non lues",
   "allCaughtUp": "Vous êtes à jour",
   "actions": {
-    "markAllRead": "Tout marquer comme lu"
+    "markAllRead": "Tout marquer comme lu",
+    "markingAllRead": "Marquage…",
+    "markReadNamed": "Marquer « {{title}} » comme lu"
   },
   "tabs": {
+    "label": "Filtrer les notifications",
     "all": "Toutes",
     "unread": "Non lues"
   },
   "state": {
     "loading": "Chargement des notifications…"
   },
+  "summary": {
+    "count_one": "{{count}} notification sur {{total}}",
+    "count_other": "{{count}} notifications sur {{total}}",
+    "sortedBy": "Triées par date, la plus récente en premier"
+  },
   "empty": {
     "all": "Aucune notification",
-    "unread": "Aucune notification non lue"
+    "allHelp": "Les alertes sur vos offres, vos chantiers et vos factures apparaîtront ici.",
+    "unread": "Aucune notification non lue",
+    "unreadHelp": "Vous avez tout lu. Ouvrez l'onglet « Toutes » pour revoir les notifications passées."
   },
   "timeAgo": {
     "months_one": "il y a {{count}} mois",

@@ -93,12 +93,12 @@ function Group({
     />
   ));
 
-  if (!group.labelKey) return <div className="grid gap-px">{rows}</div>;
+  if (!group.labelKey) return <div className="grid grid-cols-[minmax(0,1fr)] gap-px">{rows}</div>;
 
   // In the rail the heading becomes a divider: the icons still read as groups.
   if (rail) {
     return (
-      <div className="grid gap-px">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-px">
         <span aria-hidden className="mx-3 my-2 h-px bg-graphite-3" />
         {rows}
       </div>
@@ -106,7 +106,7 @@ function Group({
   }
 
   return (
-    <div className="mt-2 grid gap-px">
+    <div className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-px">
       <button
         type="button"
         onClick={onToggle}
@@ -116,7 +116,7 @@ function Group({
         <span>{t(group.labelKey)}</span>
         <ChevronDown className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')} />
       </button>
-      {collapsed ? null : <div className="grid gap-px">{rows}</div>}
+      {collapsed ? null : <div className="grid grid-cols-[minmax(0,1fr)] gap-px">{rows}</div>}
     </div>
   );
 }

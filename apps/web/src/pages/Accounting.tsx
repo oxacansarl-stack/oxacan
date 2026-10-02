@@ -1,9 +1,46 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Lock,
+  MoreHorizontal,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { apiGet, apiList, apiPost } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
 import { errorMessage } from '../lib/errors';
 import { enumLabel, formatAmount, formatDate, formatMoney } from '../lib/format';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardCount, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select } from '@/components/ui/input';
+import { Badge, Tag } from '@/components/ui/badge';
+import { DataState, EmptyState } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TabCount, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -80,28 +117,30 @@ interface ExportEmployee {
   lastName: string;
 }
 
+/** Row of GET /accounting/trial-balance → { asOfDate, accounts, totals, isBalanced }. */
 interface TrialBalanceRow {
   accountId: string;
   accountNumber: string;
   accountName: string;
-  type: string;
-  debitCents: number;
-  creditCents: number;
+  accountType: string;
+  totalDebitCents: number;
+  totalCreditCents: number;
+  balanceCents: number;
+}
+
+interface TrialBalance {
+  asOfDate: string;
+  accounts: TrialBalanceRow[];
+  totalDebitCents: number;
+  totalCreditCents: number;
+  isBalanced: boolean;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const ACCOUNT_TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
-  asset: { bg: '#dbeafe', fg: '#1d4ed8' },
-  liability: { bg: '#fee2e2', fg: '#dc2626' },
-  equity: { bg: '#ede9fe', fg: '#7c3aed' },
-  revenue: { bg: '#dcfce7', fg: '#166534' },
-  expense: { bg: '#fef3c7', fg: '#92400e' },
-};
-
-const TABS = ['accounts', 'entries', 'ledger', 'export'] as const;
+const TABS = ['accounts', 'entries', 'ledger', 'balance', 'export'] as const;
 type Tab = typeof TABS[number];
 
 const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
@@ -112,6 +151,28 @@ const FIDUCIARY_CATEGORIES = ['materiel', 'deplacement', 'equipement', 'sous-tra
 /** §17.7 period selection. */
 const PERIOD_TYPES = ['month', 'quarter', 'year', 'custom'] as const;
 type PeriodType = typeof PERIOD_TYPES[number];
+
+/**
+ * Chart-of-accounts indentation as literal utility classes — the depth is data, but the
+ * spacing must stay in the design system rather than become an inline style.
+ */
+const INDENT = ['pl-0', 'pl-4', 'pl-8', 'pl-12', 'pl-16'] as const;
+const indentClass = (depth: number) => INDENT[Math.min(depth, INDENT.length - 1)];
+
+/** A native <option> collapses plain spaces, so the picker indents with non-breaking ones. */
+const NBSP = '\u00A0';
+
+const BLANK_ACCOUNT_FORM = {
+  accountNumber: '',
+  name: '',
+  type: 'asset' as Account['type'],
+  parentId: '',
+};
+
+const blankEntryLines = (): JournalEntryLine[] => [
+  { accountId: '', debitCents: 0, creditCents: 0 },
+  { accountId: '', debitCents: 0, creditCents: 0 },
+];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -145,7 +206,7 @@ const entryTotalDebit = (e: JournalEntry): number =>
 
 /** Column names of a CSV (first line), so the preview shows headers even for an empty file. */
 function parseCsvHeader(csv: string): string[] {
-  const first = csv.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] ?? '';
+  const first = csv.replace(/^﻿/, '').split(/\r?\n/, 1)[0] ?? '';
   return first ? first.split(';') : [];
 }
 
@@ -155,7 +216,7 @@ function parseCsv(csv: string): Record<string, string>[] {
   let row: string[] = [];
   let field = '';
   let quoted = false;
-  const text = csv.replace(/^\uFEFF/, '');
+  const text = csv.replace(/^﻿/, '');
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quoted) {
@@ -173,79 +234,50 @@ function parseCsv(csv: string): Record<string, string>[] {
   return body.map(r => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ''])));
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
+/** Parent-first order with the nesting depth of each account, for the indented list. */
+function flattenAccounts(items: Account[]): { account: Account; depth: number }[] {
+  const result: { account: Account; depth: number }[] = [];
+  // Build parent-child map
+  const childMap = new Map<string | undefined, Account[]>();
+  items.forEach(a => {
+    const key = a.parentId || '__root__';
+    if (!childMap.has(key)) childMap.set(key, []);
+    childMap.get(key)!.push(a);
+  });
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
+  const walk = (parentId: string | undefined, d: number) => {
+    const children = childMap.get(parentId || '__root__') ?? [];
+    children
+      .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
+      .forEach(a => {
+        result.push({ account: a, depth: d });
+        walk(a.id, d + 1);
+      });
+  };
+  walk(undefined, 0);
 
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
+  // If hierarchical walk found nothing (flat list), just sort by number
+  if (result.length === 0 && items.length > 0) {
+    return [...items]
+      .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
+      .map(a => ({ account: a, depth: 0 }));
+  }
+  return result;
+}
 
-const btnDanger: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#dc2626',
-};
-
-const btnSuccess: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#16a34a',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnWarning: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#f59e0b',
-};
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  textAlign: 'left',
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  display: 'block',
-  marginBottom: 4,
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  fontSize: 14,
-  color: '#111827',
-  borderTop: '1px solid #f3f4f6',
-};
+/** Downloads the CSV exactly as generated by the API (UTF-8 BOM, semicolons, CRLF, ISO dates). */
+function downloadCSV(csv: string, filename: string) {
+  if (!csv) return;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -253,59 +285,136 @@ const tdStyle: React.CSSProperties = {
 
 export default function Accounting() {
   const { t } = useTranslation('accounting');
-  // Project managers may only run the fiduciary export (PRD §3.2); the ledger is admin-only.
+  const confirm = useConfirm();
+  const queryClient = useQueryClient();
+
+  // Project managers may only run the fiduciary export (PRD §3.2); the rest is admin-only.
   const currentUser = useCurrentUser();
   const isAdmin = currentUser.role === 'ADMIN';
   const visibleTabs: readonly Tab[] = isAdmin ? TABS : ['export'];
-  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'accounts' : 'export');
-  const [error, setError] = useState('');
+
+  /** Failures of a row action (post, seed): shown in the card, never as window.alert. */
+  const [actionAlert, setActionAlert] = useState<string | null>(null);
+
+  // The open tab lives in ?tab=, so a section can be linked to and survives a reload.
+  const [params, setParams] = useSearchParams();
+  const requested = params.get('tab') ?? '';
+  const activeTab: Tab = (visibleTabs as readonly string[]).includes(requested)
+    ? (requested as Tab)
+    : visibleTabs[0];
+  const selectTab = (value: string) => {
+    setActionAlert(null);
+    const next = new URLSearchParams(params);
+    next.set('tab', value);
+    setParams(next, { replace: true });
+  };
 
   /* ============================================================ */
-  /*  Chart of Accounts state                                     */
+  /*  Chart of accounts                                           */
   /* ============================================================ */
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [accountsLoading, setAccountsLoading] = useState(false);
-  const [showAccountForm, setShowAccountForm] = useState(false);
-  const [accountForm, setAccountForm] = useState({
-    accountNumber: '',
-    name: '',
-    type: 'asset' as Account['type'],
-    parentId: '',
+  const [accountFormOpen, setAccountFormOpen] = useState(false);
+  const [accountForm, setAccountForm] = useState(BLANK_ACCOUNT_FORM);
+  const [accountFormError, setAccountFormError] = useState<string | null>(null);
+
+  const accountsQuery = useQuery({
+    queryKey: ['accounting', 'accounts'],
+    queryFn: async () => {
+      const items = await apiGet<Account[]>('/accounting/accounts?limit=500');
+      return Array.isArray(items) ? items : [];
+    },
+    // The chart also feeds the entry lines and the ledger picker.
+    enabled: isAdmin && (activeTab === 'accounts' || activeTab === 'entries' || activeTab === 'ledger'),
+    retry: false,
   });
 
+  const flatAccounts = useMemo(() => flattenAccounts(accountsQuery.data ?? []), [accountsQuery.data]);
+
   /* ============================================================ */
-  /*  Journal Entries state                                       */
+  /*  Journal entries                                             */
   /* ============================================================ */
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [entriesLoading, setEntriesLoading] = useState(false);
   const [entriesPage, setEntriesPage] = useState(1);
-  const [entriesTotalPages, setEntriesTotalPages] = useState(1);
   const [entryDateFrom, setEntryDateFrom] = useState('');
   const [entryDateTo, setEntryDateTo] = useState('');
   const [entryPostedFilter, setEntryPostedFilter] = useState<'' | 'true' | 'false'>('');
-  const [showEntryForm, setShowEntryForm] = useState(false);
+  const [entryFormOpen, setEntryFormOpen] = useState(false);
   const [entryForm, setEntryForm] = useState({
     entryDate: new Date().toISOString().slice(0, 10),
     description: '',
     referenceType: '',
   });
-  const [entryLines, setEntryLines] = useState<JournalEntryLine[]>([
-    { accountId: '', debitCents: 0, creditCents: 0 },
-    { accountId: '', debitCents: 0, creditCents: 0 },
-  ]);
-  const [entryError, setEntryError] = useState('');
+  const [entryLines, setEntryLines] = useState<JournalEntryLine[]>(blankEntryLines);
+  const [entryError, setEntryError] = useState<string | null>(null);
+
+  const entriesQuery = useQuery({
+    queryKey: ['accounting', 'entries', entriesPage, entryDateFrom, entryDateTo, entryPostedFilter],
+    queryFn: () => {
+      let path = `/accounting/entries?page=${entriesPage}`;
+      if (entryDateFrom) path += `&dateFrom=${entryDateFrom}`;
+      if (entryDateTo) path += `&dateTo=${entryDateTo}`;
+      if (entryPostedFilter) path += `&isPosted=${entryPostedFilter}`;
+      return apiList<JournalEntry>(path);
+    },
+    enabled: isAdmin && activeTab === 'entries',
+    retry: false,
+  });
+
+  const entries = entriesQuery.data?.items ?? [];
+  const entriesTotalPages = Math.max(1, entriesQuery.data?.meta?.totalPages ?? 1);
 
   /* ============================================================ */
-  /*  Ledger state                                                */
+  /*  Ledger — loaded on demand, never on account change alone     */
   /* ============================================================ */
   const [ledgerAccountId, setLedgerAccountId] = useState('');
   const [ledgerDateFrom, setLedgerDateFrom] = useState('');
   const [ledgerDateTo, setLedgerDateTo] = useState('');
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerRequest, setLedgerRequest] = useState<
+    { accountId: string; dateFrom: string; dateTo: string; run: number } | null
+  >(null);
+  const ledgerRun = useRef(0);
+
+  const ledgerQuery = useQuery({
+    queryKey: ['accounting', 'ledger', ledgerRequest],
+    queryFn: async () => {
+      const req = ledgerRequest!;
+      let path = `/accounting/ledger/${req.accountId}`;
+      const search: string[] = [];
+      if (req.dateFrom) search.push(`dateFrom=${req.dateFrom}`);
+      if (req.dateTo) search.push(`dateTo=${req.dateTo}`);
+      if (search.length) path += '?' + search.join('&');
+      const res = await apiGet<{ accountId: string; entries: LedgerEntry[] }>(path);
+      return res?.entries ?? [];
+    },
+    enabled: isAdmin && activeTab === 'ledger' && ledgerRequest !== null,
+    retry: false,
+  });
+
+  const ledgerEntries = ledgerQuery.data ?? [];
+  /**
+   * The closing-balance strip reads the last row. `DataState` takes its children as a built
+   * node, so they are evaluated before it can short-circuit on loading/error/empty — the row
+   * has to be looked up here and the strip guarded on it existing.
+   */
+  const lastLedgerEntry = ledgerEntries.at(-1);
 
   /* ============================================================ */
-  /*  Export state                                                */
+  /*  Trial balance                                               */
+  /* ============================================================ */
+  const [balanceAsOf, setBalanceAsOf] = useState('');
+
+  const balanceQuery = useQuery({
+    queryKey: ['accounting', 'trial-balance', balanceAsOf],
+    queryFn: () =>
+      apiGet<TrialBalance>(
+        `/accounting/trial-balance${balanceAsOf ? `?asOfDate=${balanceAsOf}` : ''}`,
+      ),
+    enabled: isAdmin && activeTab === 'balance',
+    retry: false,
+  });
+
+  const balanceRows = balanceQuery.data?.accounts ?? [];
+
+  /* ============================================================ */
+  /*  Fiduciary export                                            */
   /* ============================================================ */
   const today = new Date();
   const [exportPeriodType, setExportPeriodType] = useState<PeriodType>('month');
@@ -318,124 +427,168 @@ export default function Accounting() {
   const [exportEmployeeId, setExportEmployeeId] = useState('');
   const [exportCategory, setExportCategory] = useState('');
   const [exportFile, setExportFile] = useState<FiduciaryFileKey>('heures_employes');
-  const [exportProjects, setExportProjects] = useState<ExportProject[]>([]);
-  const [exportEmployees, setExportEmployees] = useState<ExportEmployee[]>([]);
-  const [exportData, setExportData] = useState<FiduciaryExport | null>(null);
-  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportRequest, setExportRequest] = useState<
+    { dateFrom: string; dateTo: string; projectId: string; employeeId: string; category: string; run: number } | null
+  >(null);
+  const exportRun = useRef(0);
 
-  /* ============================================================ */
-  /*  Trial Balance state                                         */
-  /* ============================================================ */
-  const [trialBalance, setTrialBalance] = useState<TrialBalanceRow[]>([]);
-  const [trialBalanceLoading, setTrialBalanceLoading] = useState(false);
+  // Filter options: a project manager only picks among their own projects (§17.6).
+  const exportProjectsQuery = useQuery({
+    queryKey: ['accounting', 'export-projects', isAdmin, currentUser.id],
+    queryFn: async () => {
+      const path = isAdmin
+        ? '/projects?limit=100'
+        : `/projects?limit=100&managerId=${encodeURIComponent(currentUser.id)}`;
+      const items = await apiGet<ExportProject[]>(path);
+      return Array.isArray(items) ? items : [];
+    },
+    enabled: activeTab === 'export',
+    retry: false,
+  });
 
-  /* ============================================================ */
-  /*  Data loading                                                */
-  /* ============================================================ */
+  const exportEmployeesQuery = useQuery({
+    queryKey: ['accounting', 'export-employees'],
+    queryFn: async () => {
+      const items = await apiGet<ExportEmployee[]>('/hr/employees?limit=200');
+      return Array.isArray(items) ? items : [];
+    },
+    enabled: activeTab === 'export',
+    retry: false,
+  });
 
-  const fetchAccounts = useCallback(async () => {
-    setAccountsLoading(true);
-    try {
-      const items = await apiGet<Account[]>('/accounting/accounts?limit=500');
-      setAccounts(Array.isArray(items) ? items : []);
-    } catch (e) {
-      setError(errorMessage(e, t('errors.loadAccounts')));
-    } finally {
-      setAccountsLoading(false);
+  const exportQuery = useQuery({
+    queryKey: ['accounting', 'fiduciary-export', exportRequest],
+    queryFn: () => {
+      const req = exportRequest!;
+      const search = new URLSearchParams({ dateFrom: req.dateFrom, dateTo: req.dateTo });
+      if (req.projectId) search.set('projectId', req.projectId);
+      if (req.employeeId) search.set('employeeId', req.employeeId);
+      if (req.category) search.set('category', req.category);
+      return apiGet<FiduciaryExport>(`/accounting/export/fiduciary?${search.toString()}`);
+    },
+    enabled: activeTab === 'export' && exportRequest !== null,
+    retry: false,
+  });
+
+  const exportData = exportQuery.data ?? null;
+
+  /** Each file parsed once per export, so switching file tabs never re-parses the CSV. */
+  const previews = useMemo(() => {
+    const out = {} as Record<
+      FiduciaryFileKey,
+      { file?: FiduciaryCsvFile; headers: string[]; rows: Record<string, string>[] }
+    >;
+    for (const key of FIDUCIARY_FILES) {
+      const file = exportData?.files?.[key];
+      out[key] = {
+        file,
+        headers: file ? parseCsvHeader(file.content) : [],
+        rows: file ? parseCsv(file.content) : [],
+      };
     }
-  }, []);
+    return out;
+  }, [exportData]);
 
-  const fetchEntries = useCallback(async () => {
-    setEntriesLoading(true);
-    try {
-      let path = `/accounting/entries?page=${entriesPage}`;
-      if (entryDateFrom) path += `&dateFrom=${entryDateFrom}`;
-      if (entryDateTo) path += `&dateTo=${entryDateTo}`;
-      if (entryPostedFilter) path += `&isPosted=${entryPostedFilter}`;
-      const { items, meta } = await apiList<JournalEntry>(path);
-      setEntries(items);
-      setEntriesTotalPages(Math.max(1, meta?.totalPages ?? 1));
-    } catch (e) {
-      setError(errorMessage(e, t('errors.loadEntries')));
-    } finally {
-      setEntriesLoading(false);
-    }
-  }, [entriesPage, entryDateFrom, entryDateTo, entryPostedFilter]);
+  /* ============================================================ */
+  /*  Mutations                                                   */
+  /* ============================================================ */
 
-  const fetchLedger = useCallback(async () => {
-    if (!ledgerAccountId) return;
-    setLedgerLoading(true);
-    try {
-      let path = `/accounting/ledger/${ledgerAccountId}`;
-      const params: string[] = [];
-      if (ledgerDateFrom) params.push(`dateFrom=${ledgerDateFrom}`);
-      if (ledgerDateTo) params.push(`dateTo=${ledgerDateTo}`);
-      if (params.length) path += '?' + params.join('&');
-      const res = await apiGet<{ accountId: string; entries: LedgerEntry[] }>(path);
-      setLedgerEntries(res?.entries ?? []);
-    } catch (e) {
-      setError(errorMessage(e, t('errors.loadLedger')));
-    } finally {
-      setLedgerLoading(false);
-    }
-  }, [ledgerAccountId, ledgerDateFrom, ledgerDateTo]);
+  const createAccount = useMutation({
+    mutationFn: (form: typeof accountForm) =>
+      apiPost('/accounting/accounts', {
+        accountNumber: form.accountNumber.trim(),
+        name: form.name.trim(),
+        type: form.type,
+        ...(form.parentId ? { parentId: form.parentId } : {}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounting', 'accounts'] });
+      setAccountFormOpen(false);
+      setAccountForm(BLANK_ACCOUNT_FORM);
+      setAccountFormError(null);
+    },
+  });
 
-  // Fetch data when tab changes
-  useEffect(() => {
-    if (activeTab === 'accounts') fetchAccounts();
-    if (activeTab === 'entries') { fetchAccounts(); fetchEntries(); }
-    if (activeTab === 'ledger') fetchAccounts();
-  }, [activeTab, fetchAccounts, fetchEntries]);
+  const seedAccounts = useMutation({
+    mutationFn: () => apiPost('/accounting/accounts/seed'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounting', 'accounts'] }),
+    onError: (e) => setActionAlert(errorMessage(e, t('errors.seedDefaults'))),
+  });
 
-  // Filter options for the fiduciary export: a project manager only picks among their own projects (§17.6).
-  useEffect(() => {
-    if (activeTab !== 'export') return;
-    const projectPath = isAdmin ? '/projects?limit=100' : `/projects?limit=100&managerId=${encodeURIComponent(currentUser.id)}`;
-    apiGet<ExportProject[]>(projectPath)
-      .then(items => setExportProjects(Array.isArray(items) ? items : []))
-      .catch(() => setExportProjects([]));
-    apiGet<ExportEmployee[]>('/hr/employees?limit=200')
-      .then(items => setExportEmployees(Array.isArray(items) ? items : []))
-      .catch(() => setExportEmployees([]));
-  }, [activeTab, isAdmin, currentUser.id]);
+  const createEntry = useMutation({
+    mutationFn: (payload: { form: typeof entryForm; lines: JournalEntryLine[] }) =>
+      apiPost('/accounting/entries', {
+        entryDate: payload.form.entryDate,
+        description: payload.form.description.trim(),
+        ...(payload.form.referenceType.trim() ? { referenceType: payload.form.referenceType.trim() } : {}),
+        lines: payload.lines.map(l => ({
+          accountId: l.accountId,
+          debitCents: l.debitCents,
+          creditCents: l.creditCents,
+        })),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounting', 'entries'] });
+      queryClient.invalidateQueries({ queryKey: ['accounting', 'trial-balance'] });
+      setEntryFormOpen(false);
+      setEntryForm({ entryDate: new Date().toISOString().slice(0, 10), description: '', referenceType: '' });
+      setEntryLines(blankEntryLines());
+      setEntryError(null);
+    },
+    onError: (e) => setEntryError(errorMessage(e, t('errors.createEntry'))),
+  });
+
+  const postEntry = useMutation({
+    mutationFn: (id: string) => apiPost(`/accounting/entries/${id}/post`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounting', 'entries'] });
+      queryClient.invalidateQueries({ queryKey: ['accounting', 'trial-balance'] });
+    },
+    onError: (e) => setActionAlert(errorMessage(e, t('errors.postEntry'))),
+  });
 
   /* ============================================================ */
   /*  Account actions                                             */
   /* ============================================================ */
 
-  const createAccount = async () => {
-    if (!accountForm.accountNumber || !accountForm.name) {
-      setError(t('validation.accountRequired'));
-      return;
-    }
-    try {
-      await apiPost('/accounting/accounts', {
-        accountNumber: accountForm.accountNumber.trim(),
-        name: accountForm.name.trim(),
-        type: accountForm.type,
-        ...(accountForm.parentId ? { parentId: accountForm.parentId } : {}),
-      });
-      setShowAccountForm(false);
-      setAccountForm({ accountNumber: '', name: '', type: 'asset', parentId: '' });
-      fetchAccounts();
-    } catch (e) {
-      setError(errorMessage(e, t('errors.createAccount')));
-    }
+  const openAccountForm = () => {
+    setAccountForm(BLANK_ACCOUNT_FORM);
+    setAccountFormError(null);
+    createAccount.reset();
+    setAccountFormOpen(true);
   };
 
-  const seedDefaults = async () => {
-    if (!confirm(t('confirm.seedDefaults'))) return;
-    try {
-      await apiPost('/accounting/accounts/seed');
-      fetchAccounts();
-    } catch (e) {
-      setError(errorMessage(e, t('errors.seedDefaults')));
+  const submitAccount = () => {
+    setAccountFormError(null);
+    if (!accountForm.accountNumber || !accountForm.name) {
+      setAccountFormError(t('validation.accountRequired'));
+      return;
     }
+    createAccount.mutate(accountForm);
+  };
+
+  const handleSeedDefaults = async () => {
+    setActionAlert(null);
+    const ok = await confirm({
+      title: t('confirm.seedDefaults.title'),
+      description: t('confirm.seedDefaults.description'),
+      confirmLabel: t('confirm.seedDefaults.confirm'),
+      tone: 'default',
+    });
+    if (!ok) return;
+    seedAccounts.mutate();
   };
 
   /* ============================================================ */
   /*  Journal entry actions                                       */
   /* ============================================================ */
+
+  const openEntryForm = () => {
+    setEntryError(null);
+    createEntry.reset();
+    setEntryFormOpen(true);
+  };
 
   const addEntryLine = () => {
     setEntryLines(prev => [...prev, { accountId: '', debitCents: 0, creditCents: 0 }]);
@@ -445,16 +598,20 @@ export default function Accounting() {
     setEntryLines(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const updateEntryLine = (idx: number, field: keyof JournalEntryLine, value: any) => {
-    setEntryLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+  const setLineAccount = (idx: number, accountId: string) => {
+    setEntryLines(prev => prev.map((l, i) => (i === idx ? { ...l, accountId } : l)));
+  };
+
+  const setLineAmount = (idx: number, field: 'debitCents' | 'creditCents', cents: number) => {
+    setEntryLines(prev => prev.map((l, i) => (i === idx ? { ...l, [field]: cents } : l)));
   };
 
   const totalDebits = entryLines.reduce((sum, l) => sum + l.debitCents, 0);
   const totalCredits = entryLines.reduce((sum, l) => sum + l.creditCents, 0);
   const isBalanced = totalDebits === totalCredits && totalDebits > 0;
 
-  const createEntry = async () => {
-    setEntryError('');
+  const submitEntry = () => {
+    setEntryError(null);
     if (!entryForm.entryDate || !entryForm.description) {
       setEntryError(t('validation.entryRequired'));
       return;
@@ -463,8 +620,7 @@ export default function Accounting() {
       setEntryError(t('validation.unbalanced'));
       return;
     }
-    const hasEmpty = entryLines.some(l => !l.accountId);
-    if (hasEmpty) {
+    if (entryLines.some(l => !l.accountId)) {
       setEntryError(t('validation.lineAccount'));
       return;
     }
@@ -473,803 +629,1056 @@ export default function Accounting() {
       setEntryError(t('validation.positiveAmounts'));
       return;
     }
-    try {
-      await apiPost('/accounting/entries', {
-        entryDate: entryForm.entryDate,
-        description: entryForm.description.trim(),
-        ...(entryForm.referenceType.trim() ? { referenceType: entryForm.referenceType.trim() } : {}),
-        lines: entryLines.map(l => ({
-          accountId: l.accountId,
-          debitCents: l.debitCents,
-          creditCents: l.creditCents,
-        })),
-      });
-      setShowEntryForm(false);
-      setEntryForm({ entryDate: new Date().toISOString().slice(0, 10), description: '', referenceType: '' });
-      setEntryLines([
-        { accountId: '', debitCents: 0, creditCents: 0 },
-        { accountId: '', debitCents: 0, creditCents: 0 },
-      ]);
-      fetchEntries();
-    } catch (e) {
-      setEntryError(errorMessage(e, t('errors.createEntry')));
-    }
+    createEntry.mutate({ form: entryForm, lines: entryLines });
   };
 
-  const postEntry = async (id: string) => {
-    if (!confirm(t('confirm.postEntry'))) return;
-    try {
-      await apiPost(`/accounting/entries/${id}/post`);
-      fetchEntries();
-    } catch (e) {
-      setError(errorMessage(e, t('errors.postEntry')));
-    }
+  /** The one entry whose posting is in flight, so only its own button says "Comptabilisation…". */
+  const postingEntryId = postEntry.isPending ? postEntry.variables : undefined;
+
+  const handlePostEntry = async (id: string) => {
+    setActionAlert(null);
+    const ok = await confirm({
+      title: t('confirm.postEntry.title'),
+      description: t('confirm.postEntry.description'),
+      confirmLabel: t('confirm.postEntry.confirm'),
+      tone: 'default',
+    });
+    if (!ok) return;
+    postEntry.mutate(id);
   };
 
   /* ============================================================ */
-  /*  Export actions                                               */
+  /*  Ledger & export actions                                     */
   /* ============================================================ */
 
-  const generateExport = async () => {
-    const range = periodRange(exportPeriodType, exportMonth, exportQuarter, exportYear, exportDateFrom, exportDateTo);
+  const loadLedger = () => {
+    if (!ledgerAccountId) return;
+    ledgerRun.current += 1;
+    setLedgerRequest({
+      accountId: ledgerAccountId,
+      dateFrom: ledgerDateFrom,
+      dateTo: ledgerDateTo,
+      run: ledgerRun.current,
+    });
+  };
+
+  const generateExport = () => {
+    setExportError(null);
+    const range = periodRange(
+      exportPeriodType, exportMonth, exportQuarter, exportYear, exportDateFrom, exportDateTo,
+    );
     if (!range) {
-      setError(t('validation.exportDates'));
+      setExportError(t('validation.exportDates'));
       return;
     }
     const [from, to] = range;
     if (from > to) {
-      setError(t('validation.exportRange'));
+      setExportError(t('validation.exportRange'));
       return;
     }
-    setExportLoading(true);
-    try {
-      const params = new URLSearchParams({ dateFrom: from, dateTo: to });
-      if (exportProjectId) params.set('projectId', exportProjectId);
-      if (exportEmployeeId) params.set('employeeId', exportEmployeeId);
-      if (exportCategory) params.set('category', exportCategory);
-      const res = await apiGet<FiduciaryExport>(`/accounting/export/fiduciary?${params.toString()}`);
-      setExportData(res);
-    } catch (e) {
-      setError(errorMessage(e, t('errors.generateExport')));
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  /** Downloads the CSV exactly as generated by the API (UTF-8 BOM, semicolons, CRLF, ISO dates). */
-  const downloadCSV = (csv: string, filename: string) => {
-    if (!csv) return;
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  /* ============================================================ */
-  /*  Build flattened accounts for display                        */
-  /* ============================================================ */
-
-  const flattenAccounts = (items: Account[], depth = 0): { account: Account; depth: number }[] => {
-    const result: { account: Account; depth: number }[] = [];
-    // Build parent-child map
-    const childMap = new Map<string | undefined, Account[]>();
-    items.forEach(a => {
-      const key = a.parentId || '__root__';
-      if (!childMap.has(key)) childMap.set(key, []);
-      childMap.get(key)!.push(a);
+    exportRun.current += 1;
+    setExportRequest({
+      dateFrom: from,
+      dateTo: to,
+      projectId: exportProjectId,
+      employeeId: exportEmployeeId,
+      category: exportCategory,
+      run: exportRun.current,
     });
-
-    const walk = (parentId: string | undefined, d: number) => {
-      const children = childMap.get(parentId || '__root__') ?? [];
-      children
-        .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
-        .forEach(a => {
-          result.push({ account: a, depth: d });
-          walk(a.id, d + 1);
-        });
-    };
-    walk(undefined, 0);
-
-    // If hierarchical walk found nothing (flat list), just sort by number
-    if (result.length === 0 && items.length > 0) {
-      return items
-        .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
-        .map(a => ({ account: a, depth: 0 }));
-    }
-    return result;
   };
-
-  const flatAccounts = flattenAccounts(accounts);
 
   /* ------------------------------------------------------------------ */
   /*  Render                                                             */
   /* ------------------------------------------------------------------ */
 
+  const accountOptions = flatAccounts.map(({ account: a, depth }) => (
+    <option key={a.id} value={a.id}>
+      {NBSP.repeat(depth * 2)}{a.accountNumber} — {a.name}
+    </option>
+  ));
+
   return (
-    <div>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
-      </div>
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        kicker={t('common:navGroup.finance')}
+        meta={<span>{isAdmin ? t('subtitle') : t('subtitleExportOnly')}</span>}
+      />
 
-      {error && (
-        <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }}>x</button>
-        </div>
-      )}
+      <Tabs value={activeTab} onValueChange={selectTab} className="grid grid-cols-[minmax(0,1fr)] gap-5">
+        {visibleTabs.length > 1 ? (
+          <TabsList aria-label={t('tabsLabel')}>
+            {visibleTabs.map(tab => (
+              <TabsTrigger key={tab} value={tab}>
+                {t(`tabs.${tab}`)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        ) : null}
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '2px solid #e5e7eb' }}>
-        {visibleTabs.map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: '10px 20px',
-              border: 'none',
-              borderBottom: activeTab === tab ? '2px solid #2563eb' : '2px solid transparent',
-              background: 'none',
-              color: activeTab === tab ? '#2563eb' : '#6b7280',
-              fontWeight: activeTab === tab ? 600 : 400,
-              fontSize: 14,
-              cursor: 'pointer',
-              marginBottom: -2,
-            }}
-          >
-            {t(`tabs.${tab}`)}
-          </button>
-        ))}
-      </div>
+        {/* ============================================================ */}
+        {/*  PLAN COMPTABLE — admin only                                 */}
+        {/* ============================================================ */}
+        {isAdmin ? (
+          <TabsContent value="accounts">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('tabs.accounts')}
+                  <CardCount>{flatAccounts.length}</CardCount>
+                </CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="primary" onClick={openAccountForm}>
+                    <Plus />
+                    {t('accounts.newAccount')}
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" aria-label={t('accounts.moreActions')}>
+                        <MoreHorizontal />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem
+                        disabled={seedAccounts.isPending}
+                        onSelect={() => {
+                          void handleSeedDefaults();
+                        }}
+                      >
+                        <Sparkles />
+                        {t('accounts.seedDefaults')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </CardHeader>
+
+              {actionAlert ? (
+                <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+                  {actionAlert}
+                </p>
+              ) : null}
+
+              <DataState
+                isLoading={accountsQuery.isPending}
+                error={accountsQuery.isError ? errorMessage(accountsQuery.error, t('errors.loadAccounts')) : null}
+                onRetry={() => accountsQuery.refetch()}
+                isEmpty={flatAccounts.length === 0}
+                empty={
+                  <EmptyState
+                    title={t('accounts.empty')}
+                    description={t('accounts.emptyHelp')}
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={seedAccounts.isPending}
+                        onClick={() => {
+                          void handleSeedDefaults();
+                        }}
+                      >
+                        <Sparkles />
+                        {t('accounts.seedDefaults')}
+                      </Button>
+                    }
+                  />
+                }
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('accounts.table.number')}</TH>
+                        <TH>{t('accounts.table.name')}</TH>
+                        <TH>{t('accounts.table.type')}</TH>
+                        <TH>{t('accounts.table.system')}</TH>
+                        <TH>{t('accounts.table.active')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {flatAccounts.map(({ account: a, depth }) => (
+                        <TR key={a.id}>
+                          <TD>
+                            <Ref className={cn('font-medium', indentClass(depth))}>{a.accountNumber}</Ref>
+                          </TD>
+                          <TD>
+                            <span className={cn('font-medium', indentClass(depth))}>{a.name}</span>
+                          </TD>
+                          <TD>
+                            <Tag>{enumLabel('accountType', a.type)}</Tag>
+                          </TD>
+                          <TD>
+                            {a.isSystem ? (
+                              <span className="inline-flex items-center text-muted" title={t('accounts.systemAccount')}>
+                                <Lock aria-hidden className="size-3.5" />
+                                <span className="sr-only">{t('accounts.systemAccount')}</span>
+                              </span>
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </TD>
+                          <TD>
+                            {a.isActive ? (
+                              <Badge tone="ok">{t('accounts.statusActive')}</Badge>
+                            ) : (
+                              <Badge tone="neutral">{t('accounts.statusInactive')}</Badge>
+                            )}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('accounts.count', { count: flatAccounts.length })}</span>
+                  <span>{t('accounts.hierarchy')}</span>
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
+        ) : null}
+
+        {/* ============================================================ */}
+        {/*  ÉCRITURES — admin only                                      */}
+        {/* ============================================================ */}
+        {isAdmin ? (
+          <TabsContent value="entries">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('tabs.entries')}
+                  <CardCount>{entries.length}</CardCount>
+                </CardTitle>
+                <Button variant="primary" onClick={openEntryForm}>
+                  <Plus />
+                  {t('entries.newEntry')}
+                </Button>
+              </CardHeader>
+
+              <div className="flex flex-wrap items-end gap-2.5 border-b border-line-soft p-3">
+                <Field className="w-[150px]" label={t('entries.from')} htmlFor="accounting-entries-from">
+                  <Input
+                    id="accounting-entries-from"
+                    type="date"
+                    value={entryDateFrom}
+                    onChange={e => { setEntryDateFrom(e.target.value); setEntriesPage(1); }}
+                  />
+                </Field>
+                <Field className="w-[150px]" label={t('entries.to')} htmlFor="accounting-entries-to">
+                  <Input
+                    id="accounting-entries-to"
+                    type="date"
+                    value={entryDateTo}
+                    onChange={e => { setEntryDateTo(e.target.value); setEntriesPage(1); }}
+                  />
+                </Field>
+                <Field className="w-[200px]" label={t('entries.status')} htmlFor="accounting-entries-status">
+                  <Select
+                    id="accounting-entries-status"
+                    value={entryPostedFilter}
+                    onChange={e => {
+                      setEntryPostedFilter(e.target.value as '' | 'true' | 'false');
+                      setEntriesPage(1);
+                    }}
+                  >
+                    <option value="">{t('entries.all')}</option>
+                    <option value="true">{t('entries.posted')}</option>
+                    <option value="false">{t('entries.unposted')}</option>
+                  </Select>
+                </Field>
+                <Button onClick={() => entriesQuery.refetch()}>{t('entries.apply')}</Button>
+              </div>
+
+              {actionAlert ? (
+                <p role="alert" className="border-b border-line-soft px-3.5 py-2.5 text-[13px] text-bad">
+                  {actionAlert}
+                </p>
+              ) : null}
+
+              <DataState
+                isLoading={entriesQuery.isPending}
+                error={entriesQuery.isError ? errorMessage(entriesQuery.error, t('errors.loadEntries')) : null}
+                onRetry={() => entriesQuery.refetch()}
+                isEmpty={entries.length === 0}
+                empty={<EmptyState title={t('entries.empty')} description={t('entries.emptyHelp')} />}
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('entries.table.entryNumber')}</TH>
+                        <TH>{t('entries.table.date')}</TH>
+                        <TH>{t('entries.table.description')}</TH>
+                        <TH>{t('entries.table.reference')}</TH>
+                        <TH>{t('entries.table.posted')}</TH>
+                        <TH numeric>{t('entries.table.total')}</TH>
+                        <TH>{t('entries.table.actions')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {entries.map(e => (
+                        <TR key={e.id}>
+                          <TD>
+                            <Ref>{e.entryNumber || e.id.slice(0, 8)}</Ref>
+                          </TD>
+                          <TD className="tnum">{formatDate(e.entryDate)}</TD>
+                          <TD className="font-medium">{e.description}</TD>
+                          <TD className="text-muted">{e.referenceType || '—'}</TD>
+                          <TD>
+                            {e.isPosted ? (
+                              <Badge tone="ok">{t('entries.isPosted')}</Badge>
+                            ) : (
+                              <Badge tone="neutral">{t('entries.notPosted')}</Badge>
+                            )}
+                          </TD>
+                          <TD numeric className="font-medium">{formatMoney(entryTotalDebit(e))}</TD>
+                          <TD>
+                            {e.isPosted ? (
+                              <span className="text-muted">—</span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                disabled={postEntry.isPending}
+                                onClick={() => {
+                                  void handlePostEntry(e.id);
+                                }}
+                              >
+                                {postingEntryId === e.id ? t('entries.posting') : t('entries.post')}
+                              </Button>
+                            )}
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('entries.count', { count: entries.length })}</span>
+                  {entriesTotalPages > 1 ? (
+                    <span className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="iconSm"
+                        aria-label={t('common:actions.previous')}
+                        disabled={entriesPage <= 1}
+                        onClick={() => setEntriesPage(p => Math.max(1, p - 1))}
+                      >
+                        <ChevronLeft />
+                      </Button>
+                      <span className="tnum">
+                        {t('common:state.page', { page: entriesPage, total: entriesTotalPages })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="iconSm"
+                        aria-label={t('common:actions.next')}
+                        disabled={entriesPage >= entriesTotalPages}
+                        onClick={() => setEntriesPage(p => p + 1)}
+                      >
+                        <ChevronRight />
+                      </Button>
+                    </span>
+                  ) : (
+                    <span>{t('entries.sortedBy')}</span>
+                  )}
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
+        ) : null}
+
+        {/* ============================================================ */}
+        {/*  GRAND LIVRE — admin only                                    */}
+        {/* ============================================================ */}
+        {isAdmin ? (
+          <TabsContent value="ledger">
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('tabs.ledger')}</CardTitle>
+              </CardHeader>
+
+              <div className="flex flex-wrap items-end gap-2.5 border-b border-line-soft p-3">
+                <Field
+                  className="min-w-[220px] flex-1"
+                  label={t('ledger.account')}
+                  htmlFor="accounting-ledger-account"
+                  required
+                >
+                  <Select
+                    id="accounting-ledger-account"
+                    value={ledgerAccountId}
+                    onChange={e => setLedgerAccountId(e.target.value)}
+                  >
+                    <option value="">{t('ledger.selectAccount')}</option>
+                    {accountOptions}
+                  </Select>
+                </Field>
+                <Field className="w-[150px]" label={t('ledger.from')} htmlFor="accounting-ledger-from">
+                  <Input
+                    id="accounting-ledger-from"
+                    type="date"
+                    value={ledgerDateFrom}
+                    onChange={e => setLedgerDateFrom(e.target.value)}
+                  />
+                </Field>
+                <Field className="w-[150px]" label={t('ledger.to')} htmlFor="accounting-ledger-to">
+                  <Input
+                    id="accounting-ledger-to"
+                    type="date"
+                    value={ledgerDateTo}
+                    onChange={e => setLedgerDateTo(e.target.value)}
+                  />
+                </Field>
+                <Button
+                  variant="primary"
+                  blockedReason={ledgerAccountId ? undefined : t('ledger.loadBlocked')}
+                  onClick={loadLedger}
+                >
+                  {t('ledger.load')}
+                </Button>
+              </div>
+
+              {ledgerRequest === null ? (
+                <EmptyState title={t('ledger.selectPrompt')} description={t('ledger.selectPromptHelp')} />
+              ) : (
+                <DataState
+                  isLoading={ledgerQuery.isPending}
+                  error={ledgerQuery.isError ? errorMessage(ledgerQuery.error, t('errors.loadLedger')) : null}
+                  onRetry={() => ledgerQuery.refetch()}
+                  isEmpty={ledgerEntries.length === 0}
+                  empty={<EmptyState title={t('ledger.empty')} description={t('ledger.emptyHelp')} />}
+                >
+                  <TableWrap>
+                    <Table>
+                      <THead>
+                        <tr>
+                          <TH>{t('ledger.table.date')}</TH>
+                          <TH>{t('ledger.table.entryNumber')}</TH>
+                          <TH>{t('ledger.table.description')}</TH>
+                          <TH numeric>{t('ledger.table.debit')}</TH>
+                          <TH numeric>{t('ledger.table.credit')}</TH>
+                          <TH numeric>{t('ledger.table.balance')}</TH>
+                        </tr>
+                      </THead>
+                      <TBody>
+                        {ledgerEntries.map((entry, idx) => (
+                          <TR key={`${entry.entryNumber}-${idx}`}>
+                            <TD className="tnum">{formatDate(entry.entryDate)}</TD>
+                            <TD>
+                              <Ref>{entry.entryNumber}</Ref>
+                            </TD>
+                            <TD>{entry.description}</TD>
+                            <TD numeric>{entry.debitCents > 0 ? formatAmount(entry.debitCents) : ''}</TD>
+                            <TD numeric>{entry.creditCents > 0 ? formatAmount(entry.creditCents) : ''}</TD>
+                            <TD numeric className={cn('font-medium', entry.balanceCents < 0 && 'text-bad')}>
+                              {formatMoney(entry.balanceCents)}
+                            </TD>
+                          </TR>
+                        ))}
+                      </TBody>
+                    </Table>
+                  </TableWrap>
+
+                  {lastLedgerEntry ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-line-soft bg-paper-2 px-3.5 py-3">
+                      <span className="text-[13px] font-medium text-muted">{t('ledger.closingBalance')}</span>
+                      <span
+                        className={cn(
+                          'tnum font-display text-xl font-semibold',
+                          lastLedgerEntry.balanceCents < 0 && 'text-bad',
+                        )}
+                      >
+                        {formatMoney(lastLedgerEntry.balanceCents)}
+                      </span>
+                    </div>
+                  ) : null}
+                  <CardFooter>
+                    <span>{t('ledger.count', { count: ledgerEntries.length })}</span>
+                  </CardFooter>
+                </DataState>
+              )}
+            </Card>
+          </TabsContent>
+        ) : null}
+
+        {/* ============================================================ */}
+        {/*  BALANCE — admin only                                        */}
+        {/* ============================================================ */}
+        {isAdmin ? (
+          <TabsContent value="balance">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('balance.title')}
+                  <CardCount>{balanceRows.length}</CardCount>
+                </CardTitle>
+              </CardHeader>
+
+              <div className="flex flex-wrap items-end justify-between gap-2.5 border-b border-line-soft p-3">
+                <Field
+                  className="w-[190px]"
+                  label={t('balance.asOfDate')}
+                  htmlFor="accounting-balance-asof"
+                  hint={t('balance.asOfHint')}
+                >
+                  <Input
+                    id="accounting-balance-asof"
+                    type="date"
+                    value={balanceAsOf}
+                    onChange={e => setBalanceAsOf(e.target.value)}
+                  />
+                </Field>
+                <p className="max-w-[46ch] text-[13px] text-muted">{t('balance.help')}</p>
+              </div>
+
+              <DataState
+                isLoading={balanceQuery.isPending}
+                error={balanceQuery.isError ? errorMessage(balanceQuery.error, t('errors.loadTrialBalance')) : null}
+                onRetry={() => balanceQuery.refetch()}
+                isEmpty={balanceRows.length === 0}
+                empty={<EmptyState title={t('balance.empty')} description={t('balance.emptyHelp')} />}
+              >
+                <TableWrap>
+                  <Table>
+                    <THead>
+                      <tr>
+                        <TH>{t('balance.table.number')}</TH>
+                        <TH>{t('balance.table.name')}</TH>
+                        <TH>{t('balance.table.type')}</TH>
+                        <TH numeric>{t('balance.table.debit')}</TH>
+                        <TH numeric>{t('balance.table.credit')}</TH>
+                        <TH numeric>{t('balance.table.balance')}</TH>
+                      </tr>
+                    </THead>
+                    <TBody>
+                      {balanceRows.map(row => (
+                        <TR key={row.accountId}>
+                          <TD>
+                            <Ref className="font-medium">{row.accountNumber}</Ref>
+                          </TD>
+                          <TD className="font-medium">{row.accountName}</TD>
+                          <TD>
+                            <Tag>{enumLabel('accountType', row.accountType)}</Tag>
+                          </TD>
+                          <TD numeric>{formatAmount(row.totalDebitCents)}</TD>
+                          <TD numeric>{formatAmount(row.totalCreditCents)}</TD>
+                          <TD numeric className={cn('font-medium', row.balanceCents < 0 && 'text-bad')}>
+                            {formatMoney(row.balanceCents)}
+                          </TD>
+                        </TR>
+                      ))}
+                      <TR className="bg-paper-2 font-medium">
+                        <TD colSpan={3}>{t('balance.totals')}</TD>
+                        <TD numeric>{formatAmount(balanceQuery.data?.totalDebitCents ?? 0)}</TD>
+                        <TD numeric>{formatAmount(balanceQuery.data?.totalCreditCents ?? 0)}</TD>
+                        <TD numeric>
+                          {formatMoney(
+                            (balanceQuery.data?.totalDebitCents ?? 0) - (balanceQuery.data?.totalCreditCents ?? 0),
+                          )}
+                        </TD>
+                      </TR>
+                    </TBody>
+                  </Table>
+                </TableWrap>
+                <CardFooter>
+                  <span>{t('balance.count', { count: balanceRows.length })}</span>
+                  {balanceQuery.data?.isBalanced ? (
+                    <Badge tone="ok">{t('balance.balanced')}</Badge>
+                  ) : (
+                    <Badge tone="bad">{t('balance.unbalanced')}</Badge>
+                  )}
+                </CardFooter>
+              </DataState>
+            </Card>
+          </TabsContent>
+        ) : null}
+
+        {/* ============================================================ */}
+        {/*  EXPORT FIDUCIAIRE — the one section a project manager sees   */}
+        {/* ============================================================ */}
+        <TabsContent value="export" className="grid grid-cols-[minmax(0,1fr)] gap-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('export.title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+              <p className="max-w-[80ch] text-[13.5px] text-muted">
+                {isAdmin ? t('export.help') : t('export.helpOwnProjects')}
+              </p>
+
+              <div className="flex flex-wrap items-end gap-2.5">
+                <Field className="w-[170px]" label={t('export.periodType')} htmlFor="accounting-export-periodtype">
+                  <Select
+                    id="accounting-export-periodtype"
+                    value={exportPeriodType}
+                    onChange={e => setExportPeriodType(e.target.value as PeriodType)}
+                  >
+                    {PERIOD_TYPES.map(p => (
+                      <option key={p} value={p}>{t(`export.periodTypes.${p}`)}</option>
+                    ))}
+                  </Select>
+                </Field>
+                {exportPeriodType === 'month' ? (
+                  <Field className="w-[180px]" label={t('export.month')} htmlFor="accounting-export-month" required>
+                    <Input
+                      id="accounting-export-month"
+                      type="month"
+                      value={exportMonth}
+                      onChange={e => setExportMonth(e.target.value)}
+                    />
+                  </Field>
+                ) : null}
+                {exportPeriodType === 'quarter' ? (
+                  <Field className="w-[130px]" label={t('export.quarter')} htmlFor="accounting-export-quarter" required>
+                    <Select
+                      id="accounting-export-quarter"
+                      value={exportQuarter}
+                      onChange={e => setExportQuarter(Number(e.target.value))}
+                    >
+                      {[1, 2, 3, 4].map(q => (
+                        <option key={q} value={q}>{t('export.quarterLabel', { quarter: q })}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : null}
+                {exportPeriodType === 'quarter' || exportPeriodType === 'year' ? (
+                  <Field className="w-[120px]" label={t('export.year')} htmlFor="accounting-export-year" required>
+                    <Input
+                      id="accounting-export-year"
+                      type="number"
+                      inputMode="numeric"
+                      min={2000}
+                      max={2100}
+                      value={exportYear}
+                      onChange={e => setExportYear(Number(e.target.value))}
+                    />
+                  </Field>
+                ) : null}
+                {exportPeriodType === 'custom' ? (
+                  <>
+                    <Field className="w-[170px]" label={t('export.from')} htmlFor="accounting-export-from" required>
+                      <Input
+                        id="accounting-export-from"
+                        type="date"
+                        value={exportDateFrom}
+                        onChange={e => setExportDateFrom(e.target.value)}
+                      />
+                    </Field>
+                    <Field className="w-[170px]" label={t('export.to')} htmlFor="accounting-export-to" required>
+                      <Input
+                        id="accounting-export-to"
+                        type="date"
+                        value={exportDateTo}
+                        onChange={e => setExportDateTo(e.target.value)}
+                      />
+                    </Field>
+                  </>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-end gap-2.5">
+                <Field className="w-[240px]" label={t('export.project')} htmlFor="accounting-export-project">
+                  <Select
+                    id="accounting-export-project"
+                    value={exportProjectId}
+                    onChange={e => setExportProjectId(e.target.value)}
+                  >
+                    <option value="">{isAdmin ? t('export.allProjects') : t('export.allOwnProjects')}</option>
+                    {(exportProjectsQuery.data ?? []).map(p => (
+                      <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field className="w-[220px]" label={t('export.employee')} htmlFor="accounting-export-employee">
+                  <Select
+                    id="accounting-export-employee"
+                    value={exportEmployeeId}
+                    onChange={e => setExportEmployeeId(e.target.value)}
+                  >
+                    <option value="">{t('export.allEmployees')}</option>
+                    {(exportEmployeesQuery.data ?? []).map(u => (
+                      <option key={u.id} value={u.id}>{`${u.firstName} ${u.lastName}`.trim()}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field className="w-[200px]" label={t('export.category')} htmlFor="accounting-export-category">
+                  <Select
+                    id="accounting-export-category"
+                    value={exportCategory}
+                    onChange={e => setExportCategory(e.target.value)}
+                  >
+                    <option value="">{t('export.allCategories')}</option>
+                    {FIDUCIARY_CATEGORIES.map(c => (
+                      <option key={c} value={c}>{t(`export.categories.${c}`)}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Button variant="primary" disabled={exportQuery.isFetching} onClick={generateExport}>
+                  {exportQuery.isFetching ? t('export.generating') : t('export.generate')}
+                </Button>
+              </div>
+
+              {exportError ? (
+                <p role="alert" className="text-[13px] text-bad">{exportError}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {exportRequest !== null ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {t('export.previewTitle')}
+                  {exportData ? (
+                    <CardCount>
+                      {t('export.range', {
+                        from: formatDate(exportData.dateFrom),
+                        to: formatDate(exportData.dateTo),
+                      })}
+                    </CardCount>
+                  ) : null}
+                </CardTitle>
+              </CardHeader>
+
+              {/* §17.7: one tab per file — Heures | Frais & Débours | Résumé projets */}
+              <Tabs
+                value={exportFile}
+                onValueChange={value => setExportFile(value as FiduciaryFileKey)}
+              >
+                <TabsList aria-label={t('export.filesLabel')} className="px-3">
+                  {FIDUCIARY_FILES.map(key => (
+                    <TabsTrigger key={key} value={key}>
+                      {t(`export.files.${key}`)}
+                      <TabCount>{exportData?.files?.[key]?.rowCount ?? 0}</TabCount>
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                {FIDUCIARY_FILES.map(key => {
+                  const preview = previews[key];
+                  return (
+                    <TabsContent key={key} value={key}>
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft px-3.5 py-2.5">
+                        <span className="font-mono text-xs text-muted">{preview.file?.filename ?? '—'}</span>
+                        <Button
+                          size="sm"
+                          blockedReason={preview.file ? undefined : t('export.noData')}
+                          onClick={() =>
+                            preview.file && downloadCSV(preview.file.content, preview.file.filename)
+                          }
+                        >
+                          <Download />
+                          {t('export.downloadCsv')}
+                        </Button>
+                      </div>
+
+                      <DataState
+                        isLoading={exportQuery.isPending}
+                        error={
+                          exportQuery.isError
+                            ? errorMessage(exportQuery.error, t('errors.generateExport'))
+                            : null
+                        }
+                        onRetry={() => exportQuery.refetch()}
+                        isEmpty={preview.rows.length === 0}
+                        empty={<EmptyState title={t('export.noData')} description={t('export.noDataHelp')} />}
+                      >
+                        <TableWrap className="max-h-[360px] overflow-y-auto">
+                          <Table className="text-[13px]">
+                            <THead>
+                              <tr>
+                                {preview.headers.map(h => (
+                                  <TH key={h} className="sticky top-0 z-10" title={h}>
+                                    {t(`export.columns.${h}`, { defaultValue: h })}
+                                  </TH>
+                                ))}
+                              </tr>
+                            </THead>
+                            <TBody>
+                              {preview.rows.slice(0, 100).map((row, ri) => (
+                                <TR key={ri}>
+                                  {preview.headers.map(col => (
+                                    <TD key={col} className="h-10 whitespace-nowrap">
+                                      {col === 'categorie' && row[col]
+                                        ? t(`export.categories.${row[col]}`, { defaultValue: row[col] })
+                                        : row[col]}
+                                    </TD>
+                                  ))}
+                                </TR>
+                              ))}
+                            </TBody>
+                          </Table>
+                        </TableWrap>
+                        <CardFooter>
+                          <span>{t('export.rowCount', { count: preview.rows.length })}</span>
+                          {preview.rows.length > 100 ? (
+                            <span>{t('export.truncated', { count: preview.rows.length })}</span>
+                          ) : null}
+                        </CardFooter>
+                      </DataState>
+                    </TabsContent>
+                  );
+                })}
+              </Tabs>
+            </Card>
+          ) : null}
+        </TabsContent>
+      </Tabs>
 
       {/* ============================================================ */}
-      {/*  CHART OF ACCOUNTS                                          */}
+      {/*  Dialogs — admin only, so they never render for a manager     */}
       {/* ============================================================ */}
-
-      {activeTab === 'accounts' && (
+      {isAdmin ? (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button style={btnPrimary} onClick={() => setShowAccountForm(!showAccountForm)}>
-                {showAccountForm ? t('common:actions.cancel') : t('accounts.newAccount')}
-              </button>
-              <button style={btnWarning} onClick={seedDefaults}>
-                {t('accounts.seedDefaults')}
-              </button>
-            </div>
-          </div>
-
-          {showAccountForm && (
-            <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('accounts.createTitle')}</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.accountNumber')}</label>
-                  <input
-                    style={inputStyle}
-                    value={accountForm.accountNumber}
-                    onChange={e => setAccountForm(f => ({ ...f, accountNumber: e.target.value }))}
-                    placeholder="1000"
-                  />
+          <Dialog open={accountFormOpen} onOpenChange={setAccountFormOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t('accounts.createTitle')}</DialogTitle>
+                <DialogDescription>{t('accounts.createHelp')}</DialogDescription>
+              </DialogHeader>
+              <DialogBody>
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
+                  <Field label={t('accounts.accountNumber')} htmlFor="accounting-account-number" required>
+                    <Input
+                      id="accounting-account-number"
+                      className="tnum"
+                      placeholder={t('accounts.numberPlaceholder')}
+                      value={accountForm.accountNumber}
+                      onChange={e => setAccountForm(f => ({ ...f, accountNumber: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('accounts.name')} htmlFor="accounting-account-name" required>
+                    <Input
+                      id="accounting-account-name"
+                      placeholder={t('accounts.namePlaceholder')}
+                      value={accountForm.name}
+                      onChange={e => setAccountForm(f => ({ ...f, name: e.target.value }))}
+                    />
+                  </Field>
                 </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.name')}</label>
-                  <input
-                    style={inputStyle}
-                    value={accountForm.name}
-                    onChange={e => setAccountForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder={t('accounts.namePlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.type')}</label>
-                  <select
-                    style={inputStyle}
+                <Field label={t('accounts.type')} htmlFor="accounting-account-type">
+                  <Select
+                    id="accounting-account-type"
                     value={accountForm.type}
-                    onChange={e => setAccountForm(f => ({ ...f, type: e.target.value as Account['type'] }))}
+                    onChange={e =>
+                      setAccountForm(f => ({ ...f, type: e.target.value as Account['type'] }))
+                    }
                   >
                     {ACCOUNT_TYPES.map(type => (
                       <option key={type} value={type}>{enumLabel('accountType', type)}</option>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('accounts.parentAccount')}</label>
-                  <select
-                    style={inputStyle}
+                  </Select>
+                </Field>
+                <Field
+                  label={t('accounts.parentAccount')}
+                  htmlFor="accounting-account-parent"
+                  hint={t('accounts.parentHint')}
+                >
+                  <Select
+                    id="accounting-account-parent"
                     value={accountForm.parentId}
                     onChange={e => setAccountForm(f => ({ ...f, parentId: e.target.value }))}
                   >
                     <option value="">{t('accounts.noParent')}</option>
-                    {accounts
+                    {(accountsQuery.data ?? [])
                       .filter(a => a.type === accountForm.type)
                       .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
                       .map(a => (
-                        <option key={a.id} value={a.id}>{a.accountNumber} - {a.name}</option>
+                        <option key={a.id} value={a.id}>{a.accountNumber} — {a.name}</option>
                       ))}
-                  </select>
+                  </Select>
+                </Field>
+                {accountFormError ? (
+                  <p role="alert" className="text-[13px] text-bad">{accountFormError}</p>
+                ) : null}
+                {createAccount.isError ? (
+                  <p role="alert" className="text-[13px] text-bad">
+                    {errorMessage(createAccount.error, t('errors.createAccount'))}
+                  </p>
+                ) : null}
+              </DialogBody>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setAccountFormOpen(false)}>
+                  {t('common:actions.cancel')}
+                </Button>
+                <Button variant="primary" disabled={createAccount.isPending} onClick={submitAccount}>
+                  {createAccount.isPending ? t('accounts.creating') : t('accounts.create')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={entryFormOpen} onOpenChange={setEntryFormOpen}>
+            <DialogContent className="w-[min(780px,calc(100vw-32px))]">
+              <DialogHeader>
+                <DialogTitle>{t('entries.createTitle')}</DialogTitle>
+                <DialogDescription>{t('entries.createHelp')}</DialogDescription>
+              </DialogHeader>
+              <DialogBody>
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[160px_minmax(0,1fr)_180px]">
+                  <Field label={t('entries.date')} htmlFor="accounting-entry-date" required>
+                    <Input
+                      id="accounting-entry-date"
+                      type="date"
+                      value={entryForm.entryDate}
+                      onChange={e => setEntryForm(f => ({ ...f, entryDate: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('entries.description')} htmlFor="accounting-entry-description" required>
+                    <Input
+                      id="accounting-entry-description"
+                      placeholder={t('entries.descriptionPlaceholder')}
+                      value={entryForm.description}
+                      onChange={e => setEntryForm(f => ({ ...f, description: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('entries.referenceType')} htmlFor="accounting-entry-reference">
+                    <Input
+                      id="accounting-entry-reference"
+                      placeholder={t('entries.referenceTypePlaceholder')}
+                      value={entryForm.referenceType}
+                      onChange={e => setEntryForm(f => ({ ...f, referenceType: e.target.value }))}
+                    />
+                  </Field>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createAccount}>{t('accounts.create')}</button>
-                <button style={btnOutline} onClick={() => setShowAccountForm(false)}>{t('common:actions.cancel')}</button>
-              </div>
-            </div>
-          )}
 
-          {accountsLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('accounts.loading')}</p>
-          ) : flatAccounts.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('accounts.empty')}</p>
-          ) : (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f9fafb' }}>
-                  <tr>
-                    <th style={thStyle}>{t('accounts.table.number')}</th>
-                    <th style={thStyle}>{t('accounts.table.name')}</th>
-                    <th style={thStyle}>{t('accounts.table.type')}</th>
-                    <th style={thStyle}>{t('accounts.table.system')}</th>
-                    <th style={thStyle}>{t('accounts.table.active')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {flatAccounts.map(({ account: a, depth }) => (
-                    <tr key={a.id}>
-                      <td style={{ ...tdStyle, fontWeight: 600, paddingLeft: 12 + depth * 20, fontFamily: 'monospace' }}>
-                        {a.accountNumber}
-                      </td>
-                      <td style={{ ...tdStyle, paddingLeft: 12 + depth * 20 }}>
-                        {a.name}
-                      </td>
-                      <td style={tdStyle}>
-                        <Badge color={ACCOUNT_TYPE_COLORS[a.type]}>{enumLabel('accountType', a.type)}</Badge>
-                      </td>
-                      <td style={tdStyle}>
-                        {a.isSystem && (
-                          <span style={{ fontSize: 16 }} title={t('accounts.systemAccount')}>
-                            &#x1F512;
-                          </span>
-                        )}
-                      </td>
-                      <td style={tdStyle}>
-                        <span style={{ color: a.isActive ? '#16a34a' : '#dc2626', fontWeight: 600, fontSize: 16 }}>
-                          {a.isActive ? '✓' : '✗'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ============================================================ */}
-      {/*  JOURNAL ENTRIES                                             */}
-      {/* ============================================================ */}
-
-      {activeTab === 'entries' && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <button style={btnPrimary} onClick={() => setShowEntryForm(!showEntryForm)}>
-              {showEntryForm ? t('common:actions.cancel') : t('entries.newEntry')}
-            </button>
-          </div>
-
-          {/* Filters */}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.from')}</label>
-              <input type="date" style={{ ...inputStyle, width: 160 }} value={entryDateFrom} onChange={e => { setEntryDateFrom(e.target.value); setEntriesPage(1); }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.to')}</label>
-              <input type="date" style={{ ...inputStyle, width: 160 }} value={entryDateTo} onChange={e => { setEntryDateTo(e.target.value); setEntriesPage(1); }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.status')}</label>
-              <select style={{ ...inputStyle, width: 140 }} value={entryPostedFilter} onChange={e => { setEntryPostedFilter(e.target.value as any); setEntriesPage(1); }}>
-                <option value="">{t('entries.all')}</option>
-                <option value="true">{t('entries.posted')}</option>
-                <option value="false">{t('entries.unposted')}</option>
-              </select>
-            </div>
-            <div style={{ alignSelf: 'flex-end' }}>
-              <button style={btnOutline} onClick={fetchEntries}>{t('entries.apply')}</button>
-            </div>
-          </div>
-
-          {/* Create entry form */}
-          {showEntryForm && (
-            <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('entries.createTitle')}</h3>
-              {entryError && (
-                <div style={{ background: '#fee2e2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
-                  {entryError}
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.date')}</label>
-                  <input
-                    type="date"
-                    style={inputStyle}
-                    value={entryForm.entryDate}
-                    onChange={e => setEntryForm(f => ({ ...f, entryDate: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.description')}</label>
-                  <input
-                    style={inputStyle}
-                    value={entryForm.description}
-                    onChange={e => setEntryForm(f => ({ ...f, description: e.target.value }))}
-                    placeholder={t('entries.descriptionPlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('entries.referenceType')}</label>
-                  <input
-                    style={inputStyle}
-                    value={entryForm.referenceType}
-                    onChange={e => setEntryForm(f => ({ ...f, referenceType: e.target.value }))}
-                    placeholder={t('entries.referenceTypePlaceholder')}
-                  />
-                </div>
-              </div>
-
-              {/* Lines */}
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>{t('entries.lines')}</h4>
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: '#f3f4f6' }}>
-                    <tr>
-                      <th style={thStyle}>{t('entries.account')}</th>
-                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>{t('entries.debitChf')}</th>
-                      <th style={{ ...thStyle, width: 160, textAlign: 'right' }}>{t('entries.creditChf')}</th>
-                      <th style={{ ...thStyle, width: 40 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entryLines.map((line, idx) => (
-                      <tr key={idx}>
-                        <td style={tdStyle}>
-                          <select
-                            style={{ ...inputStyle, border: 'none', padding: '4px 8px' }}
-                            value={line.accountId}
-                            onChange={e => updateEntryLine(idx, 'accountId', e.target.value)}
-                          >
-                            <option value="">{t('entries.selectAccount')}</option>
-                            {flatAccounts.map(({ account: a, depth }) => (
-                              <option key={a.id} value={a.id}>
-                                {' '.repeat(depth * 2)}{a.accountNumber} - {a.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={tdStyle}>
-                          <input
-                            type="number"
-                            step="0.05"
-                            style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                            value={line.debitCents / 100 || ''}
-                            onChange={e => updateEntryLine(idx, 'debitCents', Math.round(parseFloat(e.target.value || '0') * 100))}
-                          />
-                        </td>
-                        <td style={tdStyle}>
-                          <input
-                            type="number"
-                            step="0.05"
-                            style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                            value={line.creditCents / 100 || ''}
-                            onChange={e => updateEntryLine(idx, 'creditCents', Math.round(parseFloat(e.target.value || '0') * 100))}
-                          />
-                        </td>
-                        <td style={tdStyle}>
-                          {entryLines.length > 2 && (
-                            <button
-                              onClick={() => removeEntryLine(idx)}
-                              style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16 }}
-                            >
-                              &times;
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {/* Totals row */}
-                    <tr style={{ background: '#f9fafb' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{t('entries.total')}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontFamily: 'monospace' }}>
-                        {formatAmount(totalDebits)}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontFamily: 'monospace' }}>
-                        {formatAmount(totalCredits)}
-                      </td>
-                      <td style={tdStyle} />
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Balance indicator */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                <button style={btnOutline} onClick={addEntryLine}>{t('entries.addLine')}</button>
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: totalDebits === 0 && totalCredits === 0 ? '#6b7280' : isBalanced ? '#16a34a' : '#dc2626',
-                }}>
-                  {totalDebits === 0 && totalCredits === 0
-                    ? t('entries.enterAmounts')
-                    : isBalanced
-                      ? t('entries.balanced')
-                      : t('entries.unbalanced', { amount: formatMoney(Math.abs(totalDebits - totalCredits)) })
-                  }
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createEntry} disabled={!isBalanced}>{t('entries.create')}</button>
-                <button style={btnOutline} onClick={() => setShowEntryForm(false)}>{t('common:actions.cancel')}</button>
-              </div>
-            </div>
-          )}
-
-          {/* Entries table */}
-          {entriesLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('entries.loading')}</p>
-          ) : entries.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('entries.empty')}</p>
-          ) : (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f9fafb' }}>
-                  <tr>
-                    <th style={thStyle}>{t('entries.table.entryNumber')}</th>
-                    <th style={thStyle}>{t('entries.table.date')}</th>
-                    <th style={thStyle}>{t('entries.table.description')}</th>
-                    <th style={thStyle}>{t('entries.table.reference')}</th>
-                    <th style={thStyle}>{t('entries.table.posted')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('entries.table.total')}</th>
-                    <th style={thStyle}>{t('entries.table.actions')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map(e => (
-                    <tr key={e.id}>
-                      <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'monospace' }}>{e.entryNumber || e.id.slice(0, 8)}</td>
-                      <td style={tdStyle}>{formatDate(e.entryDate)}</td>
-                      <td style={tdStyle}>{e.description}</td>
-                      <td style={tdStyle}>{e.referenceType || '-'}</td>
-                      <td style={tdStyle}>
-                        <span style={{ color: e.isPosted ? '#16a34a' : '#6b7280', fontWeight: 600, fontSize: 16 }}>
-                          {e.isPosted ? '✓' : '—'}
-                        </span>
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                        {formatMoney(entryTotalDebit(e))}
-                      </td>
-                      <td style={tdStyle}>
-                        {!e.isPosted && (
-                          <button
-                            style={{ ...btnSuccess, padding: '4px 10px', fontSize: 12 }}
-                            onClick={() => postEntry(e.id)}
-                          >
-                            {t('entries.post')}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {entriesTotalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-              <button style={btnOutline} disabled={entriesPage <= 1} onClick={() => setEntriesPage(p => Math.max(1, p - 1))}>
-                {t('common:actions.previous')}
-              </button>
-              <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                {t('common:state.page', { page: entriesPage, total: entriesTotalPages })}
-              </span>
-              <button style={btnOutline} disabled={entriesPage >= entriesTotalPages} onClick={() => setEntriesPage(p => p + 1)}>
-                {t('common:actions.next')}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ============================================================ */}
-      {/*  LEDGER                                                      */}
-      {/* ============================================================ */}
-
-      {activeTab === 'ledger' && (
-        <>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.account')}</label>
-              <select
-                style={inputStyle}
-                value={ledgerAccountId}
-                onChange={e => setLedgerAccountId(e.target.value)}
-              >
-                <option value="">{t('ledger.selectAccount')}</option>
-                {flatAccounts.map(({ account: a, depth }) => (
-                  <option key={a.id} value={a.id}>
-                    {' '.repeat(depth * 2)}{a.accountNumber} - {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.from')}</label>
-              <input type="date" style={{ ...inputStyle, width: 160 }} value={ledgerDateFrom} onChange={e => setLedgerDateFrom(e.target.value)} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('ledger.to')}</label>
-              <input type="date" style={{ ...inputStyle, width: 160 }} value={ledgerDateTo} onChange={e => setLedgerDateTo(e.target.value)} />
-            </div>
-            <button style={btnPrimary} onClick={fetchLedger} disabled={!ledgerAccountId}>
-              {t('ledger.load')}
-            </button>
-          </div>
-
-          {ledgerLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('ledger.loading')}</p>
-          ) : !ledgerAccountId ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('ledger.selectPrompt')}</p>
-          ) : ledgerEntries.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('ledger.empty')}</p>
-          ) : (
-            <>
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: '#f9fafb' }}>
-                    <tr>
-                      <th style={thStyle}>{t('ledger.table.date')}</th>
-                      <th style={thStyle}>{t('ledger.table.entryNumber')}</th>
-                      <th style={thStyle}>{t('ledger.table.description')}</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.debit')}</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.credit')}</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>{t('ledger.table.balance')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledgerEntries.map((entry, idx) => (
-                      <tr key={`${entry.entryNumber}-${idx}`}>
-                        <td style={tdStyle}>{formatDate(entry.entryDate)}</td>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{entry.entryNumber}</td>
-                        <td style={tdStyle}>{entry.description}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
-                          {entry.debitCents > 0 ? formatAmount(entry.debitCents) : ''}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
-                          {entry.creditCents > 0 ? formatAmount(entry.creditCents) : ''}
-                        </td>
-                        <td style={{
-                          ...tdStyle,
-                          textAlign: 'right',
-                          fontWeight: 600,
-                          fontFamily: 'monospace',
-                          color: entry.balanceCents < 0 ? '#dc2626' : '#111827',
-                        }}>
-                          {formatMoney(entry.balanceCents)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Bottom balance */}
-              {ledgerEntries.length > 0 && (
-                <div style={{
-                  marginTop: 16,
-                  padding: 16,
-                  background: '#f0f9ff',
-                  border: '1px solid #bae6fd',
-                  borderRadius: 8,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#0369a1' }}>{t('ledger.closingBalance')}</span>
-                  <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>
-                    {formatMoney(ledgerEntries[ledgerEntries.length - 1].balanceCents)}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
-
-      {/* ============================================================ */}
-      {/*  EXPORT (Fiduciary)                                          */}
-      {/* ============================================================ */}
-
-      {activeTab === 'export' && (
-        <>
-          <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>{t('export.title')}</h3>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-              {isAdmin ? t('export.help') : t('export.helpOwnProjects')}
-            </p>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
-              <div>
-                <label style={labelStyle}>{t('export.periodType')}</label>
-                <select style={{ ...inputStyle, width: 170 }} value={exportPeriodType} onChange={e => setExportPeriodType(e.target.value as PeriodType)}>
-                  {PERIOD_TYPES.map(p => <option key={p} value={p}>{t(`export.periodTypes.${p}`)}</option>)}
-                </select>
-              </div>
-              {exportPeriodType === 'month' && (
-                <div>
-                  <label style={labelStyle}>{t('export.month')}</label>
-                  <input type="month" style={{ ...inputStyle, width: 180 }} value={exportMonth} onChange={e => setExportMonth(e.target.value)} />
-                </div>
-              )}
-              {exportPeriodType === 'quarter' && (
-                <div>
-                  <label style={labelStyle}>{t('export.quarter')}</label>
-                  <select style={{ ...inputStyle, width: 120 }} value={exportQuarter} onChange={e => setExportQuarter(Number(e.target.value))}>
-                    {[1, 2, 3, 4].map(q => <option key={q} value={q}>{t('export.quarterLabel', { quarter: q })}</option>)}
-                  </select>
-                </div>
-              )}
-              {(exportPeriodType === 'quarter' || exportPeriodType === 'year') && (
-                <div>
-                  <label style={labelStyle}>{t('export.year')}</label>
-                  <input type="number" min={2000} max={2100} style={{ ...inputStyle, width: 110 }} value={exportYear} onChange={e => setExportYear(Number(e.target.value))} />
-                </div>
-              )}
-              {exportPeriodType === 'custom' && (
-                <>
-                  <div>
-                    <label style={labelStyle}>{t('export.from')}</label>
-                    <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateFrom} onChange={e => setExportDateFrom(e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>{t('export.to')}</label>
-                    <input type="date" style={{ ...inputStyle, width: 180 }} value={exportDateTo} onChange={e => setExportDateTo(e.target.value)} />
-                  </div>
-                </>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <div>
-                <label style={labelStyle}>{t('export.project')}</label>
-                <select style={{ ...inputStyle, width: 240 }} value={exportProjectId} onChange={e => setExportProjectId(e.target.value)}>
-                  <option value="">{isAdmin ? t('export.allProjects') : t('export.allOwnProjects')}</option>
-                  {exportProjects.map(p => <option key={p.id} value={p.id}>{p.reference} — {p.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>{t('export.employee')}</label>
-                <select style={{ ...inputStyle, width: 220 }} value={exportEmployeeId} onChange={e => setExportEmployeeId(e.target.value)}>
-                  <option value="">{t('export.allEmployees')}</option>
-                  {exportEmployees.map(u => <option key={u.id} value={u.id}>{`${u.firstName} ${u.lastName}`.trim()}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>{t('export.category')}</label>
-                <select style={{ ...inputStyle, width: 200 }} value={exportCategory} onChange={e => setExportCategory(e.target.value)}>
-                  <option value="">{t('export.allCategories')}</option>
-                  {FIDUCIARY_CATEGORIES.map(c => <option key={c} value={c}>{t(`export.categories.${c}`)}</option>)}
-                </select>
-              </div>
-              <button style={btnPrimary} onClick={generateExport} disabled={exportLoading}>
-                {exportLoading ? t('export.generating') : t('export.generate')}
-              </button>
-            </div>
-          </div>
-
-          {exportData && (() => {
-            const file = exportData.files[exportFile];
-            const data = file ? parseCsv(file.content) : [];
-            const headers = file ? parseCsvHeader(file.content) : [];
-            return (
-              <div>
-                {/* §17.7: one tab per file — Heures | Frais & Débours | Résumé projets */}
-                <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', marginBottom: 12 }}>
-                  {FIDUCIARY_FILES.map(key => (
-                    <button
-                      key={key}
-                      onClick={() => setExportFile(key)}
-                      style={{
-                        padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 14,
-                        fontWeight: exportFile === key ? 600 : 400,
-                        color: exportFile === key ? '#2563eb' : '#6b7280',
-                        borderBottom: exportFile === key ? '2px solid #2563eb' : '2px solid transparent',
-                      }}
-                    >
-                      {t(`export.files.${key}`)} ({exportData.files[key]?.rowCount ?? 0})
-                    </button>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: '#6b7280' }}>{file?.filename}</span>
-                  <button
-                    style={{ ...btnOutline, fontSize: 12, padding: '4px 12px' }}
-                    disabled={!file}
-                    onClick={() => file && downloadCSV(file.content, file.filename)}
-                  >
-                    {t('export.downloadCsv')}
-                  </button>
-                </div>
-                {data.length === 0 ? (
-                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>{t('export.noData')}</p>
-                ) : (
-                  <>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'auto', maxHeight: 360 }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                        <thead style={{ background: '#f9fafb', position: 'sticky', top: 0 }}>
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+                  <h3 className="text-[13px] font-semibold text-ink-2">{t('entries.lines')}</h3>
+                  <div className="overflow-hidden rounded-card border border-line">
+                    <TableWrap>
+                      <Table>
+                        <THead>
                           <tr>
-                            {headers.map(h => (
-                              <th key={h} style={thStyle} title={h}>{t(`export.columns.${h}`, { defaultValue: h })}</th>
-                            ))}
+                            <TH>{t('entries.account')}</TH>
+                            <TH numeric className="w-[150px]">{t('entries.debitChf')}</TH>
+                            <TH numeric className="w-[150px]">{t('entries.creditChf')}</TH>
+                            <TH className="w-11">
+                              <span className="sr-only">{t('entries.table.actions')}</span>
+                            </TH>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {data.slice(0, 100).map((row, ri) => (
-                            <tr key={ri}>
-                              {headers.map(col => (
-                                <td key={col} style={{ ...tdStyle, fontSize: 13, whiteSpace: 'nowrap' }}>
-                                  {col === 'categorie' && row[col]
-                                    ? t(`export.categories.${row[col]}`, { defaultValue: row[col] })
-                                    : row[col]}
-                                </td>
-                              ))}
-                            </tr>
+                        </THead>
+                        <TBody>
+                          {entryLines.map((line, idx) => (
+                            <TR key={idx}>
+                              <TD>
+                                <Select
+                                  className="h-8"
+                                  aria-label={t('entries.accountLine', { line: idx + 1 })}
+                                  value={line.accountId}
+                                  onChange={e => setLineAccount(idx, e.target.value)}
+                                >
+                                  <option value="">{t('entries.selectAccount')}</option>
+                                  {accountOptions}
+                                </Select>
+                              </TD>
+                              <TD>
+                                <Input
+                                  className="tnum h-8 text-right"
+                                  type="number"
+                                  step="0.05"
+                                  inputMode="decimal"
+                                  aria-label={t('entries.debitLine', { line: idx + 1 })}
+                                  value={line.debitCents / 100 || ''}
+                                  onChange={e =>
+                                    setLineAmount(
+                                      idx,
+                                      'debitCents',
+                                      Math.round(parseFloat(e.target.value || '0') * 100),
+                                    )
+                                  }
+                                />
+                              </TD>
+                              <TD>
+                                <Input
+                                  className="tnum h-8 text-right"
+                                  type="number"
+                                  step="0.05"
+                                  inputMode="decimal"
+                                  aria-label={t('entries.creditLine', { line: idx + 1 })}
+                                  value={line.creditCents / 100 || ''}
+                                  onChange={e =>
+                                    setLineAmount(
+                                      idx,
+                                      'creditCents',
+                                      Math.round(parseFloat(e.target.value || '0') * 100),
+                                    )
+                                  }
+                                />
+                              </TD>
+                              <TD>
+                                {entryLines.length > 2 ? (
+                                  <Button
+                                    variant="quiet"
+                                    size="iconSm"
+                                    className="text-bad"
+                                    aria-label={t('entries.removeLine', { line: idx + 1 })}
+                                    onClick={() => removeEntryLine(idx)}
+                                  >
+                                    <Trash2 />
+                                  </Button>
+                                ) : null}
+                              </TD>
+                            </TR>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {data.length > 100 && (
-                      <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                        {t('export.truncated', { count: data.length })}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })()}
+                          <TR className="bg-paper-2 font-medium">
+                            <TD>{t('entries.total')}</TD>
+                            <TD numeric className="font-semibold">{formatAmount(totalDebits)}</TD>
+                            <TD numeric className="font-semibold">{formatAmount(totalCredits)}</TD>
+                            <TD />
+                          </TR>
+                        </TBody>
+                      </Table>
+                    </TableWrap>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="sm" onClick={addEntryLine}>
+                      <Plus />
+                      {t('entries.addLine')}
+                    </Button>
+                    <span
+                      aria-live="polite"
+                      className={cn(
+                        'text-[13px] font-medium',
+                        totalDebits === 0 && totalCredits === 0
+                          ? 'text-muted'
+                          : isBalanced
+                            ? 'text-ok'
+                            : 'text-bad',
+                      )}
+                    >
+                      {totalDebits === 0 && totalCredits === 0
+                        ? t('entries.enterAmounts')
+                        : isBalanced
+                          ? t('entries.balanced')
+                          : t('entries.unbalanced', {
+                              amount: formatMoney(Math.abs(totalDebits - totalCredits)),
+                            })}
+                    </span>
+                  </div>
+                </div>
+
+                {entryError ? (
+                  <p role="alert" className="text-[13px] text-bad">{entryError}</p>
+                ) : null}
+              </DialogBody>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => setEntryFormOpen(false)}>
+                  {t('common:actions.cancel')}
+                </Button>
+                <Button
+                  variant="primary"
+                  blockedReason={isBalanced ? undefined : t('validation.unbalanced')}
+                  disabled={createEntry.isPending}
+                  onClick={submitEntry}
+                >
+                  {createEntry.isPending ? t('entries.creating') : t('entries.create')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Reusable sub-components                                            */
-/* ------------------------------------------------------------------ */
-
-function Badge({ color, children }: { color: { bg: string; fg: string }; children: React.ReactNode }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 9999,
-      fontSize: 12,
-      fontWeight: 500,
-      background: color.bg,
-      color: color.fg,
-    }}>
-      {children}
-    </span>
+      ) : null}
+    </PageBody>
   );
 }

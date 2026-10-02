@@ -10,11 +10,17 @@
     "summary": "{{matched}} correspondance(s), {{unmatched}} sans correspondance",
     "failed": "Échec de l'importation : {{message}}",
     "documentDate": "Date de la soumission",
+    "documentDateHint": "Date imprimée sur la soumission. Facultatif.",
     "review": "{{count}} ligne(s) à vérifier : code interne de projet ou unité différente de l'article connu (non rattachées automatiquement).",
-    "totalMismatch": "{{count}} ligne(s) dont le total imprimé ne correspond pas à quantité × prix unitaire."
+    "totalMismatch": "{{count}} ligne(s) dont le total imprimé ne correspond pas à quantité × prix unitaire.",
+    "title": "Importer un catalogue CSV",
+    "help": "L'importation démarre dès que le fichier est choisi. Les colonnes sont reconnues d'après l'en-tête du fichier.",
+    "file": "Fichier CSV",
+    "fileHint": "Colonnes reconnues : N° CAN/NPK, Désignation, Unité, Quantité, Prix unitaire, Total, Local, Étage, Section. Séparateur « ; », « , » ou tabulation."
   },
   "filters": {
     "search": "Rechercher un article…",
+    "category": "Catégorie",
     "allCategories": "Toutes les catégories"
   },
   "state": {
@@ -25,12 +31,24 @@
     "description": "Description",
     "unit": "Unité",
     "category": "Catégorie",
+    "uncategorised": "Sans catégorie",
     "medianPrice": "Prix médian (CHF)",
     "observations": "Observations"
   },
+  "summary": {
+    "articles_one": "{{count}} article",
+    "articles_other": "{{count}} articles",
+    "priced_one": "{{count}} article avec un prix médian",
+    "priced_other": "{{count}} articles avec un prix médian",
+    "count_one": "{{count}} article sur {{total}}",
+    "count_other": "{{count}} articles sur {{total}}",
+    "sortedBy": "Triés par n° CAN/NPK"
+  },
   "empty": {
     "articles": "Aucun article trouvé",
-    "hint": "Importez un fichier CSV contenant votre catalogue d'articles CAN/NPK pour commencer."
+    "hint": "Importez un fichier CSV contenant votre catalogue d'articles CAN/NPK pour commencer.",
+    "noMatch": "Aucun article ne correspond",
+    "noMatchHint": "Modifiez votre recherche ou choisissez une autre catégorie."
   },
   "messages": {
     "noValidRows": "Aucune ligne valide trouvée dans le fichier CSV.",

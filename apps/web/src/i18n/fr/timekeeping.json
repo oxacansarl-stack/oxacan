@@ -1,34 +1,76 @@
 {
   "title": "Timbrage",
   "subtitle": "Timbrez vos arrivées et départs et gérez vos heures",
+  "meta": {
+    "pendingDrafts_one": "{{count}} brouillon à soumettre",
+    "pendingDrafts_other": "{{count}} brouillons à soumettre"
+  },
   "clock": {
+    "title": "Timbrage du jour",
     "currentlyClockedIn": "Timbrage en cours",
     "projectFallback": "Projet",
     "startedAt": "Arrivée à {{time}}",
     "elapsed": "Temps écoulé",
     "clockIn": "Timbrer l'arrivée",
+    "clockingIn": "Timbrage…",
     "clockOut": "Timbrer le départ",
+    "clockingOut": "Timbrage…",
     "project": "Projet",
     "selectProject": "Sélectionnez un projet…",
+    "selectProjectFirst": "Choisissez d'abord un projet pour timbrer votre arrivée.",
+    "projectsFailed": "Impossible de charger la liste des projets. Actualisez la page.",
     "category": "Catégorie",
     "notes": "Remarques (facultatif)",
     "notesPlaceholder": "Sur quoi travaillez-vous ?"
   },
   "summary": {
+    "title": "Semaine en cours",
     "normal": "Heures normales",
     "overtime": "Heures supplémentaires",
     "travel": "Déplacement",
     "break": "Pause",
-    "totalCost": "Coût total"
+    "totalCost": "Coût total",
+    "loadFailed": "Impossible de charger le récapitulatif de la semaine.",
+    "unavailable": "Récapitulatif indisponible",
+    "unavailableHelp": "Le récapitulatif de la semaine n'a pas pu être calculé. Il réapparaîtra après votre prochain timbrage."
+  },
+  "entries": {
+    "title": "Timbrages"
   },
   "filters": {
+    "status": "Filtrer par statut",
+    "period": "Période",
     "from": "Du",
-    "to": "au"
+    "to": "au",
+    "fromLabel": "Date de début",
+    "toLabel": "Date de fin"
+  },
+  "selection": {
+    "count_one": "{{count}} timbrage sélectionné",
+    "count_other": "{{count}} timbrages sélectionnés",
+    "clear": "Tout désélectionner"
   },
   "actions": {
     "submitDrafts": "Soumettre tous les brouillons",
+    "submitting": "Soumission…",
     "approve": "Valider ({{count}})",
     "reject": "Refuser ({{count}})"
+  },
+  "approve": {
+    "title_one": "Valider {{count}} timbrage ?",
+    "title_other": "Valider {{count}} timbrages ?",
+    "description": "Les heures validées sont reprises dans la paie et dans la rentabilité du chantier.",
+    "confirm": "Valider"
+  },
+  "reject": {
+    "title_one": "Refuser {{count}} timbrage",
+    "title_other": "Refuser {{count}} timbrages",
+    "description": "Le motif est transmis à la personne concernée, qui peut corriger son timbrage et le soumettre à nouveau.",
+    "reason": "Motif du refus",
+    "reasonPlaceholder": "Par exemple : heures saisies sur le mauvais chantier.",
+    "reasonRequired": "Indiquez le motif du refus.",
+    "confirm": "Refuser",
+    "rejecting": "Refus…"
   },
   "table": {
     "date": "Date",
@@ -42,17 +84,29 @@
     "status": "Statut",
     "cost": "Coût",
     "active": "En cours",
-    "reason": "Motif : {{reason}}"
+    "reason": "Motif : {{reason}}",
+    "selectAll": "Sélectionner tous les timbrages soumis affichés",
+    "select": "Sélectionner le timbrage du {{date}}",
+    "noneSelectable": "Aucun timbrage soumis dans cette vue : seuls les timbrages soumis peuvent être validés ou refusés.",
+    "notSelectable": "Non sélectionnable : seuls les timbrages soumis peuvent être validés ou refusés."
+  },
+  "footer": {
+    "count_one": "{{count}} timbrage",
+    "count_other": "{{count}} timbrages",
+    "limit": "Les 100 timbrages les plus récents"
   },
   "empty": "Aucun timbrage trouvé",
-  "prompts": {
-    "rejectionReason": "Motif du refus :"
-  },
+  "emptyHelp": "Timbrez votre arrivée pour enregistrer vos premières heures.",
+  "noMatch": "Aucun timbrage pour ce filtre",
+  "noMatchHelp": "Changez de statut ou élargissez la période pour voir d'autres timbrages.",
   "messages": {
     "loadFailed": "Impossible de charger les timbrages.",
     "clockInFailed": "Le timbrage d'arrivée a échoué.",
     "clockOutFailed": "Le timbrage de départ a échoué.",
     "noDraftsToSubmit": "Aucun timbrage terminé en brouillon à soumettre.",
+    "draftsLoadFailed": "Impossible de charger votre timbrage en cours et vos brouillons.",
+    "draftsChecking": "Vérification de vos timbrages en cours…",
+    "draftsUnknown": "Vos brouillons n'ont pas pu être chargés : réessayez depuis la carte « Timbrage du jour ».",
     "submitFailed": "La soumission a échoué.",
     "approveFailed": "La validation a échoué.",
     "rejectFailed": "Le refus a échoué.",

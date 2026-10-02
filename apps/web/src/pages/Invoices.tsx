@@ -1,8 +1,56 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Ban,
+  Check,
+  Clock,
+  Download,
+  FileMinus2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { apiGet, apiList, apiPost, apiPatch, apiDownload } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { enumLabel, formatAmount, formatDate, formatMoney, formatNumber, statusLabel } from '../lib/format';
+import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
+import {
+  Card,
+  CardContent,
+  CardCount,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, SearchInput, Select, Textarea } from '@/components/ui/input';
+import { Tag } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -54,6 +102,16 @@ interface SituationPreview {
   positions: SituationPosition[];
 }
 
+/**
+ * GET /invoices/project/:projectId/final-preview — the server's values for the project's décompte
+ * final. It returns much more (positions, plus-values, blockers); only the acomptes the final
+ * invoice will deduct are read here, so the totals preview cannot disagree with what is created.
+ */
+interface FinalInvoicePreview {
+  projectId: string;
+  acomptesToDeductCents: number;
+}
+
 interface Payment {
   id: string;
   amountCents: number;
@@ -100,39 +158,24 @@ interface PlusValue {
   createdAt: string;
 }
 
+type Section = 'invoices' | 'plus-values';
+
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
-  invoice: { bg: '#dbeafe', fg: '#1d4ed8' },
-  situation: { bg: '#ede9fe', fg: '#7c3aed' },
-  acompte: { bg: '#fef3c7', fg: '#92400e' },
-  credit_note: { bg: '#fee2e2', fg: '#dc2626' },
-  final_invoice: { bg: '#dcfce7', fg: '#166534' },
-};
-
 /** DB CHECK invoice.type */
 const INVOICE_TYPES = ['invoice', 'situation', 'acompte', 'credit_note', 'final_invoice'] as const;
 
-const STATUS_COLORS: Record<string, { bg: string; fg: string; strike?: boolean }> = {
-  draft: { bg: '#f3f4f6', fg: '#4b5563' },
-  sent: { bg: '#dbeafe', fg: '#1d4ed8' },
-  paid: { bg: '#dcfce7', fg: '#166534' },
-  partially_paid: { bg: '#fef3c7', fg: '#92400e' },
-  overdue: { bg: '#fee2e2', fg: '#dc2626' },
-  cancelled: { bg: '#f3f4f6', fg: '#9ca3af', strike: true },
-};
-
+/**
+ * Every stored invoice status (§15.4), so the filter can never hide a document: `draft`, `sent`,
+ * `partially_paid`, `paid`, `overdue`, `cancelled`. The colours live in StatusBadge's `invoice`
+ * table, the labels in common.json's `status.invoice`.
+ */
 const STATUS_TABS = ['all', 'draft', 'sent', 'partially_paid', 'paid', 'overdue', 'cancelled'] as const;
 
-const PV_STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  detected: { bg: '#f3f4f6', fg: '#4b5563' },
-  submitted: { bg: '#fef3c7', fg: '#92400e' },
-  approved: { bg: '#dcfce7', fg: '#166534' },
-  rejected: { bg: '#fee2e2', fg: '#991b1b' },
-  invoiced: { bg: '#dbeafe', fg: '#1d4ed8' },
-};
+/** Statuses on which the server accepts a payment. */
+const PAYABLE_STATUSES = new Set(['sent', 'partially_paid', 'overdue']);
 
 /** DB CHECK payment.payment_method */
 const PAYMENT_METHODS = ['bank_transfer', 'card', 'cash', 'other'] as const;
@@ -158,67 +201,21 @@ const typeLabel = (inv: Pick<Invoice, 'type' | 'situationNumber'>, t: (k: string
     ? t('detail.situationNumber', { number: inv.situationNumber })
     : enumLabel('invoiceType', inv.type);
 
-/* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
-/* ------------------------------------------------------------------ */
+/** A credit note reverses a document, an acompte is only an advance: both read differently. */
+const typeTone = (type: Invoice['type']): 'default' | 'warn' | 'bad' =>
+  type === 'credit_note' ? 'bad' : type === 'acompte' ? 'warn' : 'default';
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#dc2626',
-};
-
-const btnSuccess: React.CSSProperties = {
-  ...btnPrimary,
-  background: '#16a34a',
-};
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  textAlign: 'left',
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  fontSize: 14,
-  color: '#111827',
-  borderTop: '1px solid #f3f4f6',
-};
+/**
+ * A credit note keeps `draft` for ever — the server refuses any status change on it
+ * (`CREDIT_NOTE_STATUS`) — so a status pill would label a final document "Brouillon". It is
+ * shown by TYPE instead; every other document gets the six-status invoice badge.
+ */
+function InvoiceState({ invoice }: { invoice: Pick<Invoice, 'type' | 'status'> }) {
+  if (invoice.type === 'credit_note') {
+    return <Tag tone="bad">{enumLabel('invoiceType', 'credit_note')}</Tag>;
+  }
+  return <StatusBadge domain="invoice" value={invoice.status} />;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -226,18 +223,24 @@ const tdStyle: React.CSSProperties = {
 
 export default function Invoices() {
   const { t } = useTranslation('invoices');
+  const confirm = useConfirm();
+  const [params, setParams] = useSearchParams();
+
   /* --- State --- */
-  const [activeSection, setActiveSection] = useState<'invoices' | 'plus-values'>('invoices');
+  const [activeSection, setActiveSection] = useState<Section>('invoices');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  /** The invoice list's own failure: DataState shows it instead of an empty table. */
+  const [listError, setListError] = useState('');
+  /** A failed action (status change, PDF, credit note…): an inline alert, never an alert(). */
+  const [actionError, setActionError] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
   // Filters
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -254,19 +257,31 @@ export default function Invoices() {
     { description: '', unit: 'u', quantity: 1, unitPriceCents: 0 },
   ]);
   const [createError, setCreateError] = useState('');
+  const [creating, setCreating] = useState(false);
   // Situations: the server's values for the project's next situation, and the cumulative
   // quantity typed per offer position ('' = position not billed on this situation).
   const [situationPreview, setSituationPreview] = useState<SituationPreview | null>(null);
   const [situationLoading, setSituationLoading] = useState(false);
+  const [situationError, setSituationError] = useState('');
+  const [situationReload, setSituationReload] = useState(0);
   const [cumulativeInputs, setCumulativeInputs] = useState<Record<string, string>>({});
+  // Final invoice: the server's values for the project's décompte final — read only for the
+  // acomptes it will deduct, which no figure on this page could derive on its own.
+  const [finalPreview, setFinalPreview] = useState<FinalInvoicePreview | null>(null);
+  const [finalError, setFinalError] = useState('');
   const isSituation = createForm.type === 'situation';
+  const isFinal = createForm.type === 'final_invoice';
 
   // Detail view
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Invoice | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
 
   // Payment form
   const [showPayment, setShowPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amountCents: 0,
     paymentDate: new Date().toISOString().slice(0, 10),
@@ -276,8 +291,10 @@ export default function Invoices() {
 
   // Plus-values
   const [plusValues, setPlusValues] = useState<PlusValue[]>([]);
-  const [pvLoading, setPvLoading] = useState(false);
+  const [pvLoading, setPvLoading] = useState(true);
+  const [pvError, setPvError] = useState('');
   const [showPvCreate, setShowPvCreate] = useState(false);
+  const [pvCreating, setPvCreating] = useState(false);
   const [pvForm, setPvForm] = useState({
     projectId: '',
     description: '',
@@ -287,7 +304,7 @@ export default function Invoices() {
   /* --- Data loading --- */
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setListError('');
     try {
       let path = `/invoices?page=${page}`;
       if (statusFilter !== 'all') path += `&status=${statusFilter}`;
@@ -296,12 +313,12 @@ export default function Invoices() {
       setInvoices(items);
       setTotalPages(Math.max(1, meta?.totalPages ?? 1));
     } catch (e) {
-      setError(errorMessage(e, t('errors.loadInvoices')));
+      setListError(errorMessage(e, t('errors.loadInvoices')));
       setInvoices([]);
     } finally {
       setLoading(false);
     }
-  }, [page, statusFilter, typeFilter]);
+  }, [page, statusFilter, typeFilter, t]);
 
   const fetchReferenceData = useCallback(async () => {
     try {
@@ -317,48 +334,92 @@ export default function Invoices() {
   useEffect(() => { fetchReferenceData(); }, [fetchReferenceData]);
   useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
 
+  // The top bar's "Créer" menu links here with ?new=1.
+  useEffect(() => {
+    if (params.get('new') === '1') {
+      setActiveSection('invoices');
+      setCreateError('');
+      setShowCreate(true);
+      const next = new URLSearchParams(params);
+      next.delete('new');
+      setParams(next, { replace: true });
+    }
+  }, [params, setParams]);
+
   /* --- Plus-values --- */
   const fetchPlusValues = useCallback(async () => {
     setPvLoading(true);
+    setPvError('');
     try {
       const items = await apiGet<PlusValue[]>('/invoices/plus-values?limit=500');
       setPlusValues(Array.isArray(items) ? items : []);
     } catch (e) {
-      setError(errorMessage(e, t('errors.loadPlusValues')));
+      setPvError(errorMessage(e, t('errors.loadPlusValues')));
+      setPlusValues([]);
     }
     finally { setPvLoading(false); }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (activeSection === 'plus-values') fetchPlusValues();
   }, [activeSection, fetchPlusValues]);
 
   /* --- Invoice detail --- */
-  const openDetail = async (inv: Invoice) => {
+  const loadDetail = useCallback(async (id: string) => {
     setDetailLoading(true);
+    setDetailError('');
     try {
-      const detail = await apiGet<Invoice>(`/invoices/${inv.id}`);
-      setSelectedInvoice(detail);
+      setDetail(await apiGet<Invoice>(`/invoices/${id}`));
     } catch (e) {
-      setError(errorMessage(e, t('errors.loadInvoice')));
+      setDetail(null);
+      setDetailError(errorMessage(e, t('errors.loadInvoice')));
     } finally {
       setDetailLoading(false);
     }
+  }, [t]);
+
+  const openDetail = (id: string) => {
+    setActionError('');
+    setDetail(null);
+    setDetailError('');
+    setSelectedId(id);
+    void loadDetail(id);
+  };
+
+  const closeDetail = () => {
+    setSelectedId(null);
+    setDetail(null);
+    setDetailError('');
+    setShowPayment(false);
   };
 
   /* --- Situation: load the server's values for the next situation of the project --- */
   useEffect(() => {
     setSituationPreview(null);
+    setSituationError('');
     setCumulativeInputs({});
     if (!showCreate || !isSituation || !createForm.projectId) return;
     let stale = false;
     setSituationLoading(true);
     apiGet<SituationPreview>(`/invoices/project/${createForm.projectId}/situation-preview`)
       .then(preview => { if (!stale) setSituationPreview(preview); })
-      .catch(e => { if (!stale) setCreateError(errorMessage(e, t('errors.loadSituation'))); })
+      .catch(e => { if (!stale) setSituationError(errorMessage(e, t('errors.loadSituation'))); })
       .finally(() => { if (!stale) setSituationLoading(false); });
     return () => { stale = true; };
-  }, [showCreate, isSituation, createForm.projectId]);
+  }, [showCreate, isSituation, createForm.projectId, situationReload, t]);
+
+  /* --- Final invoice: the acomptes the server will deduct, from the same preview the final
+         invoice is created from (its retention release stays the server's, see the totals). --- */
+  useEffect(() => {
+    setFinalPreview(null);
+    setFinalError('');
+    if (!showCreate || !isFinal || !createForm.projectId) return;
+    let stale = false;
+    apiGet<FinalInvoicePreview>(`/invoices/project/${createForm.projectId}/final-preview`)
+      .then(preview => { if (!stale) setFinalPreview(preview); })
+      .catch(e => { if (!stale) setFinalError(errorMessage(e, t('errors.loadFinalPreview'))); });
+    return () => { stale = true; };
+  }, [showCreate, isFinal, createForm.projectId, t]);
 
   // Preview of each position: period = cumulative typed − quantity already billed (from the server).
   const situationRows = (situationPreview?.positions ?? []).map(position => {
@@ -397,6 +458,7 @@ export default function Invoices() {
       setCreateError(t('validation.vatRange')); return;
     }
 
+    setCreating(true);
     try {
       await apiPost('/invoices', {
         projectId: createForm.projectId,
@@ -428,6 +490,8 @@ export default function Invoices() {
       fetchInvoices();
     } catch (e) {
       setCreateError(errorMessage(e, t('errors.createInvoice')));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -445,47 +509,79 @@ export default function Invoices() {
 
   /* --- Status change --- */
   const changeStatus = async (id: string, status: string) => {
+    setActionError('');
     try {
       await apiPatch(`/invoices/${id}/status`, { status });
       fetchInvoices();
-      if (selectedInvoice?.id === id) {
-        openDetail(selectedInvoice);
+      if (selectedId === id) {
+        void loadDetail(id);
       }
     } catch (e) {
-      setError(errorMessage(e, t('errors.updateStatus')));
+      setActionError(errorMessage(e, t('errors.updateStatus')));
     }
+  };
+
+  /**
+   * Voids a mistaken draft — PATCH /invoices/:id/status is the only route that sets `cancelled`,
+   * and the server allows it from `draft` only (INVOICE_TRANSITIONS.draft = ['sent','cancelled']);
+   * an issued invoice is neutralised with a credit note instead. Irreversible, hence the
+   * confirmation: `cancelled` transitions nowhere.
+   */
+  const cancelInvoice = async (inv: Invoice) => {
+    const ok = await confirm({
+      title: t('confirm.cancelTitle'),
+      description: t('confirm.cancelHelp', { number: inv.invoiceNumber }),
+      confirmLabel: t('actions.cancelInvoice'),
+      cancelLabel: t('confirm.keepDraft'),
+    });
+    if (!ok) return;
+    await changeStatus(inv.id, 'cancelled');
   };
 
   /* --- PDF --- */
   const downloadPdf = async (id: string) => {
+    setActionError('');
     try {
       await apiDownload(`/invoices/${id}/pdf`);
     } catch (e) {
-      setError(errorMessage(e, t('errors.downloadPdf')));
+      setActionError(errorMessage(e, t('errors.downloadPdf')));
     }
   };
 
   /* --- Credit note --- */
-  const createCreditNote = async (id: string) => {
-    if (!confirm(t('confirm.creditNote'))) return;
+  const createCreditNote = async (inv: Invoice) => {
+    const ok = await confirm({
+      title: t('confirm.creditNoteTitle'),
+      description: t('confirm.creditNoteHelp', { number: inv.invoiceNumber }),
+      confirmLabel: t('actions.creditNote'),
+    });
+    if (!ok) return;
+    setActionError('');
     try {
-      await apiPost(`/invoices/${id}/credit-note`);
+      await apiPost(`/invoices/${inv.id}/credit-note`);
       fetchInvoices();
-      setSelectedInvoice(null);
+      closeDetail();
     } catch (e) {
-      setError(errorMessage(e, t('errors.createCreditNote')));
+      setActionError(errorMessage(e, t('errors.createCreditNote')));
     }
   };
 
   /* --- Record payment --- */
+  const openPayment = () => {
+    setPaymentError('');
+    setShowPayment(true);
+  };
+
   const recordPayment = async () => {
-    if (!selectedInvoice) return;
+    if (!detail) return;
+    setPaymentError('');
     if (!Number.isInteger(paymentForm.amountCents) || paymentForm.amountCents <= 0) {
-      setError(t('validation.paymentAmount')); return;
+      setPaymentError(t('validation.paymentAmount')); return;
     }
-    if (!paymentForm.paymentDate) { setError(t('validation.paymentDate')); return; }
+    if (!paymentForm.paymentDate) { setPaymentError(t('validation.paymentDate')); return; }
+    setSavingPayment(true);
     try {
-      await apiPost(`/invoices/${selectedInvoice.id}/payments`, {
+      await apiPost(`/invoices/${detail.id}/payments`, {
         amountCents: paymentForm.amountCents,
         paymentDate: paymentForm.paymentDate,
         paymentMethod: paymentForm.paymentMethod,
@@ -493,16 +589,26 @@ export default function Invoices() {
       });
       setShowPayment(false);
       setPaymentForm({ amountCents: 0, paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: 'bank_transfer', reference: '' });
-      openDetail(selectedInvoice);
+      void loadDetail(detail.id);
       fetchInvoices();
     } catch (e) {
-      setError(errorMessage(e, t('errors.recordPayment')));
+      setPaymentError(errorMessage(e, t('errors.recordPayment')));
+    } finally {
+      setSavingPayment(false);
     }
   };
 
   /* --- Plus-value create --- */
+  const pvFormValid =
+    Boolean(pvForm.projectId) &&
+    pvForm.description.trim().length > 0 &&
+    Number.isInteger(pvForm.amountCents) &&
+    pvForm.amountCents > 0;
+
   const createPlusValue = async () => {
-    if (!pvForm.projectId || !pvForm.description.trim() || !Number.isInteger(pvForm.amountCents) || pvForm.amountCents <= 0) return;
+    if (!pvFormValid) return;
+    setActionError('');
+    setPvCreating(true);
     try {
       await apiPost('/invoices/plus-values', {
         projectId: pvForm.projectId,
@@ -513,17 +619,20 @@ export default function Invoices() {
       setPvForm({ projectId: '', description: '', amountCents: 0 });
       fetchPlusValues();
     } catch (e) {
-      setError(errorMessage(e, t('errors.createPlusValue')));
+      setActionError(errorMessage(e, t('errors.createPlusValue')));
+    } finally {
+      setPvCreating(false);
     }
   };
 
   /* --- Plus-value status --- */
   const updatePvStatus = async (id: string, status: string) => {
+    setActionError('');
     try {
       await apiPatch(`/invoices/plus-values/${id}/status`, { status });
       fetchPlusValues();
     } catch (e) {
-      setError(errorMessage(e, t('errors.updateStatus')));
+      setActionError(errorMessage(e, t('errors.updateStatus')));
     }
   };
 
@@ -540,843 +649,1078 @@ export default function Invoices() {
     setCreateLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
   };
 
-  /* --- Computed --- */
-  // Preview mirrors InvoicingService.createInvoice: offer positions bill the period quantity,
-  // free lines quantity × price; acomptes carry no retention; a situation deducts the acomptes
-  // the server reports as not yet deducted.
+  /* --- Computed: the create form's preview --- */
+  // Mirrors InvoicingService.createInvoice: offer positions bill the period quantity, free lines
+  // quantity × price. The acomptes not yet deducted come off a situation AND off the final invoice
+  // (invoicing.service.ts: `if (dto.type === 'situation' || isFinal)`), so both deduct them here.
   const lineTotal = (l: InvoiceLine): number => Math.round(l.quantity * l.unitPriceCents);
   const subtotalHt = freeLines.reduce((sum, l) => sum + lineTotal(l), 0)
     + billedRows.reduce((sum, r) => sum + r.total, 0);
   const vatRate = parseFloat(createForm.vatRate) || 8.10;
   const vatAmount = swissRound(Math.round(subtotalHt * Math.round(vatRate * 100) / 10000));
-  const retentionAmount = createForm.type === 'acompte' ? 0 : swissRound(Math.round(subtotalHt * 500 / 10000));
-  const priorAcomptes = isSituation ? situationPreview?.acomptesToDeductCents ?? 0 : 0;
-  const totalTtc = swissRound(subtotalHt + vatAmount - retentionAmount - priorAcomptes);
+  // Always the server's own figure, from the preview of the very document being created — the
+  // situation preview or the final invoice's — never one computed here. Until that preview
+  // answers, the amount is unknown: the total then does not deduct it and says so.
+  const acomptesAreDeducted = isSituation || isFinal;
+  const acomptesPreview = isSituation ? situationPreview : isFinal ? finalPreview : null;
+  const priorAcomptes = acomptesPreview?.acomptesToDeductCents ?? 0;
+  const priorAcomptesKnown = acomptesAreDeducted && acomptesPreview != null;
+  // NO RETENTION LINE HERE, ON PURPOSE. The server applies the rate of the project's contract,
+  // falling back to the company default (invoicing.service.ts: `dto.retentionRate ??
+  // contract.retention_rate ?? company.defaultRetentionRate`), and an acompte or a final invoice
+  // holds none at all. Neither rate is in the data this page loads (/projects, /clients,
+  // situation-preview), so the only way to show the line would be to hardcode 5 %, which is what
+  // this preview used to do — and why it disagreed with the invoice the server then created.
+  // Nor does the final invoice's retention release belong in the figure: the server computes what
+  // the project still holds. So this total is provisional on every document that moves the
+  // retention — before it is withheld, or before it is released — and the label says which.
+  // Only an acompte, which neither withholds nor releases nor deducts, shows a plain Total TTC.
+  const provisionalTotal = swissRound(subtotalHt + vatAmount - priorAcomptes);
+  const retentionIsWithheld = createForm.type === 'invoice' || createForm.type === 'situation';
 
   const filteredInvoices = searchTerm
     ? invoices.filter(inv => inv.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()))
     : invoices;
+  /** Tells "nothing here yet" apart from "nothing matches what you asked for". */
+  const filtersActive = statusFilter !== 'all' || typeFilter !== '' || searchTerm.trim() !== '';
 
   /* ------------------------------------------------------------------ */
-  /*  Render: Detail view                                               */
+  /*  Create-invoice dialog (shared by both renders below)              */
   /* ------------------------------------------------------------------ */
 
-  if (selectedInvoice) {
-    const inv = selectedInvoice;
-    const paidPct = inv.totalTtcCents > 0 ? Math.min(100, Math.round(((inv.amountPaidCents ?? 0) / inv.totalTtcCents) * 100)) : 0;
-
-    return (
-      <div>
-        {/* Back button */}
-        <button onClick={() => setSelectedInvoice(null)} style={{ ...btnOutline, marginBottom: 16 }}>
-          {t('actions.backToList')}
-        </button>
-
-        {detailLoading && <p style={{ color: '#6b7280' }}>{t('common:state.loading')}</p>}
-
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-              {inv.invoiceNumber || t('detail.fallbackTitle')}
-              {inv.type === 'situation' && inv.situationNumber ? ` · ${typeLabel(inv, t)}` : ''}
-            </h1>
-            <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
-              {inv.client?.name} &middot; {inv.project?.name || inv.projectId}
-            </div>
+  const createDialog = (
+    <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <DialogContent className="w-[min(1040px,calc(100vw-32px))]">
+        <DialogHeader>
+          <DialogTitle>{t('form.createTitle')}</DialogTitle>
+          <DialogDescription>{t('form.help')}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label={t('form.project')} htmlFor="invoice-project" required>
+              <Select
+                id="invoice-project"
+                value={createForm.projectId}
+                onChange={e => handleProjectChange(e.target.value)}
+              >
+                <option value="">{t('form.selectProject')}</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('form.client')} htmlFor="invoice-client" required>
+              <Select
+                id="invoice-client"
+                value={createForm.clientId}
+                onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}
+              >
+                <option value="">{t('form.selectClient')}</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('form.type')} htmlFor="invoice-type">
+              <Select
+                id="invoice-type"
+                value={createForm.type}
+                onChange={e => setCreateForm(f => ({ ...f, type: e.target.value as Invoice['type'] }))}
+              >
+                <option value="invoice">{enumLabel('invoiceType', 'invoice')}</option>
+                <option value="situation">{enumLabel('invoiceType', 'situation')}</option>
+                <option value="acompte">{enumLabel('invoiceType', 'acompte')}</option>
+                <option value="final_invoice">{enumLabel('invoiceType', 'final_invoice')}</option>
+              </Select>
+            </Field>
+            <Field label={t('form.vatRate')} htmlFor="invoice-vat">
+              <Input
+                id="invoice-vat"
+                type="number"
+                step="0.01"
+                inputMode="decimal"
+                className="tnum text-right"
+                value={createForm.vatRate}
+                onChange={e => setCreateForm(f => ({ ...f, vatRate: e.target.value }))}
+              />
+            </Field>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Badge color={TYPE_COLORS[inv.type]}>{typeLabel(inv, t)}</Badge>
-            <Badge color={STATUS_COLORS[inv.status]} strike={STATUS_COLORS[inv.status]?.strike}>
-              {statusLabel('invoice', inv.status)}
-            </Badge>
-          </div>
-        </div>
 
-        {/* Summary cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-          <SummaryCard label={t('summary.subtotalHt')} value={formatMoney(inv.subtotalHtCents)} />
-          <SummaryCard label={t('summary.vat', { rate: (inv.vatRate / 100).toFixed(2) })} value={formatMoney(inv.vatAmountCents)} />
-          <SummaryCard label={t('summary.retention')} value={`- ${formatMoney(inv.retentionAmountCents ?? 0)}`} />
-          <div style={{
-            background: '#f0f9ff', borderRadius: 8, padding: 16, border: '1px solid #bae6fd',
-          }}>
-            <div style={{ fontSize: 12, color: '#0369a1', fontWeight: 600, textTransform: 'uppercase' }}>{t('summary.totalTtc')}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: '#111827', marginTop: 4 }}>{formatMoney(inv.totalTtcCents)}</div>
-          </div>
-        </div>
-
-        {/* Info row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-          <InfoField label={t('detail.issueDate')} value={formatDate(inv.issueDate)} />
-          <InfoField label={t('detail.dueDate')} value={formatDate(inv.dueDate)} />
-          <InfoField label={t('detail.notes')} value={inv.notes || '-'} />
-        </div>
-
-        {/* Lines table */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('detail.lines')}</h3>
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 24 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ background: '#f9fafb' }}>
-              <tr>
-                <th style={thStyle}>{t('table.description')}</th>
-                <th style={thStyle}>{t('table.unit')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>
-                  {inv.type === 'situation' ? t('table.offerQuantity') : t('table.quantity')}
-                </th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.unitPrice')}</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.total')}</th>
-                {inv.type === 'situation' && (
-                  <>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.previousQuantity')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.budgetPercent')}</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {(inv.lines || []).map((line, i) => (
-                <tr key={line.id || i}>
-                  <td style={tdStyle}>{line.description}</td>
-                  <td style={tdStyle}>{line.unit}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{line.quantity}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMoney(line.unitPriceCents)}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
-                    {formatMoney(line.totalPriceCents ?? line.quantity * line.unitPriceCents)}
-                  </td>
-                  {inv.type === 'situation' && (
-                    <>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{line.cumulativeQuantity ?? '-'}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{line.previousQuantity ?? '-'}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{line.periodQuantity ?? '-'}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>
-                        {line.offerLineId && line.cumulativeQuantity != null && Number(line.quantity) > 0
-                          ? `${Math.round((line.cumulativeQuantity / Number(line.quantity)) * 100)} %`
-                          : '-'}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-              {(!inv.lines || inv.lines.length === 0) && (
-                <tr><td style={{ ...tdStyle, textAlign: 'center', color: '#9ca3af' }} colSpan={inv.type === 'situation' ? 9 : 5}>{t('detail.noLines')}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Payment progress */}
-        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', marginBottom: 8 }}>{t('detail.payments')}</h3>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280', marginBottom: 4 }}>
-            <span>{t('detail.paidAmount', { amount: formatMoney(inv.amountPaidCents ?? 0) })}</span>
-            <span>{t('detail.paidPercent', { percent: paidPct })}</span>
-          </div>
-          <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{
-              width: `${paidPct}%`,
-              height: '100%',
-              background: paidPct >= 100 ? '#16a34a' : paidPct > 0 ? '#f59e0b' : '#e5e7eb',
-              borderRadius: 4,
-              transition: 'width 0.3s',
-            }} />
-          </div>
-        </div>
-
-        {/* Payment history */}
-        {(inv.payments && inv.payments.length > 0) && (
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead style={{ background: '#f9fafb' }}>
-                <tr>
-                  <th style={thStyle}>{t('table.date')}</th>
-                  <th style={thStyle}>{t('table.method')}</th>
-                  <th style={thStyle}>{t('table.reference')}</th>
-                  <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.amount')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inv.payments.map(p => (
-                  <tr key={p.id}>
-                    <td style={tdStyle}>{formatDate(p.paymentDate)}</td>
-                    <td style={tdStyle}>{enumLabel('paymentMethod', p.paymentMethod)}</td>
-                    <td style={tdStyle}>{p.reference || '-'}</td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
-                      {formatMoney(p.amountCents)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Record payment form */}
-        {showPayment && (
-          <div style={{ background: '#f9fafb', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid #e5e7eb' }}>
-            <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>{t('payment.title')}</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.amount')}</label>
-                <input
-                  type="number"
-                  step="0.05"
-                  style={inputStyle}
-                  value={paymentForm.amountCents / 100 || ''}
-                  onChange={e => setPaymentForm(f => ({ ...f, amountCents: Math.round(parseFloat(e.target.value || '0') * 100) }))}
-                />
+          {/* Situation: offer positions with the server's previously billed quantities */}
+          {isSituation ? (
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+                <h3 className="text-[13px] font-semibold text-ink">
+                  {situationPreview
+                    ? t('form.situationTitle', { number: situationPreview.situationNumber })
+                    : t('form.situationPositions')}
+                </h3>
+                <p className="text-xs text-muted">{t('form.situationHint')}</p>
               </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.date')}</label>
-                <input
-                  type="date"
-                  style={inputStyle}
-                  value={paymentForm.paymentDate}
-                  onChange={e => setPaymentForm(f => ({ ...f, paymentDate: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.method')}</label>
-                <select
-                  style={inputStyle}
-                  value={paymentForm.paymentMethod}
-                  onChange={e => setPaymentForm(f => ({ ...f, paymentMethod: e.target.value }))}
-                >
-                  {PAYMENT_METHODS.map(m => (
-                    <option key={m} value={m}>{enumLabel('paymentMethod', m)}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('payment.reference')}</label>
-                <input
-                  type="text"
-                  style={inputStyle}
-                  value={paymentForm.reference}
-                  onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button style={btnSuccess} onClick={recordPayment}>{t('actions.savePayment')}</button>
-              <button style={btnOutline} onClick={() => setShowPayment(false)}>{t('common:actions.cancel')}</button>
-            </div>
-          </div>
-        )}
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button style={btnOutline} onClick={() => downloadPdf(inv.id)}>
-            {t('actions.downloadPdf')}
-          </button>
-          {!showPayment && inv.type !== 'credit_note' && ['sent', 'partially_paid', 'overdue'].includes(inv.status) && (
-            <button style={btnPrimary} onClick={() => setShowPayment(true)}>{t('actions.recordPayment')}</button>
-          )}
-          {inv.status === 'draft' && (
-            <button style={{ ...btnPrimary, background: '#0ea5e9' }} onClick={() => changeStatus(inv.id, 'sent')}>
-              {t('actions.markSent')}
-            </button>
-          )}
-          {(inv.status === 'sent' || inv.status === 'partially_paid') && (
-            <button style={{ ...btnPrimary, background: '#f59e0b' }} onClick={() => changeStatus(inv.id, 'overdue')}>
-              {t('actions.markOverdue')}
-            </button>
-          )}
-          {!['draft', 'cancelled'].includes(inv.status) && inv.type !== 'credit_note' && (
-            <button style={btnDanger} onClick={() => createCreditNote(inv.id)}>
-              {t('actions.creditNote')}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  /* ------------------------------------------------------------------ */
-  /*  Render: List / Create views                                       */
-  /* ------------------------------------------------------------------ */
-
-  return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>{t('title')}</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{t('subtitle')}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {activeSection === 'invoices' && (
-            <button style={btnPrimary} onClick={() => setShowCreate(!showCreate)}>
-              {showCreate ? t('common:actions.cancel') : t('actions.newInvoice')}
-            </button>
-          )}
-          {activeSection === 'plus-values' && (
-            <button style={btnPrimary} onClick={() => setShowPvCreate(!showPvCreate)}>
-              {showPvCreate ? t('common:actions.cancel') : t('actions.newPlusValue')}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {error && (
-        <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 14 }}>
-          {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontWeight: 600 }}>x</button>
-        </div>
-      )}
-
-      {/* Section tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid #e5e7eb' }}>
-        {(['invoices', 'plus-values'] as const).map(sec => (
-          <button
-            key={sec}
-            onClick={() => setActiveSection(sec)}
-            style={{
-              padding: '10px 20px',
-              border: 'none',
-              borderBottom: activeSection === sec ? '2px solid #2563eb' : '2px solid transparent',
-              background: 'none',
-              color: activeSection === sec ? '#2563eb' : '#6b7280',
-              fontWeight: activeSection === sec ? 600 : 400,
-              fontSize: 14,
-              cursor: 'pointer',
-              marginBottom: -2,
-            }}
-          >
-            {sec === 'invoices' ? t('tabs.invoices') : t('tabs.plusValues')}
-          </button>
-        ))}
-      </div>
-
-      {/* ============================================================ */}
-      {/*  INVOICES TAB                                                 */}
-      {/* ============================================================ */}
-
-      {activeSection === 'invoices' && (
-        <>
-          {/* Create form */}
-          {showCreate && (
-            <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('form.createTitle')}</h3>
-              {createError && (
-                <div style={{ background: '#fee2e2', color: '#dc2626', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
-                  {createError}
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.project')}</label>
-                  <select style={inputStyle} value={createForm.projectId} onChange={e => handleProjectChange(e.target.value)}>
-                    <option value="">{t('form.selectProject')}</option>
-                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.client')}</label>
-                  <select style={inputStyle} value={createForm.clientId} onChange={e => setCreateForm(f => ({ ...f, clientId: e.target.value }))}>
-                    <option value="">{t('form.selectClient')}</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.type')}</label>
-                  <select
-                    style={inputStyle}
-                    value={createForm.type}
-                    onChange={e => setCreateForm(f => ({ ...f, type: e.target.value as Invoice['type'] }))}
+              {!createForm.projectId ? (
+                <p className="text-[13px] text-muted">{t('form.situationSelectProject')}</p>
+              ) : (
+                <div className="overflow-hidden rounded-card border border-line">
+                  <DataState
+                    isLoading={situationLoading}
+                    error={situationError || null}
+                    onRetry={() => setSituationReload(n => n + 1)}
+                    isEmpty={situationRows.length === 0}
+                    loading={<TableSkeleton rows={3} cols={5} />}
+                    empty={
+                      <EmptyState
+                        title={t('state.noPositionsTitle')}
+                        description={t('state.noPositions')}
+                      />
+                    }
                   >
-                    <option value="invoice">{enumLabel('invoiceType', 'invoice')}</option>
-                    <option value="situation">{enumLabel('invoiceType', 'situation')}</option>
-                    <option value="acompte">{enumLabel('invoiceType', 'acompte')}</option>
-                    <option value="final_invoice">{enumLabel('invoiceType', 'final_invoice')}</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.vatRate')}</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    style={inputStyle}
-                    value={createForm.vatRate}
-                    onChange={e => setCreateForm(f => ({ ...f, vatRate: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              {/* Situation: offer positions with the server's previously billed quantities */}
-              {isSituation && (
-                <div style={{ marginBottom: 16 }}>
-                  <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>
-                    {situationPreview
-                      ? t('form.situationTitle', { number: situationPreview.situationNumber })
-                      : t('form.situationPositions')}
-                  </h4>
-                  <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6b7280' }}>{t('form.situationHint')}</p>
-                  {!createForm.projectId ? (
-                    <p style={{ fontSize: 13, color: '#9ca3af' }}>{t('form.situationSelectProject')}</p>
-                  ) : situationLoading ? (
-                    <p style={{ fontSize: 13, color: '#6b7280' }}>{t('state.loadingPositions')}</p>
-                  ) : situationRows.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#9ca3af' }}>{t('state.noPositions')}</p>
-                  ) : (
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ background: '#f3f4f6' }}>
+                    <TableWrap>
+                      <Table>
+                        <THead>
                           <tr>
-                            <th style={{ ...thStyle, width: 50 }}>{t('table.position')}</th>
-                            <th style={thStyle}>{t('table.description')}</th>
-                            <th style={{ ...thStyle, width: 60 }}>{t('table.unit')}</th>
-                            <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>{t('table.offerQuantity')}</th>
-                            <th style={{ ...thStyle, width: 110, textAlign: 'right' }}>{t('table.unitPrice')}</th>
-                            <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.previouslyInvoiced')}</th>
-                            <th style={{ ...thStyle, width: 100, textAlign: 'right' }}>{t('table.cumulativeQuantity')}</th>
-                            <th style={{ ...thStyle, width: 90, textAlign: 'right' }}>{t('table.periodQuantity')}</th>
-                            <th style={{ ...thStyle, width: 70, textAlign: 'right' }}>{t('table.budgetPercent')}</th>
-                            <th style={{ ...thStyle, width: 110, textAlign: 'right' }}>{t('table.total')}</th>
+                            <TH className="w-12">{t('table.position')}</TH>
+                            <TH>{t('table.description')}</TH>
+                            <TH className="w-16">{t('table.unit')}</TH>
+                            <TH numeric>{t('table.offerQuantity')}</TH>
+                            <TH numeric>{t('table.unitPriceChf')}</TH>
+                            <TH numeric>{t('table.previouslyInvoiced')}</TH>
+                            <TH numeric>{t('table.cumulativeQuantity')}</TH>
+                            <TH numeric>{t('table.periodQuantity')}</TH>
+                            <TH numeric>{t('table.budgetPercent')}</TH>
+                            <TH numeric>{t('table.totalChf')}</TH>
                           </tr>
-                        </thead>
-                        <tbody>
+                        </THead>
+                        <TBody>
                           {situationRows.map(({ position: p, cumulative, period, total }) => {
                             const executed = cumulative ?? p.previousQuantity;
                             const belowPrevious = cumulative != null && roundQuantity(cumulative) < p.previousQuantity;
+                            const overBudget = Number.isFinite(executed) && executed > p.offerQuantity;
                             return (
-                              <tr key={p.offerLineId}>
-                                <td style={{ ...tdStyle, color: '#6b7280' }}>{p.positionNumber}</td>
-                                <td style={tdStyle}>{p.description}</td>
-                                <td style={tdStyle}>{p.unit}</td>
-                                <td style={{ ...tdStyle, textAlign: 'right' }}>{p.offerQuantity}</td>
-                                <td style={{ ...tdStyle, textAlign: 'right' }}>
-                                  {p.unitPriceCents == null ? t('form.unpriced') : formatMoney(p.unitPriceCents)}
-                                </td>
-                                <td style={{ ...tdStyle, textAlign: 'right', color: '#6b7280' }}>{p.previousQuantity}</td>
-                                <td style={tdStyle}>
-                                  <input
+                              <TR key={p.offerLineId}>
+                                <TD className="tnum text-muted">{p.positionNumber}</TD>
+                                <TD className="min-w-[180px] max-w-[280px]">{p.description}</TD>
+                                <TD className="text-muted">{p.unit || '—'}</TD>
+                                <TD numeric>{formatNumber(p.offerQuantity)}</TD>
+                                <TD numeric>
+                                  {p.unitPriceCents == null ? (
+                                    <Tag tone="warn">{t('form.unpriced')}</Tag>
+                                  ) : (
+                                    formatAmount(p.unitPriceCents)
+                                  )}
+                                </TD>
+                                <TD numeric className="text-muted">{formatNumber(p.previousQuantity)}</TD>
+                                <TD numeric>
+                                  <Input
                                     type="number"
                                     min={p.previousQuantity}
                                     step="any"
                                     disabled={p.unitPriceCents == null}
+                                    aria-label={t('table.cumulativeQuantity')}
+                                    aria-invalid={belowPrevious || undefined}
                                     placeholder={String(p.previousQuantity)}
-                                    style={{
-                                      ...inputStyle, padding: '4px 8px', textAlign: 'right',
-                                      borderColor: belowPrevious ? '#dc2626' : '#d1d5db',
-                                    }}
+                                    className={cn(
+                                      'tnum h-8 w-24 text-right',
+                                      belowPrevious && 'border-bad focus:border-bad focus:ring-bad/15',
+                                    )}
                                     value={cumulativeInputs[p.offerLineId] ?? ''}
                                     onChange={e => setCumulativeInputs(prev => ({ ...prev, [p.offerLineId]: e.target.value }))}
                                   />
-                                </td>
-                                <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13, color: belowPrevious ? '#dc2626' : '#6b7280' }}>
-                                  {cumulative == null ? '-' : period}
-                                </td>
-                                <td style={{ ...tdStyle, textAlign: 'right', fontSize: 13, color: executed > p.offerQuantity ? '#b45309' : '#6b7280' }}>
-                                  {p.offerQuantity > 0 && Number.isFinite(executed) ? `${Math.round((executed / p.offerQuantity) * 100)} %` : '-'}
-                                </td>
-                                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
-                                  {cumulative == null ? '-' : formatMoney(total)}
-                                </td>
-                              </tr>
+                                </TD>
+                                <TD numeric className={belowPrevious ? 'text-bad' : 'text-muted'}>
+                                  {cumulative == null ? '—' : formatNumber(period)}
+                                </TD>
+                                <TD numeric className={overBudget ? 'text-warn' : 'text-muted'}>
+                                  {p.offerQuantity > 0 && Number.isFinite(executed)
+                                    ? `${Math.round((executed / p.offerQuantity) * 100)} %`
+                                    : '—'}
+                                </TD>
+                                <TD numeric className="font-medium">
+                                  {cumulative == null ? '—' : formatAmount(total)}
+                                </TD>
+                              </TR>
                             );
                           })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                        </TBody>
+                      </Table>
+                    </TableWrap>
+                  </DataState>
                 </div>
               )}
+            </div>
+          ) : null}
 
-              {/* Lines */}
-              <h4 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>
-                {isSituation ? t('form.extraLines') : t('form.lines')}
-              </h4>
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: '#f3f4f6' }}>
+          {/* Free lines */}
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+            <h3 className="text-[13px] font-semibold text-ink">
+              {isSituation ? t('form.extraLines') : t('form.lines')}
+            </h3>
+            <div className="overflow-hidden rounded-card border border-line">
+              <TableWrap>
+                <Table>
+                  <THead>
                     <tr>
-                      <th style={thStyle}>{t('table.description')}</th>
-                      <th style={{ ...thStyle, width: 80 }}>{t('table.unit')}</th>
-                      <th style={{ ...thStyle, width: 80, textAlign: 'right' }}>{t('table.quantity')}</th>
-                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.unitPriceChf')}</th>
-                      <th style={{ ...thStyle, width: 120, textAlign: 'right' }}>{t('table.total')}</th>
-                      <th style={{ ...thStyle, width: 40 }}></th>
+                      <TH>{t('table.description')}</TH>
+                      <TH className="w-20">{t('table.unit')}</TH>
+                      <TH numeric>{t('table.quantity')}</TH>
+                      <TH numeric>{t('table.unitPriceChf')}</TH>
+                      <TH numeric>{t('table.totalChf')}</TH>
+                      <TH className="w-11">
+                        <span className="sr-only">{t('table.actions')}</span>
+                      </TH>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {createLines.map((line, idx) => {
-                      return (
-                        <tr key={idx}>
-                          <td style={tdStyle}>
-                            <input
-                              style={{ ...inputStyle, border: 'none', padding: '4px 8px' }}
-                              placeholder={t('form.descriptionPlaceholder')}
-                              value={line.description}
-                              onChange={e => updateLine(idx, 'description', e.target.value)}
-                            />
-                          </td>
-                          <td style={tdStyle}>
-                            <input
-                              style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'center' }}
-                              value={line.unit}
-                              onChange={e => updateLine(idx, 'unit', e.target.value)}
-                            />
-                          </td>
-                          <td style={tdStyle}>
-                            <input
-                              type="number"
-                              style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                              value={line.quantity}
-                              onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                            />
-                          </td>
-                          <td style={tdStyle}>
-                            <input
-                              type="number"
-                              step="0.05"
-                              style={{ ...inputStyle, border: 'none', padding: '4px 8px', textAlign: 'right' }}
-                              value={line.unitPriceCents / 100 || ''}
-                              onChange={e => updateLine(idx, 'unitPriceCents', Math.round(parseFloat(e.target.value || '0') * 100))}
-                            />
-                          </td>
-                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
-                            {formatMoney(lineTotal(line))}
-                          </td>
-                          <td style={tdStyle}>
-                            {(createLines.length > 1 || isSituation) && (
-                              <button
-                                onClick={() => removeLine(idx)}
-                                style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 16 }}
-                              >
-                                &times;
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <button style={btnOutline} onClick={addLine}>{t('actions.addLine')}</button>
-
-              {/* Summary */}
-              <div style={{
-                marginTop: 16,
-                padding: 16,
-                background: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                maxWidth: 360,
-                marginLeft: 'auto',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>{t('summary.subtotalHt')}</span>
-                  <span>{formatMoney(subtotalHt)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>{t('summary.vat', { rate: vatRate })}</span>
-                  <span>{formatMoney(vatAmount)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                  <span style={{ color: '#6b7280' }}>{t('summary.retention')}</span>
-                  <span style={{ color: '#dc2626' }}>- {formatMoney(retentionAmount)}</span>
-                </div>
-                {isSituation && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 6 }}>
-                    <span style={{ color: '#6b7280' }}>{t('summary.priorAcomptes')}</span>
-                    <span style={{ color: '#dc2626' }}>- {formatMoney(priorAcomptes)}</span>
-                  </div>
-                )}
-                <div style={{ borderTop: '2px solid #e5e7eb', marginTop: 8, paddingTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{t('summary.totalTtc')}</span>
-                  <span style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{formatMoney(totalTtc)}</span>
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div style={{ marginTop: 12 }}>
-                <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.notes')}</label>
-                <textarea
-                  style={{ ...inputStyle, minHeight: 60 }}
-                  value={createForm.notes}
-                  onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
-                />
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-                <button style={btnPrimary} onClick={handleCreate}>{t('actions.createInvoice')}</button>
-                <button style={btnOutline} onClick={() => setShowCreate(false)}>{t('common:actions.cancel')}</button>
-              </div>
+                  </THead>
+                  <TBody>
+                    {createLines.map((line, idx) => (
+                      <TR key={idx}>
+                        <TD>
+                          <Input
+                            className="h-8 min-w-[160px]"
+                            aria-label={t('table.description')}
+                            placeholder={t('form.descriptionPlaceholder')}
+                            value={line.description}
+                            onChange={e => updateLine(idx, 'description', e.target.value)}
+                          />
+                        </TD>
+                        <TD>
+                          <Input
+                            className="h-8 w-16 text-center"
+                            aria-label={t('table.unit')}
+                            value={line.unit}
+                            onChange={e => updateLine(idx, 'unit', e.target.value)}
+                          />
+                        </TD>
+                        <TD numeric>
+                          <Input
+                            type="number"
+                            step="any"
+                            className="tnum h-8 w-20 text-right"
+                            aria-label={t('table.quantity')}
+                            value={line.quantity}
+                            onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                          />
+                        </TD>
+                        <TD numeric>
+                          <Input
+                            type="number"
+                            step="0.05"
+                            inputMode="decimal"
+                            className="tnum h-8 w-28 text-right"
+                            aria-label={t('table.unitPriceChf')}
+                            value={line.unitPriceCents / 100 || ''}
+                            onChange={e => updateLine(idx, 'unitPriceCents', Math.round(parseFloat(e.target.value || '0') * 100))}
+                          />
+                        </TD>
+                        <TD numeric className="font-medium">{formatAmount(lineTotal(line))}</TD>
+                        <TD>
+                          {createLines.length > 1 || isSituation ? (
+                            <Button
+                              variant="quiet"
+                              size="iconSm"
+                              aria-label={t('actions.removeLine')}
+                              onClick={() => removeLine(idx)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          ) : null}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrap>
+              <CardFooter>
+                <Button variant="ghost" size="sm" onClick={addLine}>
+                  <Plus />
+                  {t('actions.addLine')}
+                </Button>
+              </CardFooter>
             </div>
-          )}
-
-          {/* Filters */}
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-            {/* Status tabs */}
-            <div style={{ display: 'flex', gap: 0, flex: 1, flexWrap: 'wrap' }}>
-              {STATUS_TABS.map(s => (
-                <button
-                  key={s}
-                  onClick={() => { setStatusFilter(s); setPage(1); }}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 9999,
-                    border: 'none',
-                    background: statusFilter === s ? '#2563eb' : '#f3f4f6',
-                    color: statusFilter === s ? '#fff' : '#4b5563',
-                    fontSize: 13,
-                    fontWeight: statusFilter === s ? 600 : 400,
-                    cursor: 'pointer',
-                    marginRight: 4,
-                    marginBottom: 4,
-                  }}
-                >
-                  {s === 'all' ? t('filters.allStatuses') : statusLabel('invoice', s)}
-                </button>
-              ))}
-            </div>
-
-            {/* Type filter */}
-            <select
-              style={{ ...inputStyle, width: 160 }}
-              value={typeFilter}
-              onChange={e => { setTypeFilter(e.target.value); setPage(1); }}
-            >
-              <option value="">{t('filters.allTypes')}</option>
-              {INVOICE_TYPES.map(k => (
-                <option key={k} value={k}>{enumLabel('invoiceType', k)}</option>
-              ))}
-            </select>
-
-            {/* Search */}
-            <input
-              type="text"
-              placeholder={t('filters.searchPlaceholder')}
-              style={{ ...inputStyle, width: 200 }}
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-            />
           </div>
 
-          {/* Invoice table */}
-          {loading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loadingInvoices')}</p>
-          ) : filteredInvoices.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('state.noInvoices')}</p>
-          ) : (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f9fafb' }}>
-                  <tr>
-                    <th style={thStyle}>{t('table.invoiceNumber')}</th>
-                    <th style={thStyle}>{t('table.type')}</th>
-                    <th style={thStyle}>{t('table.client')}</th>
-                    <th style={thStyle}>{t('table.project')}</th>
-                    <th style={thStyle}>{t('table.issueDate')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.totalTtc')}</th>
-                    <th style={thStyle}>{t('table.status')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.paid')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredInvoices.map(inv => (
-                    <tr
-                      key={inv.id}
-                      onClick={() => openDetail(inv)}
-                      style={{ cursor: 'pointer' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '')}
-                    >
-                      <td style={{ ...tdStyle, fontWeight: 600, color: '#2563eb' }}>{inv.invoiceNumber}</td>
-                      <td style={tdStyle}>
-                        <Badge color={TYPE_COLORS[inv.type]}>{typeLabel(inv, t)}</Badge>
-                      </td>
-                      <td style={tdStyle}>{inv.client?.name || '-'}</td>
-                      <td style={tdStyle}>{inv.project?.name || '-'}</td>
-                      <td style={tdStyle}>{formatDate(inv.issueDate)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{formatMoney(inv.totalTtcCents)}</td>
-                      <td style={tdStyle}>
-                        <Badge color={STATUS_COLORS[inv.status]} strike={STATUS_COLORS[inv.status]?.strike}>
-                          {statusLabel('invoice', inv.status)}
-                        </Badge>
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMoney(inv.amountPaidCents ?? 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-              <button
-                style={btnOutline}
-                disabled={page <= 1}
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-              >
-                {t('common:actions.previous')}
-              </button>
-              <span style={{ padding: '8px 12px', fontSize: 14, color: '#6b7280' }}>
-                {t('common:state.page', { page, total: totalPages })}
+          {/* Totals preview */}
+          <div className="ml-auto grid grid-cols-[minmax(0,1fr)] w-full max-w-[340px] gap-2 rounded-card border border-line bg-paper-2 p-3.5">
+            <dl className="grid grid-cols-[minmax(0,1fr)] gap-2">
+              <SummaryRow label={t('summary.subtotalHt')} value={formatMoney(subtotalHt)} />
+              <SummaryRow label={t('summary.vat', { rate: vatRate.toFixed(2) })} value={formatMoney(vatAmount)} />
+              {acomptesAreDeducted ? (
+                <SummaryRow
+                  label={t('summary.priorAcomptes')}
+                  value={
+                    priorAcomptesKnown
+                      ? formatMoney(priorAcomptes === 0 ? 0 : -priorAcomptes)
+                      : '—'
+                  }
+                />
+              ) : null}
+            </dl>
+            <div className="flex items-baseline justify-between gap-3 border-t border-line pt-2.5">
+              <span className="text-[13px] font-medium text-ink">
+                {retentionIsWithheld
+                  ? t('summary.totalBeforeRetention')
+                  : isFinal
+                    ? t('summary.totalBeforeRelease')
+                    : t('summary.totalTtc')}
               </span>
-              <button
-                style={btnOutline}
-                disabled={page >= totalPages}
-                onClick={() => setPage(p => p + 1)}
-              >
-                {t('common:actions.next')}
-              </button>
+              <span className="tnum text-[19px] font-semibold tracking-[-0.01em]">
+                {formatMoney(provisionalTotal)}
+              </span>
             </div>
-          )}
-        </>
-      )}
+            {retentionIsWithheld ? (
+              <p className="text-xs text-muted">{t('summary.retentionNote')}</p>
+            ) : null}
+            {isFinal ? (
+              <p className="text-xs text-muted">{t('summary.finalReleaseNote')}</p>
+            ) : null}
+            {acomptesAreDeducted && !priorAcomptesKnown ? (
+              <p className="text-xs text-muted">{t('summary.acomptesPendingNote')}</p>
+            ) : null}
+            {finalError ? (
+              <p role="alert" className="text-[13px] text-bad">{finalError}</p>
+            ) : null}
+          </div>
 
-      {/* ============================================================ */}
-      {/*  PLUS-VALUES TAB                                              */}
-      {/* ============================================================ */}
+          <Field label={t('form.notes')} htmlFor="invoice-notes">
+            <Textarea
+              id="invoice-notes"
+              value={createForm.notes}
+              onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
+            />
+          </Field>
 
-      {activeSection === 'plus-values' && (
-        <>
-          {/* Create form */}
-          {showPvCreate && (
-            <div style={{ background: '#f9fafb', borderRadius: 8, padding: 20, marginBottom: 20, border: '1px solid #e5e7eb' }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>{t('plusValues.createTitle')}</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('form.project')}</label>
-                  <select style={inputStyle} value={pvForm.projectId} onChange={e => setPvForm(f => ({ ...f, projectId: e.target.value }))}>
-                    <option value="">{t('form.selectProject')}</option>
-                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('plusValues.description')}</label>
-                  <input
-                    style={inputStyle}
-                    value={pvForm.description}
-                    onChange={e => setPvForm(f => ({ ...f, description: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>{t('plusValues.amount')}</label>
-                  <input
+          {createError ? (
+            <p role="alert" className="text-[13px] text-bad">{createError}</p>
+          ) : null}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setShowCreate(false)}>
+            {t('common:actions.cancel')}
+          </Button>
+          <Button variant="primary" disabled={creating} onClick={handleCreate}>
+            {creating ? t('actions.creating') : t('actions.createInvoice')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  /* ------------------------------------------------------------------ */
+  /*  Render: detail view                                               */
+  /* ------------------------------------------------------------------ */
+
+  if (selectedId) {
+    const inv = detail;
+    const lines = inv?.lines ?? [];
+    const payments = inv?.payments ?? [];
+    const paidPct = inv && inv.totalTtcCents > 0
+      ? Math.min(100, Math.round(((inv.amountPaidCents ?? 0) / inv.totalTtcCents) * 100))
+      : 0;
+    const retention = inv?.retentionAmountCents ?? 0;
+    const prior = inv?.priorAcomptesCents ?? 0;
+    const isCreditNote = inv?.type === 'credit_note';
+    const canPay = inv != null && !isCreditNote && PAYABLE_STATUSES.has(inv.status);
+    const canCredit = inv != null && !isCreditNote && !['draft', 'cancelled'].includes(inv.status);
+    const situationColumns = inv?.type === 'situation';
+
+    return (
+      <PageBody>
+        <div>
+          <Button variant="quiet" size="sm" onClick={closeDetail}>
+            <ArrowLeft />
+            {t('actions.backToList')}
+          </Button>
+        </div>
+
+        <PageHeader
+          kicker={t('common:nav.invoices')}
+          title={inv?.invoiceNumber || t('detail.fallbackTitle')}
+          meta={
+            inv ? (
+              <>
+                <span>{inv.client?.name ?? '—'}</span>
+                <MetaDivider />
+                <span>{inv.project?.name || inv.projectId}</span>
+                <MetaDivider />
+                <Tag tone={typeTone(inv.type)}>{typeLabel(inv, t)}</Tag>
+                <InvoiceState invoice={inv} />
+              </>
+            ) : undefined
+          }
+          actions={
+            inv ? (
+              <>
+                {canPay ? (
+                  <Button variant="primary" onClick={openPayment}>
+                    <Plus />
+                    {t('actions.recordPayment')}
+                  </Button>
+                ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" aria-label={t('actions.moreActions')}>
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => void downloadPdf(inv.id)}>
+                      <Download />
+                      {t('actions.downloadPdf')}
+                    </DropdownMenuItem>
+                    {inv.status === 'draft' && !isCreditNote ? (
+                      <DropdownMenuItem onSelect={() => void changeStatus(inv.id, 'sent')}>
+                        <Send />
+                        {t('actions.markSent')}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {(inv.status === 'sent' || inv.status === 'partially_paid') && !isCreditNote ? (
+                      <DropdownMenuItem onSelect={() => void changeStatus(inv.id, 'overdue')}>
+                        <Clock />
+                        {t('actions.markOverdue')}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canCredit ? (
+                      <DropdownMenuItem className="text-bad" onSelect={() => void createCreditNote(inv)}>
+                        <FileMinus2 />
+                        {t('actions.creditNote')}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {/* A draft is voided, not credited: the server refuses `cancelled` on anything
+                        issued, and a credit note on a draft. */}
+                    {inv.status === 'draft' && !isCreditNote ? (
+                      <DropdownMenuItem className="text-bad" onSelect={() => void cancelInvoice(inv)}>
+                        <Ban />
+                        {t('actions.cancelInvoice')}
+                      </DropdownMenuItem>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ) : undefined
+          }
+        />
+
+        {actionError ? (
+          <p role="alert" className="text-[13px] text-bad">{actionError}</p>
+        ) : null}
+
+        {inv ? (
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
+              {/* Lines */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {t('detail.lines')}
+                    <CardCount>({lines.length})</CardCount>
+                  </CardTitle>
+                </CardHeader>
+                <DataState
+                  isLoading={detailLoading}
+                  isEmpty={lines.length === 0}
+                  loading={<TableSkeleton rows={4} cols={5} />}
+                  empty={<EmptyState title={t('detail.noLines')} description={t('detail.noLinesHelp')} />}
+                >
+                  <TableWrap>
+                    <Table>
+                      <THead>
+                        <tr>
+                          <TH>{t('table.description')}</TH>
+                          <TH className="w-16">{t('table.unit')}</TH>
+                          <TH numeric>
+                            {situationColumns ? t('table.offerQuantity') : t('table.quantity')}
+                          </TH>
+                          <TH numeric>{t('table.unitPriceChf')}</TH>
+                          <TH numeric>{t('table.totalChf')}</TH>
+                          {situationColumns ? (
+                            <>
+                              <TH numeric>{t('table.cumulativeQuantity')}</TH>
+                              <TH numeric>{t('table.previousQuantity')}</TH>
+                              <TH numeric>{t('table.periodQuantity')}</TH>
+                              <TH numeric>{t('table.budgetPercent')}</TH>
+                            </>
+                          ) : null}
+                        </tr>
+                      </THead>
+                      <TBody>
+                        {lines.map((line, i) => (
+                          <TR key={line.id || i}>
+                            <TD className="min-w-[180px] max-w-[320px]">{line.description}</TD>
+                            <TD className="text-muted">{line.unit || '—'}</TD>
+                            <TD numeric>{formatNumber(line.quantity)}</TD>
+                            <TD numeric>{formatAmount(line.unitPriceCents)}</TD>
+                            <TD numeric className="font-medium">
+                              {formatAmount(line.totalPriceCents ?? line.quantity * line.unitPriceCents)}
+                            </TD>
+                            {situationColumns ? (
+                              <>
+                                <TD numeric>{formatNumber(line.cumulativeQuantity)}</TD>
+                                <TD numeric className="text-muted">{formatNumber(line.previousQuantity)}</TD>
+                                <TD numeric>{formatNumber(line.periodQuantity)}</TD>
+                                <TD numeric className="text-muted">
+                                  {line.offerLineId && line.cumulativeQuantity != null && Number(line.quantity) > 0
+                                    ? `${Math.round((line.cumulativeQuantity / Number(line.quantity)) * 100)} %`
+                                    : '—'}
+                                </TD>
+                              </>
+                            ) : null}
+                          </TR>
+                        ))}
+                      </TBody>
+                    </Table>
+                  </TableWrap>
+                </DataState>
+              </Card>
+
+              {/* Payments */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {t('detail.payments')}
+                    <CardCount>({payments.length})</CardCount>
+                  </CardTitle>
+                  {canPay ? (
+                    <Button variant="ghost" size="sm" onClick={openPayment}>
+                      <Plus />
+                      {t('actions.recordPayment')}
+                    </Button>
+                  ) : null}
+                </CardHeader>
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
+                    <span className="text-muted">
+                      {t('detail.paidAmount', { amount: formatMoney(inv.amountPaidCents ?? 0) })}
+                    </span>
+                    <span className="tnum font-medium">{t('detail.paidPercent', { percent: paidPct })}</span>
+                  </div>
+                  <div
+                    role="progressbar"
+                    aria-label={t('detail.progressLabel')}
+                    aria-valuenow={paidPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="h-2 overflow-hidden rounded-full bg-line-soft"
+                  >
+                    {/* A bar's width is a runtime value — the one inline style the conventions allow. */}
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-[width] duration-300',
+                        paidPct >= 100 ? 'bg-ok' : 'bg-warn',
+                      )}
+                      style={{ width: `${paidPct}%` }}
+                    />
+                  </div>
+                </CardContent>
+                <DataState
+                  isLoading={detailLoading}
+                  isEmpty={payments.length === 0}
+                  loading={<TableSkeleton rows={2} cols={4} />}
+                  empty={<EmptyState title={t('detail.noPayments')} description={t('detail.noPaymentsHelp')} />}
+                >
+                  <TableWrap>
+                    <Table>
+                      <THead>
+                        <tr>
+                          <TH>{t('table.date')}</TH>
+                          <TH>{t('table.method')}</TH>
+                          <TH>{t('table.reference')}</TH>
+                          <TH numeric>{t('table.amount')}</TH>
+                        </tr>
+                      </THead>
+                      <TBody>
+                        {payments.map(p => (
+                          <TR key={p.id}>
+                            <TD className="tnum">{formatDate(p.paymentDate)}</TD>
+                            <TD>{enumLabel('paymentMethod', p.paymentMethod)}</TD>
+                            <TD className="text-muted">{p.reference || '—'}</TD>
+                            <TD numeric className="font-medium text-ok">{formatMoney(p.amountCents)}</TD>
+                          </TR>
+                        ))}
+                      </TBody>
+                    </Table>
+                  </TableWrap>
+                </DataState>
+              </Card>
+
+              {/* Notes */}
+              {inv.notes ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{t('detail.notes')}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="whitespace-pre-line text-[13.5px] text-ink-2">{inv.notes}</p>
+                  </CardContent>
+                </Card>
+              ) : null}
+            </div>
+
+            {/* The numbers */}
+            <aside className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_20px)] lg:self-start">
+              <Card>
+                <CardHeader>
+                  <CardTitle>{t('detail.summaryTitle')}</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+                  <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+                    <span className="text-xs text-muted">{t('summary.totalTtc')}</span>
+                    <span className="tnum text-[26px] font-semibold leading-none tracking-[-0.01em]">
+                      {formatMoney(inv.totalTtcCents)}
+                    </span>
+                  </div>
+
+                  <dl className="grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-line-soft pt-3.5">
+                    <SummaryRow label={t('summary.subtotalHt')} value={formatMoney(inv.subtotalHtCents)} />
+                    <SummaryRow
+                      label={t('summary.vat', { rate: (inv.vatRate / 100).toFixed(2) })}
+                      value={formatMoney(inv.vatAmountCents)}
+                    />
+                    {/* The server's own amount, in its effect on the total: withheld, or released
+                        by the final invoice (a negative retention). The rate is not stored on the
+                        invoice, so only the amount is shown. */}
+                    <SummaryRow
+                      label={retention < 0 ? t('summary.retentionReleased') : t('summary.retention')}
+                      value={formatMoney(retention === 0 ? 0 : -retention)}
+                    />
+                    {prior !== 0 ? (
+                      <SummaryRow label={t('summary.priorAcomptes')} value={formatMoney(-prior)} />
+                    ) : null}
+                    <SummaryRow label={t('detail.issueDate')} value={formatDate(inv.issueDate)} />
+                    <SummaryRow label={t('detail.dueDate')} value={formatDate(inv.dueDate)} />
+                  </dl>
+                </CardContent>
+              </Card>
+            </aside>
+          </div>
+        ) : (
+          /* No invoice yet: DataState decides between loading, a failed load and "not found". */
+          <Card>
+            <DataState
+              isLoading={detailLoading}
+              error={detailError || null}
+              onRetry={() => void loadDetail(selectedId)}
+              isEmpty
+              loading={<TableSkeleton rows={4} cols={3} />}
+              empty={<EmptyState title={t('detail.notFound')} description={t('detail.notFoundHelp')} />}
+            >
+              {null}
+            </DataState>
+          </Card>
+        )}
+
+        {/* Record a payment */}
+        <Dialog open={showPayment} onOpenChange={setShowPayment}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('payment.title')}</DialogTitle>
+              <DialogDescription>{t('payment.help')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+                <Field label={t('payment.amount')} htmlFor="payment-amount" required>
+                  <Input
+                    id="payment-amount"
                     type="number"
                     step="0.05"
-                    style={inputStyle}
-                    value={pvForm.amountCents / 100 || ''}
-                    onChange={e => setPvForm(f => ({ ...f, amountCents: Math.round(parseFloat(e.target.value || '0') * 100) }))}
+                    inputMode="decimal"
+                    className="tnum text-right"
+                    value={paymentForm.amountCents / 100 || ''}
+                    onChange={e => setPaymentForm(f => ({ ...f, amountCents: Math.round(parseFloat(e.target.value || '0') * 100) }))}
                   />
-                </div>
+                </Field>
+                <Field label={t('payment.date')} htmlFor="payment-date" required>
+                  <Input
+                    id="payment-date"
+                    type="date"
+                    value={paymentForm.paymentDate}
+                    onChange={e => setPaymentForm(f => ({ ...f, paymentDate: e.target.value }))}
+                  />
+                </Field>
+                <Field label={t('payment.method')} htmlFor="payment-method">
+                  <Select
+                    id="payment-method"
+                    value={paymentForm.paymentMethod}
+                    onChange={e => setPaymentForm(f => ({ ...f, paymentMethod: e.target.value }))}
+                  >
+                    {PAYMENT_METHODS.map(m => (
+                      <option key={m} value={m}>{enumLabel('paymentMethod', m)}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('payment.reference')} htmlFor="payment-reference">
+                  <Input
+                    id="payment-reference"
+                    value={paymentForm.reference}
+                    onChange={e => setPaymentForm(f => ({ ...f, reference: e.target.value }))}
+                  />
+                </Field>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button style={btnPrimary} onClick={createPlusValue}>{t('common:actions.create')}</button>
-                <button style={btnOutline} onClick={() => setShowPvCreate(false)}>{t('common:actions.cancel')}</button>
-              </div>
-            </div>
-          )}
+              {paymentError ? (
+                <p role="alert" className="text-[13px] text-bad">{paymentError}</p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowPayment(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button variant="primary" disabled={savingPayment} onClick={recordPayment}>
+                {savingPayment ? t('common:actions.saving') : t('actions.savePayment')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-          {pvLoading ? (
-            <p style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>{t('state.loadingPlusValues')}</p>
-          ) : plusValues.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>{t('state.noPlusValues')}</p>
+        {createDialog}
+      </PageBody>
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
+  /*  Render: list view                                                 */
+  /* ------------------------------------------------------------------ */
+
+  return (
+    <PageBody>
+      <PageHeader
+        title={t('title')}
+        kicker={t('common:navGroup.finance')}
+        meta={<span>{t('subtitle')}</span>}
+        actions={
+          activeSection === 'invoices' ? (
+            <Button
+              variant="primary"
+              onClick={() => { setCreateError(''); setShowCreate(true); }}
+            >
+              <Plus />
+              {t('actions.newInvoice')}
+            </Button>
           ) : (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ background: '#f9fafb' }}>
-                  <tr>
-                    <th style={thStyle}>{t('table.project')}</th>
-                    <th style={thStyle}>{t('table.description')}</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>{t('table.amount')}</th>
-                    <th style={thStyle}>{t('table.status')}</th>
-                    <th style={thStyle}>{t('table.actions')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plusValues.map(pv => (
-                    <tr key={pv.id}>
-                      <td style={tdStyle}>{pv.project?.name || pv.projectId}</td>
-                      <td style={tdStyle}>{pv.description}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{formatMoney(pv.amountCents)}</td>
-                      <td style={tdStyle}>
-                        <Badge color={PV_STATUS_COLORS[pv.status]}>{statusLabel('plusValue', pv.status)}</Badge>
-                      </td>
-                      <td style={tdStyle}>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          {pv.status === 'detected' && (
-                            <button
-                              style={{ ...btnOutline, padding: '4px 10px', fontSize: 12 }}
-                              onClick={() => updatePvStatus(pv.id, 'submitted')}
-                            >
-                              {t('plusValues.submit')}
-                            </button>
-                          )}
-                          {pv.status === 'submitted' && (
-                            <>
-                              <button
-                                style={{ ...btnSuccess, padding: '4px 10px', fontSize: 12 }}
-                                onClick={() => updatePvStatus(pv.id, 'approved')}
-                              >
-                                {t('plusValues.approve')}
-                              </button>
-                              <button
-                                style={{ ...btnDanger, padding: '4px 10px', fontSize: 12 }}
-                                onClick={() => updatePvStatus(pv.id, 'rejected')}
-                              >
-                                {t('plusValues.reject')}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+            <Button variant="primary" onClick={() => setShowPvCreate(true)}>
+              <Plus />
+              {t('actions.newPlusValue')}
+            </Button>
+          )
+        }
+      />
+
+      {actionError ? (
+        <p role="alert" className="text-[13px] text-bad">{actionError}</p>
+      ) : null}
+
+      <Tabs
+        value={activeSection}
+        onValueChange={value => setActiveSection(value as Section)}
+        className="grid grid-cols-[minmax(0,1fr)] gap-5"
+      >
+        <TabsList aria-label={t('tabs.label')}>
+          <TabsTrigger value="invoices">{t('tabs.invoices')}</TabsTrigger>
+          <TabsTrigger value="plus-values">{t('tabs.plusValues')}</TabsTrigger>
+        </TabsList>
+
+        {/* ---------------- Invoices ---------------- */}
+        <TabsContent value="invoices">
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+              <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('filters.status')}>
+                {STATUS_TABS.map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={statusFilter === value}
+                    onClick={() => { setStatusFilter(value); setPage(1); }}
+                    className={cn(
+                      'rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-ink',
+                      statusFilter === value && 'bg-chalk font-medium text-ink',
+                    )}
+                  >
+                    {value === 'all' ? t('filters.allStatuses') : statusLabel('invoice', value)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  className="w-[170px]"
+                  aria-label={t('filters.type')}
+                  value={typeFilter}
+                  onChange={e => { setTypeFilter(e.target.value); setPage(1); }}
+                >
+                  <option value="">{t('filters.allTypes')}</option>
+                  {INVOICE_TYPES.map(k => (
+                    <option key={k} value={k}>{enumLabel('invoiceType', k)}</option>
                   ))}
-                </tbody>
-              </table>
+                </Select>
+                <SearchInput
+                  icon={<Search className="size-4" />}
+                  placeholder={t('filters.searchPlaceholder')}
+                  aria-label={t('filters.searchPlaceholder')}
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
             </div>
-          )}
-        </>
-      )}
-    </div>
+
+            <DataState
+              isLoading={loading}
+              error={listError || null}
+              onRetry={() => void fetchInvoices()}
+              isEmpty={filteredInvoices.length === 0}
+              loading={<TableSkeleton rows={6} cols={6} />}
+              empty={
+                filtersActive ? (
+                  <EmptyState title={t('state.noMatch')} description={t('state.noMatchHelp')} />
+                ) : (
+                  <EmptyState
+                    title={t('state.noInvoices')}
+                    description={t('state.noInvoicesHelp')}
+                    action={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setCreateError(''); setShowCreate(true); }}
+                      >
+                        <Plus />
+                        {t('actions.newInvoice')}
+                      </Button>
+                    }
+                  />
+                )
+              }
+            >
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>{t('table.invoiceNumber')}</TH>
+                      <TH>{t('table.type')}</TH>
+                      <TH>{t('table.client')}</TH>
+                      <TH>{t('table.project')}</TH>
+                      <TH>{t('table.issueDate')}</TH>
+                      <TH numeric>{t('table.totalTtc')}</TH>
+                      <TH>{t('table.status')}</TH>
+                      <TH numeric>{t('table.paid')}</TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {filteredInvoices.map(inv => (
+                      <TR
+                        key={inv.id}
+                        muted={inv.status === 'cancelled'}
+                        onActivate={() => openDetail(inv.id)}
+                      >
+                        <TD>
+                          <Ref>{inv.invoiceNumber || '—'}</Ref>
+                        </TD>
+                        <TD>
+                          <Tag tone={typeTone(inv.type)}>{typeLabel(inv, t)}</Tag>
+                        </TD>
+                        <TD>{inv.client?.name || '—'}</TD>
+                        <TD>{inv.project?.name || '—'}</TD>
+                        <TD className="tnum text-muted">{formatDate(inv.issueDate)}</TD>
+                        <TD numeric className="font-medium">{formatMoney(inv.totalTtcCents)}</TD>
+                        <TD>
+                          <InvoiceState invoice={inv} />
+                        </TD>
+                        <TD numeric className="text-muted">{formatMoney(inv.amountPaidCents ?? 0)}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrap>
+            </DataState>
+
+            {/* Pagination stays reachable even when the filtered page shows nothing. */}
+            {loading || listError ? null : (
+              <CardFooter>
+                <span>{t('summary.rowCount', { count: filteredInvoices.length })}</span>
+                {totalPages > 1 ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={page <= 1}
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                    >
+                      {t('common:actions.previous')}
+                    </Button>
+                    <span className="tnum">{t('common:state.page', { page, total: totalPages })}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={page >= totalPages}
+                      onClick={() => setPage(p => p + 1)}
+                    >
+                      {t('common:actions.next')}
+                    </Button>
+                  </div>
+                ) : null}
+              </CardFooter>
+            )}
+          </Card>
+        </TabsContent>
+
+        {/* ---------------- Plus-values ---------------- */}
+        <TabsContent value="plus-values">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {t('plusValues.title')}
+                {pvLoading ? null : <CardCount>({plusValues.length})</CardCount>}
+              </CardTitle>
+            </CardHeader>
+            <DataState
+              isLoading={pvLoading}
+              error={pvError || null}
+              onRetry={() => void fetchPlusValues()}
+              isEmpty={plusValues.length === 0}
+              loading={<TableSkeleton rows={4} cols={4} />}
+              empty={
+                <EmptyState
+                  title={t('state.noPlusValues')}
+                  description={t('state.noPlusValuesHelp')}
+                  action={
+                    <Button variant="ghost" size="sm" onClick={() => setShowPvCreate(true)}>
+                      <Plus />
+                      {t('actions.newPlusValue')}
+                    </Button>
+                  }
+                />
+              }
+            >
+              <TableWrap>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>{t('table.project')}</TH>
+                      <TH>{t('table.description')}</TH>
+                      <TH numeric>{t('table.amount')}</TH>
+                      <TH>{t('table.status')}</TH>
+                      <TH className="w-11">
+                        <span className="sr-only">{t('table.actions')}</span>
+                      </TH>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {plusValues.map(pv => (
+                      <TR key={pv.id}>
+                        <TD>{pv.project?.name || pv.projectId}</TD>
+                        <TD className="min-w-[180px] max-w-[380px]">{pv.description}</TD>
+                        <TD numeric className="font-medium">{formatMoney(pv.amountCents)}</TD>
+                        <TD>
+                          <StatusBadge domain="plusValue" value={pv.status} />
+                        </TD>
+                        <TD>
+                          {pv.status === 'detected' || pv.status === 'submitted' ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="iconSm"
+                                  aria-label={t('plusValues.rowActions')}
+                                >
+                                  <MoreHorizontal />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent>
+                                {pv.status === 'detected' ? (
+                                  <DropdownMenuItem onSelect={() => void updatePvStatus(pv.id, 'submitted')}>
+                                    <Send />
+                                    {t('plusValues.submit')}
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem onSelect={() => void updatePvStatus(pv.id, 'approved')}>
+                                      <Check />
+                                      {t('plusValues.approve')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      className="text-bad"
+                                      onSelect={() => void updatePvStatus(pv.id, 'rejected')}
+                                    >
+                                      <X />
+                                      {t('plusValues.reject')}
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableWrap>
+              <CardFooter>
+                <span>{t('plusValues.rowCount', { count: plusValues.length })}</span>
+              </CardFooter>
+            </DataState>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {createDialog}
+
+      {/* Create a plus-value */}
+      <Dialog open={showPvCreate} onOpenChange={setShowPvCreate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('plusValues.createTitle')}</DialogTitle>
+            <DialogDescription>{t('plusValues.help')}</DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field label={t('plusValues.project')} htmlFor="pv-project" required>
+              <Select
+                id="pv-project"
+                value={pvForm.projectId}
+                onChange={e => setPvForm(f => ({ ...f, projectId: e.target.value }))}
+              >
+                <option value="">{t('plusValues.selectProject')}</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </Field>
+            <Field label={t('plusValues.description')} htmlFor="pv-description" required>
+              <Input
+                id="pv-description"
+                value={pvForm.description}
+                onChange={e => setPvForm(f => ({ ...f, description: e.target.value }))}
+              />
+            </Field>
+            <Field label={t('plusValues.amount')} htmlFor="pv-amount" required>
+              <Input
+                id="pv-amount"
+                type="number"
+                step="0.05"
+                inputMode="decimal"
+                className="tnum text-right"
+                value={pvForm.amountCents / 100 || ''}
+                onChange={e => setPvForm(f => ({ ...f, amountCents: Math.round(parseFloat(e.target.value || '0') * 100) }))}
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowPvCreate(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={pvCreating}
+              blockedReason={pvFormValid ? undefined : t('plusValues.incomplete')}
+              onClick={createPlusValue}
+            >
+              {pvCreating ? t('actions.creating') : t('common:actions.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Reusable sub-components                                            */
+/*  Summary row                                                        */
 /* ------------------------------------------------------------------ */
 
-function Badge({ color, strike, children }: { color: { bg: string; fg: string }; strike?: boolean; children: React.ReactNode }) {
+function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 9999,
-      fontSize: 12,
-      fontWeight: 500,
-      background: color.bg,
-      color: color.fg,
-      textDecoration: strike ? 'line-through' : 'none',
-    }}>
-      {children}
-    </span>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ background: '#f9fafb', borderRadius: 8, padding: 16, border: '1px solid #e5e7eb' }}>
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: '#111827', marginTop: 4 }}>{value}</div>
-    </div>
-  );
-}
-
-function InfoField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, color: '#111827' }}>{value}</div>
+    <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3">
+      <dt className="text-[13px] text-muted">{label}</dt>
+      <dd className="tnum text-[13px] font-medium text-ink">{value}</dd>
     </div>
   );
 }

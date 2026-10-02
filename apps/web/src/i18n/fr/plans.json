@@ -1,31 +1,55 @@
 {
   "title": "Plans",
   "actions": {
-    "upload": "+ Téléverser un plan",
+    "new": "Nouveau plan",
     "create": "Créer le plan",
     "creating": "Création…"
   },
   "form": {
-    "name": "Nom du plan *",
-    "fileUrl": "URL du fichier (provisoire)",
-    "floor": "Étage (p. ex. RDC, 1er, sous-sol)",
-    "scale": "Échelle (p. ex. 1:50)"
+    "title": "Nouveau plan",
+    "help": "Le nom et le lien du fichier sont obligatoires ; l'étage et l'échelle peuvent être complétés plus tard.",
+    "name": "Nom du plan",
+    "fileUrl": "Lien du fichier",
+    "fileUrlHint": "Adresse HTTPS du fichier, en attendant le téléversement direct.",
+    "fileType": "Type de fichier",
+    "floor": "Étage",
+    "floorHint": "P. ex. RDC, 1er, sous-sol.",
+    "scale": "Échelle",
+    "scaleHint": "P. ex. 1:50."
   },
-  "card": {
-    "floor": "Étage : {{value}}",
-    "scale": "Échelle : {{value}}",
-    "type": "Type : {{value}}",
-    "version": "v{{version}}"
+  "filters": {
+    "all": "Tous",
+    "fileType": "Type de fichier",
+    "search": "Nom, étage ou échelle",
+    "searchLabel": "Rechercher un plan"
+  },
+  "table": {
+    "name": "Nom",
+    "type": "Type",
+    "floor": "Étage",
+    "scale": "Échelle",
+    "version": "Version",
+    "versionValue": "v{{version}}"
+  },
+  "summary": {
+    "count_one": "{{count}} plan sur {{total}}",
+    "count_other": "{{count}} plans sur {{total}}",
+    "sortedBy": "Triés du plus récent au plus ancien"
   },
   "annotations": {
     "title": "Annotations",
-    "empty": "Aucune annotation"
+    "empty": "Aucune annotation sur ce plan",
+    "untitled": "Sans libellé"
   },
   "empty": {
-    "plans": "Aucun plan pour le moment"
+    "plans": "Aucun plan",
+    "plansHelp": "Ajoutez un plan pour le partager avec les équipes et y porter des annotations.",
+    "noMatch": "Aucun plan ne correspond",
+    "noMatchHelp": "Modifiez la recherche ou choisissez un autre type de fichier."
   },
   "messages": {
     "loadFailed": "Impossible de charger les plans.",
+    "detailFailed": "Impossible de charger les annotations du plan.",
     "createFailed": "Impossible de créer le plan."
   }
 }

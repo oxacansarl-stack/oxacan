@@ -1,9 +1,46 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleCheck,
+  MoreHorizontal,
+  Plus,
+  Send,
+  ShoppingCart,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { formatAmount, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { formatAmount, formatDate, formatMoney, formatNumber, statusLabel } from '../lib/format';
 import type { PageProps } from '../lib/page-props';
+import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardCount, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Field, Input, Select } from '@/components/ui/input';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, TableSkeleton } from '@/components/states';
+import { useConfirm } from '@/components/confirm-dialog';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Ref, TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -44,61 +81,26 @@ interface PurchaseOrder {
   createdAt: string;
 }
 
+interface NewLine {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPriceCents: number;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
 const STATUS_TABS = ['all', 'draft', 'sent', 'confirmed', 'delivered'] as const;
 
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  draft: { bg: '#f3f4f6', fg: '#4b5563' },
-  sent: { bg: '#dbeafe', fg: '#1d4ed8' },
-  confirmed: { bg: '#dcfce7', fg: '#166534' },
-  partially_delivered: { bg: '#fef3c7', fg: '#92400e' },
-  delivered: { bg: '#f0fdf4', fg: '#15803d' },
-  cancelled: { bg: '#fee2e2', fg: '#991b1b' },
-};
-
 const UNITS = ['pce', 'm', 'm2', 'm3', 'kg', 'l', 'h', 'fft'] as const;
 
-/* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
+/** Unit codes are stored values; only their display label is translated. */
+const UNIT_KEYS = new Set<string>(UNITS);
 
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 6,
-  fontSize: 14,
-  outline: 'none',
-  width: '100%',
-  boxSizing: 'border-box',
-};
-
-const btnPrimary: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const btnDanger: React.CSSProperties = { ...btnPrimary, background: '#dc2626' };
-const btnSuccess: React.CSSProperties = { ...btnPrimary, background: '#16a34a' };
-
-const btnOutline: React.CSSProperties = {
-  padding: '8px 16px',
-  borderRadius: 6,
-  border: '1px solid #d1d5db',
-  background: '#fff',
-  color: '#374151',
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: 'pointer',
-};
+/** Columns of the orders table, so the expanded detail row spans the whole width. */
+const COLUMN_COUNT = 8;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -118,9 +120,28 @@ const emptyDraftLine = (): DraftLine => ({
   unitPrice: '',
 });
 
+/** A CHF amount typed into a field → integer centimes, as the API stores them. */
 function parseCents(chfStr: string): number {
   const n = parseFloat(chfStr);
-  return isNaN(n) ? 0 : Math.round(n * 100);
+  return Number.isNaN(n) ? 0 : Math.round(n * 100);
+}
+
+/** 0–100, so a delivery beyond the ordered quantity can never overflow the bar. */
+function deliveredPercent(line: POLine): number {
+  if (!(line.quantity > 0)) return 0;
+  return Math.min(100, Math.max(0, Math.round((line.deliveredQuantity / line.quantity) * 100)));
+}
+
+/** "2026-004" when the project carries a reference, its name otherwise. */
+function projectShort(po: PurchaseOrder): string {
+  if (!po.project) return '—';
+  return po.project.reference ? po.project.reference : po.project.name;
+}
+
+/** "2026-004 — Villa Dupont" for the detail panel, where there is room for both. */
+function projectLong(po: PurchaseOrder): string {
+  if (!po.project) return '—';
+  return po.project.reference ? `${po.project.reference} — ${po.project.name}` : po.project.name;
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,85 +150,180 @@ function parseCents(chfStr: string): number {
 
 export default function PurchaseOrders({ embedded = false }: PageProps) {
   const { t } = useTranslation('purchaseOrders');
-  /* ---------- state ---------- */
-  const [pos, setPos] = useState<PurchaseOrder[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const queryClient = useQueryClient();
+
   const [activeTab, setActiveTab] = useState<string>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedPO, setExpandedPO] = useState<PurchaseOrder | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  /** Failures of a row action: shown in the card, never as a browser alert. */
+  const [actionAlert, setActionAlert] = useState<string | null>(null);
 
   /* create form */
+  const [createOpen, setCreateOpen] = useState(false);
   const [newSupplierId, setNewSupplierId] = useState('');
   const [newProjectId, setNewProjectId] = useState('');
   const [draftLines, setDraftLines] = useState<DraftLine[]>([emptyDraftLine()]);
-  const [creating, setCreating] = useState(false);
+  const [linesError, setLinesError] = useState<string | null>(null);
 
-  /* detail add-line form */
+  /* add-line form, for the expanded order */
+  const [addLineOpen, setAddLineOpen] = useState(false);
   const [addLineDesc, setAddLineDesc] = useState('');
   const [addLineQty, setAddLineQty] = useState('');
   const [addLineUnit, setAddLineUnit] = useState('pce');
   const [addLinePrice, setAddLinePrice] = useState('');
+  const [addLineErrors, setAddLineErrors] = useState<{ description?: string; quantity?: string }>({});
 
   /* delivery recording */
   const [deliveryInputs, setDeliveryInputs] = useState<Record<string, string>>({});
 
-  /* ---------- fetchers ---------- */
+  const unitLabel = (unit: string) => (UNIT_KEYS.has(unit) ? t(`units.${unit}`) : unit);
 
-  const fetchList = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const statusParam = activeTab !== 'all' ? `&status=${activeTab}` : '';
-      const list = await apiGet<PurchaseOrder[]>(`/purchase-orders?page=1${statusParam}`);
-      setPos(list ?? []);
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.loadFailed')));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab, t]);
+  /* ---------- queries ---------- */
 
-  const fetchDropdowns = useCallback(async () => {
-    try {
-      const [sRes, pRes] = await Promise.all([
-        apiGet<Supplier[]>('/suppliers?limit=100'),
-        apiGet<Project[]>('/projects'),
-      ]);
-      setSuppliers(sRes ?? []);
-      setProjects(pRes ?? []);
-    } catch {
-      /* non-blocking */
-    }
-  }, []);
+  const orders = useQuery<PurchaseOrder[], ApiError>({
+    queryKey: ['purchase-orders', activeTab],
+    queryFn: () =>
+      apiGet<PurchaseOrder[]>(
+        `/purchase-orders?page=1${activeTab !== 'all' ? `&status=${activeTab}` : ''}`,
+      ),
+    retry: false,
+  });
 
-  const fetchDetail = useCallback(async (id: string) => {
-    try {
-      const po = await apiGet<PurchaseOrder>(`/purchase-orders/${id}`);
-      setExpandedPO(po);
-      /* init delivery inputs */
-      const inputs: Record<string, string> = {};
-      (po.lines ?? []).forEach((l) => {
-        inputs[l.id] = String(l.deliveredQuantity);
-      });
-      setDeliveryInputs(inputs);
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.loadDetailFailed')));
-    }
-  }, [t]);
+  // Dropdown sources: a failure leaves the select empty rather than blocking the page.
+  const suppliers = useQuery<Supplier[], ApiError>({
+    queryKey: ['suppliers-options'],
+    queryFn: () => apiGet<Supplier[]>('/suppliers?limit=100'),
+    retry: false,
+  });
 
+  const projects = useQuery<Project[], ApiError>({
+    queryKey: ['projects-options'],
+    queryFn: () => apiGet<Project[]>('/projects'),
+    retry: false,
+  });
+
+  const detail = useQuery<PurchaseOrder, ApiError>({
+    queryKey: ['purchase-order', expandedId],
+    queryFn: () => apiGet<PurchaseOrder>(`/purchase-orders/${expandedId}`),
+    enabled: expandedId !== null,
+    retry: false,
+  });
+
+  // Each delivery field starts at the quantity already recorded, and is reseeded after a save.
   useEffect(() => {
-    fetchList();
-  }, [fetchList]);
+    const po = detail.data;
+    if (!po) return;
+    const inputs: Record<string, string> = {};
+    (po.lines ?? []).forEach((line) => {
+      inputs[line.id] = String(line.deliveredQuantity);
+    });
+    setDeliveryInputs(inputs);
+  }, [detail.data]);
 
-  useEffect(() => {
-    fetchDropdowns();
-  }, [fetchDropdowns]);
+  /* ---------- mutations ---------- */
 
-  /* ---------- create PO ---------- */
+  const invalidateList = () => queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+  const invalidateDetail = (id: string) =>
+    queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
+
+  const create = useMutation({
+    mutationFn: (body: { supplierId: string; projectId?: string; lines: NewLine[] }) =>
+      apiPost('/purchase-orders', body),
+    onSuccess: () => {
+      setCreateOpen(false);
+      setNewSupplierId('');
+      setNewProjectId('');
+      setDraftLines([emptyDraftLine()]);
+      setLinesError(null);
+      invalidateList();
+    },
+  });
+
+  const changeStatus = useMutation({
+    mutationFn: (vars: { id: string; status: string }) =>
+      apiPut(`/purchase-orders/${vars.id}/status`, { status: vars.status }),
+    onMutate: () => setActionAlert(null),
+    onSuccess: (_data, vars) => {
+      invalidateList();
+      if (expandedId === vars.id) invalidateDetail(vars.id);
+    },
+    onError: (err) => setActionAlert(errorMessage(err, t('messages.statusFailed'))),
+  });
+
+  const addLine = useMutation({
+    mutationFn: (vars: { poId: string; body: NewLine }) =>
+      apiPost(`/purchase-orders/${vars.poId}/lines`, vars.body),
+    onSuccess: (_data, vars) => {
+      setAddLineDesc('');
+      setAddLineQty('');
+      setAddLineUnit('pce');
+      setAddLinePrice('');
+      setAddLineErrors({});
+      setAddLineOpen(false);
+      invalidateDetail(vars.poId);
+      invalidateList();
+    },
+  });
+
+  const deleteLine = useMutation({
+    mutationFn: (vars: { poId: string; lineId: string }) =>
+      apiDelete(`/purchase-orders/${vars.poId}/lines/${vars.lineId}`),
+    onMutate: () => setActionAlert(null),
+    onSuccess: (_data, vars) => {
+      invalidateDetail(vars.poId);
+      invalidateList();
+    },
+    onError: (err) => setActionAlert(errorMessage(err, t('messages.deleteLineFailed'))),
+  });
+
+  const recordDelivery = useMutation({
+    mutationFn: (vars: { poId: string; lineId: string; deliveredQuantity: number }) =>
+      apiPost(`/purchase-orders/${vars.poId}/lines/${vars.lineId}/delivery`, {
+        deliveredQuantity: vars.deliveredQuantity,
+      }),
+    onMutate: () => setActionAlert(null),
+    onSuccess: (_data, vars) => {
+      invalidateDetail(vars.poId);
+      invalidateList();
+    },
+    onError: (err) => setActionAlert(errorMessage(err, t('messages.deliveryFailed'))),
+  });
+
+  /* ---------- derived ---------- */
+
+  const rows = orders.data ?? [];
+  const totalHt = rows.reduce((sum, po) => sum + (po.totalHtCents ?? 0), 0);
+
+  const draftTotal = draftLines.reduce((sum, line) => {
+    const qty = parseFloat(line.quantity) || 0;
+    const price = parseCents(line.unitPrice);
+    return sum + qty * price;
+  }, 0);
+
+  const createValid =
+    newSupplierId.length > 0 && draftLines.some((line) => line.description.trim().length > 0);
+
+  const detailBusy =
+    changeStatus.isPending || deleteLine.isPending || recordDelivery.isPending || addLine.isPending;
+
+  /* ---------- handlers ---------- */
+
+  const selectTab = (tab: string) => {
+    setActiveTab(tab);
+    setExpandedId(null);
+    setActionAlert(null);
+  };
+
+  const toggleExpand = (id: string) => {
+    setActionAlert(null);
+    setExpandedId((current) => (current === id ? null : id));
+  };
+
+  const openCreate = () => {
+    create.reset();
+    setLinesError(null);
+    setCreateOpen(true);
+  };
 
   const updateDraftLine = (idx: number, field: keyof DraftLine, value: string) => {
     setDraftLines((prev) => {
@@ -221,840 +337,779 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
     setDraftLines((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const draftTotal = draftLines.reduce((sum, l) => {
-    const qty = parseFloat(l.quantity) || 0;
-    const price = parseCents(l.unitPrice);
-    return sum + qty * price;
-  }, 0);
-
-  const handleCreate = async () => {
+  const handleCreate = (event: FormEvent) => {
+    event.preventDefault();
     if (!newSupplierId) return;
-    const lines = draftLines
-      .filter((l) => l.description.trim() && parseFloat(l.quantity) > 0)
-      .map((l) => ({
-        description: l.description.trim(),
-        quantity: parseFloat(l.quantity),
-        unit: l.unit,
-        unitPriceCents: parseCents(l.unitPrice),
+    const lines: NewLine[] = draftLines
+      .filter((line) => line.description.trim() && parseFloat(line.quantity) > 0)
+      .map((line) => ({
+        description: line.description.trim(),
+        quantity: parseFloat(line.quantity),
+        unit: line.unit,
+        unitPriceCents: parseCents(line.unitPrice),
       }));
-    if (lines.length === 0) return;
-
-    setCreating(true);
-    try {
-      await apiPost('/purchase-orders', {
-        supplierId: newSupplierId,
-        projectId: newProjectId || undefined,
-        lines,
-      });
-      setShowCreate(false);
-      setNewSupplierId('');
-      setNewProjectId('');
-      setDraftLines([emptyDraftLine()]);
-      fetchList();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.createFailed')));
-    } finally {
-      setCreating(false);
+    if (lines.length === 0) {
+      setLinesError(t('messages.noValidLines'));
+      return;
     }
+    setLinesError(null);
+    create.mutate({
+      supplierId: newSupplierId,
+      projectId: newProjectId || undefined,
+      lines,
+    });
   };
 
-  /* ---------- status transition ---------- */
-
-  const changeStatus = async (id: string, status: string) => {
-    try {
-      await apiPut(`/purchase-orders/${id}/status`, { status });
-      fetchList();
-      if (expandedId === id) fetchDetail(id);
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.statusFailed')));
-    }
+  const openAddLine = () => {
+    addLine.reset();
+    setAddLineDesc('');
+    setAddLineQty('');
+    setAddLineUnit('pce');
+    setAddLinePrice('');
+    setAddLineErrors({});
+    setAddLineOpen(true);
   };
 
-  /* ---------- add line to existing PO ---------- */
-
-  const handleAddLine = async (poId: string) => {
+  const handleAddLine = (event: FormEvent) => {
+    event.preventDefault();
+    if (!expandedId) return;
     const qty = parseFloat(addLineQty);
-    if (!addLineDesc.trim() || isNaN(qty) || qty < 0) return;
-    try {
-      await apiPost(`/purchase-orders/${poId}/lines`, {
+    const errors: { description?: string; quantity?: string } = {};
+    if (!addLineDesc.trim()) errors.description = t('messages.descriptionRequired');
+    if (Number.isNaN(qty) || qty < 0) errors.quantity = t('messages.invalidQuantity');
+    if (errors.description || errors.quantity) {
+      setAddLineErrors(errors);
+      return;
+    }
+    setAddLineErrors({});
+    addLine.mutate({
+      poId: expandedId,
+      body: {
         description: addLineDesc.trim(),
         quantity: qty,
         unit: addLineUnit,
         unitPriceCents: parseCents(addLinePrice),
-      });
-      setAddLineDesc('');
-      setAddLineQty('');
-      setAddLineUnit('pce');
-      setAddLinePrice('');
-      fetchDetail(poId);
-      fetchList();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.addLineFailed')));
-    }
+      },
+    });
   };
 
-  /* ---------- delete line ---------- */
-
-  const handleDeleteLine = async (poId: string, lineId: string) => {
-    try {
-      await apiDelete(`/purchase-orders/${poId}/lines/${lineId}`);
-      fetchDetail(poId);
-      fetchList();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.deleteLineFailed')));
+  const handleDeleteLine = async (poId: string, line: POLine) => {
+    if (
+      !(await confirm({
+        title: t('prompts.deleteLineTitle'),
+        description: t('prompts.deleteLineHelp', { description: line.description }),
+      }))
+    ) {
+      return;
     }
+    deleteLine.mutate({ poId, lineId: line.id });
   };
 
-  /* ---------- record delivery ---------- */
-
-  const handleRecordDelivery = async (poId: string, lineId: string) => {
-    const val = parseFloat(deliveryInputs[lineId] ?? '0');
-    if (isNaN(val) || val < 0) return;
-    try {
-      await apiPost(`/purchase-orders/${poId}/lines/${lineId}/delivery`, {
-        deliveredQuantity: val,
-      });
-      fetchDetail(poId);
-      fetchList();
-    } catch (err: any) {
-      setError(errorMessage(err, t('messages.deliveryFailed')));
+  const handleRecordDelivery = (poId: string, lineId: string) => {
+    const value = parseFloat(deliveryInputs[lineId] ?? '0');
+    if (Number.isNaN(value) || value < 0) {
+      setActionAlert(t('messages.invalidQuantity'));
+      return;
     }
+    recordDelivery.mutate({ poId, lineId, deliveredQuantity: value });
   };
 
-  /* ---------- row click ---------- */
-
-  const toggleExpand = (id: string) => {
-    if (expandedId === id) {
-      setExpandedId(null);
-      setExpandedPO(null);
-    } else {
-      setExpandedId(id);
-      setExpandedPO(null);
-      fetchDetail(id);
+  const handleCancelOrder = async (po: PurchaseOrder) => {
+    if (
+      !(await confirm({
+        title: t('prompts.cancelOrderTitle'),
+        description: t('prompts.cancelOrderHelp', { reference: po.reference }),
+        confirmLabel: t('actions.cancelOrder'),
+        cancelLabel: t('prompts.keepOrder'),
+      }))
+    ) {
+      return;
     }
+    changeStatus.mutate({ id: po.id, status: 'cancelled' });
   };
 
   /* ---------- render ---------- */
 
-  return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#111827' }}>
-          {t('title')}
-        </h1>
-        <button
-          style={btnPrimary}
-          onClick={() => setShowCreate((v) => !v)}
-        >
-          {showCreate ? t('common:actions.cancel') : t('actions.new')}
-        </button>
-      </div>
+  const newOrderButton = (
+    <Button variant="primary" onClick={openCreate}>
+      <Plus />
+      {t('actions.new')}
+    </Button>
+  );
 
-      {/* Error banner */}
-      {error && (
-        <div
-          style={{
-            padding: '10px 16px',
-            marginBottom: 16,
-            background: '#fee2e2',
-            color: '#991b1b',
-            borderRadius: 6,
-            fontSize: 14,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <span>{error}</span>
-          <button
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontWeight: 600 }}
-            onClick={() => setError(null)}
-          >
-            &times;
-          </button>
-        </div>
+  return (
+    <PageBody>
+      {/* Rendered as a tab of Achats, which already carries the title and the kicker. */}
+      {embedded ? null : (
+        <PageHeader
+          title={t('title')}
+          kicker={t('common:navGroup.procurement')}
+          meta={
+            rows.length > 0 ? (
+              <>
+                <span>{t('summary.count', { count: rows.length })}</span>
+                <MetaDivider />
+                <span className="tnum">{t('summary.total', { amount: formatMoney(totalHt) })}</span>
+              </>
+            ) : undefined
+          }
+          actions={newOrderButton}
+        />
       )}
 
-      {/* Create form */}
-      {showCreate && (
-        <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            padding: 20,
-            marginBottom: 24,
-          }}
-        >
-          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            {t('form.title')}
-          </h3>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            {/* Supplier */}
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.supplier')}
-              </label>
-              <select
-                style={inputStyle}
-                value={newSupplierId}
-                onChange={(e) => setNewSupplierId(e.target.value)}
-              >
-                <option value="">{t('form.selectSupplier')}</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Project */}
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 4 }}>
-                {t('form.project')}
-              </label>
-              <select
-                style={inputStyle}
-                value={newProjectId}
-                onChange={(e) => setNewProjectId(e.target.value)}
-              >
-                <option value="">{t('form.noProject')}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.reference ? `${p.reference} — ${p.name}` : p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Draft lines */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{t('form.lines')}</span>
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line-soft p-3">
+          <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('filters.status')}>
+            {STATUS_TABS.map((tab) => (
               <button
-                style={btnOutline}
-                onClick={() => setDraftLines((prev) => [...prev, emptyDraftLine()])}
+                key={tab}
+                type="button"
+                aria-pressed={activeTab === tab}
+                onClick={() => selectTab(tab)}
+                className={cn(
+                  'rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-ink',
+                  activeTab === tab && 'bg-chalk font-medium text-ink',
+                )}
               >
-                {t('actions.addLine')}
+                {tab === 'all' ? t('tabs.all') : statusLabel('purchaseOrder', tab)}
               </button>
-            </div>
+            ))}
+          </div>
+          {embedded ? newOrderButton : null}
+        </div>
 
-            {/* Column headers */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '2fr 80px 90px 110px 100px 36px',
-                gap: 8,
-                marginBottom: 4,
-                fontSize: 12,
-                fontWeight: 600,
-                color: '#6b7280',
-                textTransform: 'uppercase',
-              }}
+        {actionAlert ? (
+          <div
+            role="alert"
+            className="flex items-start justify-between gap-2 border-b border-line-soft bg-bad-bg px-3.5 py-2.5 text-[13px] text-bad"
+          >
+            <span>{actionAlert}</span>
+            <Button
+              variant="quiet"
+              size="iconSm"
+              className="shrink-0 text-bad hover:bg-bad-bg"
+              aria-label={t('actions.dismissAlert')}
+              onClick={() => setActionAlert(null)}
             >
-              <span>{t('form.description')}</span>
-              <span>{t('form.quantity')}</span>
-              <span>{t('form.unit')}</span>
-              <span>{t('form.unitPriceChf')}</span>
-              <span style={{ textAlign: 'right' }}>{t('form.total')}</span>
-              <span />
-            </div>
+              <X />
+            </Button>
+          </div>
+        ) : null}
 
-            {draftLines.map((line, idx) => {
-              const qty = parseFloat(line.quantity) || 0;
-              const priceCents = parseCents(line.unitPrice);
-              const lineTotalCents = qty * priceCents;
+        <DataState
+          isLoading={orders.isPending}
+          error={orders.isError ? errorMessage(orders.error, t('messages.loadFailed')) : null}
+          onRetry={() => orders.refetch()}
+          isEmpty={rows.length === 0}
+          loading={<TableSkeleton rows={6} cols={6} />}
+          empty={
+            activeTab === 'all' ? (
+              <EmptyState
+                icon={<ShoppingCart className="size-5" />}
+                title={t('empty.none')}
+                description={t('empty.noneHelp')}
+                action={
+                  <Button variant="ghost" size="sm" onClick={openCreate}>
+                    <Plus />
+                    {t('actions.new')}
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<ShoppingCart className="size-5" />}
+                title={t('empty.filtered')}
+                description={t('empty.filteredHelp')}
+              />
+            )
+          }
+        >
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH className="w-9">
+                    <span className="sr-only">{t('table.expand')}</span>
+                  </TH>
+                  <TH>{t('table.reference')}</TH>
+                  <TH>{t('table.supplier')}</TH>
+                  <TH>{t('table.project')}</TH>
+                  <TH>{t('table.status')}</TH>
+                  <TH numeric>{t('table.totalHt')}</TH>
+                  <TH>{t('table.expectedDelivery')}</TH>
+                  <TH>{t('table.created')}</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {rows.map((po) => {
+                  const isExpanded = expandedId === po.id;
+                  return (
+                    <Fragment key={po.id}>
+                      <TR
+                        onActivate={() => toggleExpand(po.id)}
+                        aria-expanded={isExpanded}
+                        className={cn(isExpanded && '[&>td]:bg-chalk')}
+                      >
+                        <TD className="text-muted">
+                          {isExpanded ? (
+                            <ChevronDown aria-hidden className="size-4" />
+                          ) : (
+                            <ChevronRight aria-hidden className="size-4" />
+                          )}
+                        </TD>
+                        <TD>
+                          <Ref>{po.reference}</Ref>
+                        </TD>
+                        <TD className="font-medium">{po.supplier?.name ?? '—'}</TD>
+                        <TD className="text-muted">{projectShort(po)}</TD>
+                        <TD>
+                          <StatusBadge domain="purchaseOrder" value={po.status} />
+                        </TD>
+                        <TD numeric className="font-medium">
+                          {formatMoney(po.totalHtCents)}
+                        </TD>
+                        <TD className="tnum text-muted">{formatDate(po.expectedDelivery)}</TD>
+                        <TD className="tnum text-muted">{formatDate(po.createdAt)}</TD>
+                      </TR>
 
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 80px 90px 110px 100px 36px',
-                    gap: 8,
-                    marginBottom: 6,
-                    alignItems: 'center',
-                  }}
+                      {isExpanded ? (
+                        <tr>
+                          <TD colSpan={COLUMN_COUNT} className="h-auto bg-chalk p-0">
+                            <div className="p-3.5">
+                              <DataState
+                                isLoading={detail.isPending}
+                                error={
+                                  detail.isError
+                                    ? errorMessage(detail.error, t('messages.loadDetailFailed'))
+                                    : null
+                                }
+                                onRetry={() => detail.refetch()}
+                                loading={<TableSkeleton rows={3} cols={5} />}
+                              >
+                                {detail.data ? (
+                                  <OrderDetail
+                                    po={detail.data}
+                                    busy={detailBusy}
+                                    deliveryInputs={deliveryInputs}
+                                    unitLabel={unitLabel}
+                                    onDeliveryInputChange={(lineId, value) =>
+                                      setDeliveryInputs((prev) => ({ ...prev, [lineId]: value }))
+                                    }
+                                    onRecordDelivery={handleRecordDelivery}
+                                    onDeleteLine={(poId, line) => {
+                                      void handleDeleteLine(poId, line);
+                                    }}
+                                    onAddLine={openAddLine}
+                                    onStatusChange={(poId, status) =>
+                                      changeStatus.mutate({ id: poId, status })
+                                    }
+                                    onCancelOrder={(order) => {
+                                      void handleCancelOrder(order);
+                                    }}
+                                  />
+                                ) : null}
+                              </DataState>
+                            </div>
+                          </TD>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+          <CardFooter>
+            <span>{t('summary.count', { count: rows.length })}</span>
+            <span className="tnum">{t('summary.total', { amount: formatMoney(totalHt) })}</span>
+          </CardFooter>
+        </DataState>
+      </Card>
+
+      {/* Create: a dialog, so the list is never pushed down the page. */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <form onSubmit={handleCreate}>
+            <DialogHeader>
+              <DialogTitle>{t('form.title')}</DialogTitle>
+              <DialogDescription>{t('form.help')}</DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+                <Field label={t('form.supplier')} htmlFor="po-supplier" required>
+                  <Select
+                    id="po-supplier"
+                    value={newSupplierId}
+                    onChange={(e) => setNewSupplierId(e.target.value)}
+                  >
+                    <option value="">{t('form.selectSupplier')}</option>
+                    {(suppliers.data ?? []).map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('form.project')} htmlFor="po-project" hint={t('form.projectHint')}>
+                  <Select
+                    id="po-project"
+                    value={newProjectId}
+                    onChange={(e) => setNewProjectId(e.target.value)}
+                  >
+                    <option value="">{t('form.noProject')}</option>
+                    {(projects.data ?? []).map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.reference ? `${project.reference} — ${project.name}` : project.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium text-ink-2">{t('form.lines')}</span>
+                  <Button
+                    size="sm"
+                    onClick={() => setDraftLines((prev) => [...prev, emptyDraftLine()])}
+                  >
+                    <Plus />
+                    {t('actions.addLine')}
+                  </Button>
+                </div>
+
+                {draftLines.map((line, idx) => {
+                  const qty = parseFloat(line.quantity) || 0;
+                  const lineTotalCents = qty * parseCents(line.unitPrice);
+                  return (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-md border border-line-soft bg-paper-2 p-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[13px] font-medium text-ink-2">
+                          {t('form.line', { index: idx + 1 })}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="tnum text-[13px] font-medium text-ink">
+                            {t('form.lineTotal', { amount: formatAmount(lineTotalCents) })}
+                          </span>
+                          <Button
+                            variant="quiet"
+                            size="iconSm"
+                            className="text-bad hover:bg-bad-bg"
+                            aria-label={t('actions.removeLine')}
+                            title={t('actions.removeLine')}
+                            onClick={() => removeDraftLine(idx)}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <Field label={t('form.description')} htmlFor={`po-line-${idx}-description`}>
+                        <Input
+                          id={`po-line-${idx}-description`}
+                          value={line.description}
+                          onChange={(e) => updateDraftLine(idx, 'description', e.target.value)}
+                        />
+                      </Field>
+
+                      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
+                        <Field label={t('form.quantity')} htmlFor={`po-line-${idx}-quantity`}>
+                          <Input
+                            id={`po-line-${idx}-quantity`}
+                            type="number"
+                            min="0"
+                            step="any"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={line.quantity}
+                            onChange={(e) => updateDraftLine(idx, 'quantity', e.target.value)}
+                          />
+                        </Field>
+                        <Field label={t('form.unit')} htmlFor={`po-line-${idx}-unit`}>
+                          <Select
+                            id={`po-line-${idx}-unit`}
+                            value={line.unit}
+                            onChange={(e) => updateDraftLine(idx, 'unit', e.target.value)}
+                          >
+                            {UNITS.map((unit) => (
+                              <option key={unit} value={unit}>
+                                {unitLabel(unit)}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Field label={t('form.unitPriceChf')} htmlFor={`po-line-${idx}-price`}>
+                          <Input
+                            id={`po-line-${idx}-price`}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={line.unitPrice}
+                            onChange={(e) => updateDraftLine(idx, 'unitPrice', e.target.value)}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <p className="tnum text-right text-[13.5px] font-semibold text-ink">
+                  {t('form.totalHt', { amount: formatMoney(draftTotal) })}
+                </p>
+              </div>
+
+              {linesError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {linesError}
+                </p>
+              ) : null}
+              {create.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(create.error, t('messages.createFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!createValid || create.isPending}
+              >
+                {create.isPending ? t('actions.creating') : t('actions.create')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add a line to the order that is open below. */}
+      <Dialog open={addLineOpen} onOpenChange={setAddLineOpen}>
+        <DialogContent className="w-[min(520px,calc(100vw-32px))]">
+          <form onSubmit={handleAddLine}>
+            <DialogHeader>
+              <DialogTitle>{t('detail.addLineTitle')}</DialogTitle>
+              <DialogDescription>
+                {t('detail.addLineHelp', { reference: detail.data?.reference ?? '—' })}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody>
+              <Field
+                label={t('form.description')}
+                htmlFor="po-new-line-description"
+                error={addLineErrors.description}
+                required
+              >
+                <Input
+                  id="po-new-line-description"
+                  value={addLineDesc}
+                  onChange={(e) => setAddLineDesc(e.target.value)}
+                />
+              </Field>
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
+                <Field
+                  label={t('form.quantity')}
+                  htmlFor="po-new-line-quantity"
+                  error={addLineErrors.quantity}
+                  required
                 >
-                  <input
-                    style={inputStyle}
-                    placeholder={t('form.description')}
-                    value={line.description}
-                    onChange={(e) => updateDraftLine(idx, 'description', e.target.value)}
-                  />
-                  <input
-                    style={inputStyle}
+                  <Input
+                    id="po-new-line-quantity"
                     type="number"
                     min="0"
                     step="any"
+                    inputMode="decimal"
                     placeholder="0"
-                    value={line.quantity}
-                    onChange={(e) => updateDraftLine(idx, 'quantity', e.target.value)}
+                    value={addLineQty}
+                    onChange={(e) => setAddLineQty(e.target.value)}
                   />
-                  <select
-                    style={inputStyle}
-                    value={line.unit}
-                    onChange={(e) => updateDraftLine(idx, 'unit', e.target.value)}
+                </Field>
+                <Field label={t('form.unit')} htmlFor="po-new-line-unit">
+                  <Select
+                    id="po-new-line-unit"
+                    value={addLineUnit}
+                    onChange={(e) => setAddLineUnit(e.target.value)}
                   >
-                    {UNITS.map((u) => (
-                      <option key={u} value={u}>{u}</option>
+                    {UNITS.map((unit) => (
+                      <option key={unit} value={unit}>
+                        {unitLabel(unit)}
+                      </option>
                     ))}
-                  </select>
-                  <input
-                    style={inputStyle}
+                  </Select>
+                </Field>
+                <Field label={t('detail.priceChf')} htmlFor="po-new-line-price">
+                  <Input
+                    id="po-new-line-price"
                     type="number"
                     min="0"
                     step="0.01"
+                    inputMode="decimal"
                     placeholder="0.00"
-                    value={line.unitPrice}
-                    onChange={(e) => updateDraftLine(idx, 'unitPrice', e.target.value)}
+                    value={addLinePrice}
+                    onChange={(e) => setAddLinePrice(e.target.value)}
                   />
-                  <span style={{ textAlign: 'right', fontSize: 14, fontWeight: 500, color: '#111827' }}>
-                    {formatAmount(lineTotalCents)}
-                  </span>
-                  <button
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: '#dc2626',
-                      fontSize: 18,
-                      padding: 0,
-                      lineHeight: 1,
-                    }}
-                    title={t('actions.removeLine')}
-                    onClick={() => removeDraftLine(idx)}
-                  >
-                    &times;
-                  </button>
-                </div>
-              );
-            })}
-
-            {/* Running total */}
-            <div style={{ textAlign: 'right', fontSize: 15, fontWeight: 600, color: '#111827', marginTop: 8 }}>
-              {t('form.totalHt', { amount: formatMoney(draftTotal) })}
-            </div>
-          </div>
-
-          {/* Submit */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button style={btnOutline} onClick={() => setShowCreate(false)}>
-              {t('common:actions.cancel')}
-            </button>
-            <button
-              style={{
-                ...btnPrimary,
-                opacity: !newSupplierId || draftLines.every((l) => !l.description.trim()) || creating ? 0.6 : 1,
-              }}
-              disabled={!newSupplierId || draftLines.every((l) => !l.description.trim()) || creating}
-              onClick={handleCreate}
-            >
-              {creating ? t('actions.creating') : t('actions.create')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Status tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid #e5e7eb', paddingBottom: 0 }}>
-        {STATUS_TABS.map((tab) => {
-          const isActive = activeTab === tab;
-          return (
-            <button
-              key={tab}
-              onClick={() => { setActiveTab(tab); setExpandedId(null); setExpandedPO(null); }}
-              style={{
-                padding: '8px 16px',
-                fontSize: 14,
-                fontWeight: isActive ? 600 : 400,
-                color: isActive ? '#2563eb' : '#6b7280',
-                background: 'none',
-                border: 'none',
-                borderBottom: isActive ? '2px solid #2563eb' : '2px solid transparent',
-                cursor: 'pointer',
-                marginBottom: -1,
-              }}
-            >
-              {tab === 'all' ? t('tabs.all') : statusLabel('purchaseOrder', tab)}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 14 }}>
-          {t('state.loading')}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && !error && pos.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 48, color: '#6b7280', fontSize: 14 }}>
-          {t('empty.none')}
-        </div>
-      )}
-
-      {/* Table */}
-      {!loading && pos.length > 0 && (
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: '#f8f9fa' }}>
-                {(['reference', 'supplier', 'project', 'status', 'totalHt', 'expectedDelivery', 'created'] as const).map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: '10px 14px',
-                        textAlign: 'left',
-                        fontWeight: 600,
-                        color: '#374151',
-                        borderBottom: '1px solid #e5e7eb',
-                        fontSize: 13,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {t(`table.${h}`)}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {pos.map((po) => {
-                const sc = STATUS_COLORS[po.status] ?? { bg: '#f3f4f6', fg: '#4b5563' };
-                const isExpanded = expandedId === po.id;
-
-                return (
-                  <React.Fragment key={po.id}>
-                    <tr
-                      onClick={() => toggleExpand(po.id)}
-                      style={{
-                        cursor: 'pointer',
-                        background: isExpanded ? '#f0f7ff' : '#fff',
-                        borderBottom: isExpanded ? 'none' : undefined,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isExpanded) (e.currentTarget as HTMLElement).style.background = '#f8f9fa';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isExpanded) (e.currentTarget as HTMLElement).style.background = '#fff';
-                      }}
-                    >
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', fontWeight: 500, color: '#2563eb' }}>
-                        {po.reference}
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', color: '#111827' }}>
-                        {po.supplier?.name ?? '—'}
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
-                        {po.project ? (po.project.reference ? `${po.project.reference}` : po.project.name) : '—'}
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '2px 10px',
-                            borderRadius: 12,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            background: sc.bg,
-                            color: sc.fg,
-                          }}
-                        >
-                          {statusLabel('purchaseOrder', po.status)}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', fontWeight: 500, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                        {formatMoney(po.totalHtCents)}
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
-                        {formatDate(po.expectedDelivery)}
-                      </td>
-                      <td style={{ padding: '10px 14px', borderBottom: '1px solid #e5e7eb', color: '#6b7280' }}>
-                        {formatDate(po.createdAt)}
-                      </td>
-                    </tr>
-
-                    {/* Expanded detail */}
-                    {isExpanded && (
-                      <tr>
-                        <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid #e5e7eb' }}>
-                          <ExpandedDetail
-                            po={expandedPO}
-                            onStatusChange={(status) => changeStatus(po.id, status)}
-                            onAddLine={() => handleAddLine(po.id)}
-                            onDeleteLine={(lineId) => handleDeleteLine(po.id, lineId)}
-                            onRecordDelivery={(lineId) => handleRecordDelivery(po.id, lineId)}
-                            addLineDesc={addLineDesc}
-                            setAddLineDesc={setAddLineDesc}
-                            addLineQty={addLineQty}
-                            setAddLineQty={setAddLineQty}
-                            addLineUnit={addLineUnit}
-                            setAddLineUnit={setAddLineUnit}
-                            addLinePrice={addLinePrice}
-                            setAddLinePrice={setAddLinePrice}
-                            deliveryInputs={deliveryInputs}
-                            setDeliveryInputs={setDeliveryInputs}
-                            formatDate={formatDate}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+                </Field>
+              </div>
+              {addLine.isError ? (
+                <p role="alert" className="text-[13px] text-bad">
+                  {errorMessage(addLine.error, t('messages.addLineFailed'))}
+                </p>
+              ) : null}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setAddLineOpen(false)}>
+                {t('common:actions.cancel')}
+              </Button>
+              <Button type="submit" variant="primary" disabled={addLine.isPending}>
+                {addLine.isPending ? t('actions.adding') : t('common:actions.add')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Expanded Detail Sub-component                                      */
+/*  Expanded detail                                                    */
 /* ------------------------------------------------------------------ */
 
-interface ExpandedDetailProps {
-  po: PurchaseOrder | null;
-  onStatusChange: (status: string) => void;
-  onAddLine: () => void;
-  onDeleteLine: (lineId: string) => void;
-  onRecordDelivery: (lineId: string) => void;
-  addLineDesc: string;
-  setAddLineDesc: (v: string) => void;
-  addLineQty: string;
-  setAddLineQty: (v: string) => void;
-  addLineUnit: string;
-  setAddLineUnit: (v: string) => void;
-  addLinePrice: string;
-  setAddLinePrice: (v: string) => void;
+interface OrderDetailProps {
+  po: PurchaseOrder;
+  /** True while any order mutation is in flight. */
+  busy: boolean;
   deliveryInputs: Record<string, string>;
-  setDeliveryInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  formatDate: (iso?: string) => string;
+  /** Translates a unit code for display; the stored code is never changed. */
+  unitLabel: (unit: string) => string;
+  onDeliveryInputChange: (lineId: string, value: string) => void;
+  onRecordDelivery: (poId: string, lineId: string) => void;
+  onDeleteLine: (poId: string, line: POLine) => void;
+  onAddLine: () => void;
+  onStatusChange: (poId: string, status: string) => void;
+  onCancelOrder: (po: PurchaseOrder) => void;
 }
 
-function ExpandedDetail({
+function OrderDetail({
   po,
-  onStatusChange,
-  onAddLine,
-  onDeleteLine,
-  onRecordDelivery,
-  addLineDesc,
-  setAddLineDesc,
-  addLineQty,
-  setAddLineQty,
-  addLineUnit,
-  setAddLineUnit,
-  addLinePrice,
-  setAddLinePrice,
+  busy,
   deliveryInputs,
-  setDeliveryInputs,
-  formatDate,
-}: ExpandedDetailProps) {
+  unitLabel,
+  onDeliveryInputChange,
+  onRecordDelivery,
+  onDeleteLine,
+  onAddLine,
+  onStatusChange,
+  onCancelOrder,
+}: OrderDetailProps) {
   const { t } = useTranslation('purchaseOrders');
-  if (!po) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center', color: '#6b7280', fontSize: 14 }}>
-        {t('detail.loading')}
-      </div>
-    );
-  }
 
-  const sc = STATUS_COLORS[po.status] ?? { bg: '#f3f4f6', fg: '#4b5563' };
   const lines = po.lines ?? [];
   const isDraft = po.status === 'draft';
+  // A delivery can only be recorded once the order has left the draft, and never on a cancelled one.
+  const canRecordDelivery = po.status !== 'cancelled' && po.status !== 'draft';
+  const canCancel = po.status !== 'delivered' && po.status !== 'cancelled';
 
   return (
-    <div style={{ padding: 20, background: '#f8f9fa' }}>
-      {/* PO info header */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 16,
-          marginBottom: 20,
-          padding: 16,
-          background: '#fff',
-          borderRadius: 8,
-          border: '1px solid #e5e7eb',
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.reference')}</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{po.reference}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.supplier')}</div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>{po.supplier?.name ?? '—'}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.project')}</div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>
-            {po.project ? (po.project.reference ? `${po.project.reference} — ${po.project.name}` : po.project.name) : '—'}
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      <Card>
+        <dl className="grid grid-cols-[minmax(0,1fr)] gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <dt className="text-xs text-muted">{t('detail.reference')}</dt>
+            <dd>
+              <Ref>{po.reference}</Ref>
+            </dd>
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.status')}</div>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '2px 10px',
-              borderRadius: 12,
-              fontSize: 12,
-              fontWeight: 600,
-              background: sc.bg,
-              color: sc.fg,
-            }}
-          >
-            {statusLabel('purchaseOrder', po.status)}
-          </span>
-        </div>
-      </div>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <dt className="text-xs text-muted">{t('detail.supplier')}</dt>
+            <dd className="text-[13.5px] font-medium text-ink">{po.supplier?.name ?? '—'}</dd>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <dt className="text-xs text-muted">{t('detail.project')}</dt>
+            <dd className="text-[13.5px] text-ink">{projectLong(po)}</dd>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
+            <dt className="text-xs text-muted">{t('detail.status')}</dt>
+            <dd>
+              <StatusBadge domain="purchaseOrder" value={po.status} />
+            </dd>
+          </div>
+        </dl>
+      </Card>
 
-      {/* Lines table */}
-      {lines.length > 0 && (
-        <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            overflow: 'hidden',
-            marginBottom: 16,
-          }}
-        >
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#f8f9fa' }}>
-                <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.description')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.qtyOrdered')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.qtyDelivered')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb', minWidth: 140 }}>
-                  {t('lines.progress')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.unitPrice')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.total')}
-                </th>
-                <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 600, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>
-                  {t('lines.actions')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((line) => {
-                const pct = line.quantity > 0 ? Math.min((line.deliveredQuantity / line.quantity) * 100, 100) : 0;
-                const isComplete = pct >= 100;
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            {t('form.lines')}
+            <CardCount>{lines.length}</CardCount>
+          </CardTitle>
+          <Button size="sm" onClick={onAddLine} disabled={busy}>
+            <Plus />
+            {t('actions.addLine')}
+          </Button>
+        </CardHeader>
 
-                return (
-                  <tr key={line.id}>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', color: '#111827' }}>
-                      {line.description}
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      {line.quantity} {line.unit}
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      {line.deliveredQuantity} {line.unit}
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div
-                          style={{
-                            flex: 1,
-                            height: 8,
-                            background: '#e5e7eb',
-                            borderRadius: 4,
-                            overflow: 'hidden',
-                          }}
-                        >
+        {lines.length === 0 ? (
+          <EmptyState
+            title={t('detail.noLines')}
+            description={t('detail.noLinesHelp')}
+            action={
+              <Button variant="ghost" size="sm" onClick={onAddLine} disabled={busy}>
+                <Plus />
+                {t('actions.addLine')}
+              </Button>
+            }
+          />
+        ) : (
+          <TableWrap>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>{t('lines.description')}</TH>
+                  <TH numeric>{t('lines.qtyOrdered')}</TH>
+                  <TH numeric>{t('lines.qtyDelivered')}</TH>
+                  <TH className="min-w-[140px]">{t('lines.progress')}</TH>
+                  <TH numeric>{t('lines.unitPrice')}</TH>
+                  <TH numeric>{t('lines.total')}</TH>
+                  <TH numeric>{t('lines.actions')}</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {lines.map((line) => {
+                  const percent = deliveredPercent(line);
+                  return (
+                    <TR key={line.id}>
+                      <TD className="min-w-[180px] max-w-[320px] font-medium">{line.description}</TD>
+                      <TD numeric className="whitespace-nowrap">
+                        {formatNumber(line.quantity)} {unitLabel(line.unit)}
+                      </TD>
+                      <TD numeric className="whitespace-nowrap">
+                        {formatNumber(line.deliveredQuantity)} {unitLabel(line.unit)}
+                      </TD>
+                      <TD>
+                        <div className="flex items-center gap-2">
                           <div
-                            style={{
-                              width: `${pct}%`,
-                              height: '100%',
-                              background: isComplete ? '#16a34a' : '#2563eb',
-                              borderRadius: 4,
-                              transition: 'width 0.3s ease',
-                            }}
-                          />
-                        </div>
-                        <span style={{ fontSize: 12, color: '#6b7280', minWidth: 36, textAlign: 'right' }}>
-                          {Math.round(pct)}%
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      {formatMoney(line.unitPriceCents)}
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'right', fontWeight: 500, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      {formatMoney(line.totalPriceCents)}
-                    </td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', textAlign: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                        {/* Delivery recording */}
-                        {po.status !== 'cancelled' && po.status !== 'draft' && (
-                          <>
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={deliveryInputs[line.id] ?? ''}
-                              onChange={(e) =>
-                                setDeliveryInputs((prev) => ({ ...prev, [line.id]: e.target.value }))
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              style={{ ...inputStyle, width: 64, textAlign: 'right', padding: '4px 6px', fontSize: 13 }}
-                            />
-                            <button
-                              style={{ ...btnSuccess, padding: '4px 8px', fontSize: 12 }}
-                              onClick={(e) => { e.stopPropagation(); onRecordDelivery(line.id); }}
-                              title={t('actions.recordDelivery')}
-                            >
-                              {t('common:actions.save')}
-                            </button>
-                          </>
-                        )}
-                        {/* Delete line (draft only) */}
-                        {isDraft && (
-                          <button
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              color: '#dc2626',
-                              fontSize: 16,
-                              padding: '4px',
-                              lineHeight: 1,
-                            }}
-                            title={t('actions.deleteLine')}
-                            onClick={(e) => { e.stopPropagation(); onDeleteLine(line.id); }}
+                            role="progressbar"
+                            aria-label={t('lines.progress')}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={percent}
+                            className="h-2 w-20 shrink-0 overflow-hidden rounded-full bg-line-soft"
                           >
-                            &times;
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                            {/* The one permitted inline style: a width only known at runtime. */}
+                            <div
+                              className={cn('h-full rounded-full', percent >= 100 ? 'bg-ok' : 'bg-copper')}
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <span className="tnum text-xs text-muted">
+                            {t('lines.progressValue', { percent })}
+                          </span>
+                        </div>
+                      </TD>
+                      <TD numeric>{formatMoney(line.unitPriceCents)}</TD>
+                      <TD numeric className="font-medium">
+                        {formatMoney(line.totalPriceCents)}
+                      </TD>
+                      <TD>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {canRecordDelivery ? (
+                            <>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                className="tnum h-7 w-[76px] px-2 text-right text-[13px]"
+                                aria-label={t('lines.deliveryFor', { description: line.description })}
+                                value={deliveryInputs[line.id] ?? ''}
+                                onChange={(e) => onDeliveryInputChange(line.id, e.target.value)}
+                              />
+                              <Button
+                                size="iconSm"
+                                aria-label={t('actions.recordDelivery')}
+                                title={t('actions.recordDelivery')}
+                                disabled={busy}
+                                onClick={() => onRecordDelivery(po.id, line.id)}
+                              >
+                                <Check />
+                              </Button>
+                            </>
+                          ) : null}
+                          {isDraft ? (
+                            <Button
+                              variant="quiet"
+                              size="iconSm"
+                              className="text-bad hover:bg-bad-bg"
+                              aria-label={t('actions.deleteLine')}
+                              title={t('actions.deleteLine')}
+                              disabled={busy}
+                              onClick={() => onDeleteLine(po.id, line)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TD>
+                    </TR>
+                  );
+                })}
+              </TBody>
+            </Table>
+          </TableWrap>
+        )}
 
-      {lines.length === 0 && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: 24,
-            color: '#6b7280',
-            fontSize: 14,
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 8,
-            marginBottom: 16,
-          }}
-        >
-          {t('detail.noLines')}
-        </div>
-      )}
+        <CardFooter>
+          <span className="tnum">{t('form.totalHt', { amount: formatMoney(po.totalHtCents) })}</span>
+        </CardFooter>
+      </Card>
 
-      {/* Add line form (for existing POs) */}
-      <div
-        style={{
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: 8,
-          padding: 14,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
-          {t('detail.addLine')}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 80px 90px 110px auto', gap: 8, alignItems: 'end' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.description')}</label>
-            <input
-              style={inputStyle}
-              placeholder={t('form.description')}
-              value={addLineDesc}
-              onChange={(e) => setAddLineDesc(e.target.value)}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.quantity')}</label>
-            <input
-              style={inputStyle}
-              type="number"
-              min="0"
-              step="any"
-              placeholder="0"
-              value={addLineQty}
-              onChange={(e) => setAddLineQty(e.target.value)}
-            />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('form.unit')}</label>
-            <select style={inputStyle} value={addLineUnit} onChange={(e) => setAddLineUnit(e.target.value)}>
-              {UNITS.map((u) => (
-                <option key={u} value={u}>{u}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{t('detail.priceChf')}</label>
-            <input
-              style={inputStyle}
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={addLinePrice}
-              onChange={(e) => setAddLinePrice(e.target.value)}
-            />
-          </div>
-          <button style={{ ...btnPrimary, padding: '8px 14px' }} onClick={onAddLine}>
-            {t('common:actions.add')}
-          </button>
-        </div>
-      </div>
-
-      {/* Status transition buttons */}
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        {po.status === 'draft' && (
-          <button style={btnPrimary} onClick={() => onStatusChange('sent')}>
+      {/* Lifecycle: draft → envoyée → confirmée → livrée, with a cancel until delivery. */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {po.status === 'draft' ? (
+          <Button disabled={busy} onClick={() => onStatusChange(po.id, 'sent')}>
+            <Send />
             {t('actions.send')}
-          </button>
-        )}
-        {po.status === 'sent' && (
-          <button style={btnSuccess} onClick={() => onStatusChange('confirmed')}>
+          </Button>
+        ) : null}
+        {po.status === 'sent' ? (
+          <Button disabled={busy} onClick={() => onStatusChange(po.id, 'confirmed')}>
+            <Check />
             {t('actions.confirm')}
-          </button>
-        )}
-        {po.status === 'confirmed' && (
-          <button style={btnSuccess} onClick={() => onStatusChange('delivered')}>
+          </Button>
+        ) : null}
+        {po.status === 'confirmed' ? (
+          <Button disabled={busy} onClick={() => onStatusChange(po.id, 'delivered')}>
+            <CircleCheck />
             {t('actions.markDelivered')}
-          </button>
-        )}
-        {po.status !== 'delivered' && po.status !== 'cancelled' && (
-          <button style={btnDanger} onClick={() => onStatusChange('cancelled')}>
-            {t('actions.cancelOrder')}
-          </button>
-        )}
+          </Button>
+        ) : null}
+        {canCancel ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="quiet" size="icon" aria-label={t('actions.orderActions')}>
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem
+                className="text-bad"
+                disabled={busy}
+                onSelect={() => onCancelOrder(po)}
+              >
+                <X />
+                {t('actions.cancelOrder')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
     </div>
   );

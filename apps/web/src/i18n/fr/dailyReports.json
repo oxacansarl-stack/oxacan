@@ -1,47 +1,67 @@
 {
   "title": "Rapports journaliers",
-  "subtitle": "Documentez les travaux du jour, la météo et le matériel utilisé",
+  "subtitle": "Les travaux du jour, la météo et le matériel utilisé, chantier par chantier",
+  "loginRequired": "Connexion requise",
   "actions": {
-    "new": "+ Nouveau rapport",
+    "new": "Nouveau rapport",
     "create": "Créer le rapport",
-    "update": "Mettre à jour le rapport"
+    "creating": "Création…",
+    "update": "Mettre à jour le rapport",
+    "rowActions": "Actions du rapport"
   },
   "form": {
     "newTitle": "Nouveau rapport journalier",
     "editTitle": "Modifier le rapport",
-    "project": "Projet *",
+    "newHelp": "Un seul rapport par chantier et par jour. Le chantier et la date sont figés après la création.",
+    "editHelp": "Le chantier et la date ne peuvent plus être modifiés ; les autres champs restent ouverts.",
+    "project": "Projet",
     "selectProject": "Sélectionnez un projet…",
-    "date": "Date *",
+    "locked": "Figé depuis la création.",
+    "date": "Date",
     "weather": "Météo",
     "weatherPlaceholder": "p. ex. ensoleillé, nuageux, pluie…",
     "temperature": "Température (°C)",
     "temperaturePlaceholder": "p. ex. 22",
     "workDescription": "Description des travaux",
     "workDescriptionPlaceholder": "Décrivez les travaux effectués aujourd'hui…",
-    "materials": "Matériel utilisé (un par ligne)",
+    "materials": "Matériel utilisé",
+    "materialsHint": "Un matériel par ligne.",
     "materialsPlaceholder": "Béton 5 m³\nArmature 200 kg\nPanneaux de coffrage 20x",
     "notes": "Remarques",
-    "notesPlaceholder": "Remarques, problèmes, observations…"
+    "notesPlaceholder": "Remarques, problèmes, observations…",
+    "created": "Créé le {{date}}",
+    "projectsLoadFailed": "Impossible de charger la liste des projets."
   },
   "filters": {
-    "project": "Projet",
+    "project": "Chantier",
     "allProjects": "Tous les projets",
     "from": "Du",
-    "to": "Au"
+    "to": "Au",
+    "reset": "Réinitialiser les filtres"
   },
-  "card": {
+  "table": {
+    "date": "Date",
+    "reference": "Référence",
+    "project": "Chantier",
     "unknownProject": "Projet inconnu",
+    "workDescription": "Travaux",
     "noDescription": "Aucune description",
-    "workDescription": "Description des travaux",
-    "noneProvided": "Non renseignée",
-    "materials": "Matériel utilisé",
-    "noneRecorded": "Aucun matériel saisi",
-    "weather": "Conditions météo",
-    "notRecorded": "Non renseignée",
-    "notes": "Remarques",
-    "created": "Créé le {{date}}"
+    "hasNotes": "Contient des remarques",
+    "weather": "Météo",
+    "temperature": "{{value}} °C",
+    "materials": "Matériel",
+    "actions": "Actions"
   },
-  "empty": "Aucun rapport journalier trouvé",
+  "summary": {
+    "count_one": "{{count}} rapport",
+    "count_other": "{{count}} rapports",
+    "sortedBy": "Triés du plus récent au plus ancien",
+    "capped": "Les {{count}} rapports les plus récents"
+  },
+  "empty": "Aucun rapport journalier",
+  "emptyHelp": "Documentez une journée de chantier : travaux effectués, météo et matériel utilisé.",
+  "noMatch": "Aucun rapport ne correspond",
+  "noMatchHelp": "Modifiez le chantier ou la période sélectionnée.",
   "prompts": {
     "confirmDelete": "Supprimer ce rapport journalier ?"
   },

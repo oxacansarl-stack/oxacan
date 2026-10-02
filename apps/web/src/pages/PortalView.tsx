@@ -1,9 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Flag, Layers, Link2Off, ListChecks, Newspaper } from 'lucide-react';
 import { ApiError } from '../lib/api';
-import { formatDate, statusLabel } from '../lib/format';
+import { formatDate } from '../lib/format';
 import { errorMessage } from '../lib/errors';
+import { PageBody, PageHeader } from '@/components/page-header';
+import { Card, CardContent, CardCount, CardHeader, CardTitle } from '@/components/ui/card';
+import { StatusBadge } from '@/components/status-badge';
+import { DataState, EmptyState, ErrorState, LoadingState, Skeleton, TableSkeleton } from '@/components/states';
+import { TBody, TD, TH, THead, TR, Table, TableWrap } from '@/components/ui/table';
+import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -90,19 +98,36 @@ function toPortalData(raw: PortalApiResponse): PortalData {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Styles                                                             */
+/*  Shell                                                              */
 /* ------------------------------------------------------------------ */
 
-const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
-  not_started: { bg: '#f3f4f6', fg: '#4b5563' },
-  in_progress: { bg: '#dbeafe', fg: '#1d4ed8' },
-  completed: { bg: '#dcfce7', fg: '#166534' },
-  on_hold: { bg: '#fef3c7', fg: '#92400e' },
-  active: { bg: '#dbeafe', fg: '#1d4ed8' },
-  done: { bg: '#dcfce7', fg: '#166534' },
-  todo: { bg: '#f3f4f6', fg: '#4b5563' },
-  overdue: { bg: '#fee2e2', fg: '#dc2626' },
-};
+/**
+ * The portal is public and token-scoped, so it renders outside the app shell: no sidebar, no
+ * top bar, no navigation. It carries its own calm frame instead — a band with the wordmark and
+ * a single centred column — and every state of the page lives inside it.
+ */
+function PortalFrame({ children }: { children: ReactNode }) {
+  const { t } = useTranslation('portalView');
+  return (
+    <div className="flex min-h-dvh flex-col bg-chalk">
+      <header className="border-b border-line bg-paper">
+        <div className="mx-auto flex w-full max-w-4xl flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 py-3.5 sm:px-6">
+          <span className="font-display text-base font-bold tracking-[0.14em] text-ink">OXACAN</span>
+          <span className="text-[13px] text-muted">{t('brand')}</span>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6">{children}</main>
+
+      <footer className="border-t border-line bg-paper">
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-center gap-1.5 px-4 py-3.5 text-xs text-muted sm:px-6">
+          <span>{t('footer.poweredBy')}</span>
+          <span className="font-display font-semibold tracking-[0.12em] text-ink">OXACAN</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -111,269 +136,290 @@ const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
 export default function PortalView() {
   const { token } = useParams<{ token: string }>();
   const { t } = useTranslation('portalView');
-  const [data, setData] = useState<PortalData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (!token) return;
-    setLoading(true);
-    setError('');
-    fetch(`/api/portal/view/${token}`)
-      .then(async res => {
-        if (!res.ok) {
-          const body = await res.text();
-          let msg: string;
-          let code: string | undefined;
-          let details: Record<string, unknown> | undefined;
-          try {
-            const parsed = JSON.parse(body);
-            msg = parsed?.error?.message || parsed?.message || res.statusText;
-            code = parsed?.error?.code;
-            details = parsed?.error?.details;
-          }
-          catch { msg = body || res.statusText; }
-          throw new ApiError(res.status, msg, code, details);
+  /**
+   * Deliberately a bare fetch rather than the `api` helper: the portal carries no session, and a
+   * 401 here must not fire the app's "session expired" event on a client who was never signed in.
+   */
+  const portal = useQuery<PortalData, Error>({
+    queryKey: ['portal-view', token],
+    queryFn: async () => {
+      const res = await fetch(`/api/portal/view/${token}`);
+      if (!res.ok) {
+        const body = await res.text();
+        let msg: string;
+        let code: string | undefined;
+        let details: Record<string, unknown> | undefined;
+        try {
+          const parsed = JSON.parse(body);
+          msg = parsed?.error?.message || parsed?.message || res.statusText;
+          code = parsed?.error?.code;
+          details = parsed?.error?.details;
         }
-        return res.json();
-      })
-      .then(res => {
-        setData(toPortalData((res?.data ?? res) as PortalApiResponse));
-      })
-      .catch(e => {
-        // An unknown, revoked or expired token is the common case for the building owner.
-        const invalidLink = e instanceof ApiError && [401, 403, 404].includes(e.status);
-        setError(invalidLink ? t('unavailable.invalidLink') : errorMessage(e, t('unavailable.loadFailed')));
-      })
-      .finally(() => setLoading(false));
-  }, [token, t]);
+        catch { msg = body || res.statusText; }
+        throw new ApiError(res.status, msg, code, details);
+      }
+      const payload = await res.json();
+      return toPortalData((payload?.data ?? payload) as PortalApiResponse);
+    },
+    enabled: Boolean(token),
+    retry: false,
+    // The client reads the portal, they do not work in it: one load per visit, no focus refetch
+    // that could replace the page with an error after the link was revoked in another tab.
+    refetchOnWindowFocus: false,
+  });
 
-  if (loading) {
+  const loadError = portal.isError ? errorMessage(portal.error, t('unavailable.loadFailed')) : null;
+
+  if (portal.isPending) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        background: '#f8f9fa',
-      }}>
-        <p style={{ color: '#6b7280', fontSize: 16 }}>{t('loading')}</p>
-      </div>
+      <PortalFrame>
+        <Card>
+          <LoadingState label={t('loading')} />
+        </Card>
+      </PortalFrame>
     );
   }
 
-  if (error || !data) {
+  const data = portal.data;
+
+  // The states where the page has no project to name: an unusable link, or a load that failed.
+  if (!data) {
+    const status = portal.error instanceof ApiError ? portal.error.status : undefined;
+    // An unknown, revoked or expired token is the common case for the building owner.
+    const invalidLink = status !== undefined && [401, 403, 404].includes(status);
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        background: '#f8f9fa',
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 48, color: '#d1d5db', marginBottom: 16 }}>!</div>
-          <h2 style={{ fontSize: 20, fontWeight: 600, color: '#111827', margin: '0 0 8px' }}>{t('unavailable.title')}</h2>
-          <p style={{ color: '#6b7280', fontSize: 14 }}>{error || t('unavailable.invalidLink')}</p>
-        </div>
-      </div>
+      <PortalFrame>
+        <Card>
+          {invalidLink ? (
+            <EmptyState
+              icon={<Link2Off className="size-5" />}
+              title={t('unavailable.title')}
+              description={t('unavailable.invalidLink')}
+            />
+          ) : (
+            <ErrorState
+              message={loadError ?? t('unavailable.loadFailed')}
+              onRetry={() => portal.refetch()}
+            />
+          )}
+        </Card>
+      </PortalFrame>
     );
   }
 
-  const project = data.project;
-  const totalTasks = (data.taskOverview?.todo ?? 0) + (data.taskOverview?.in_progress ?? 0) + (data.taskOverview?.done ?? 0);
+  const { project, lots, milestones, recentReports, taskOverview } = data;
+  const progress = project.progress ?? 0;
+  const progressWidth = Math.min(100, Math.max(0, progress));
+  const totalTasks =
+    (taskOverview?.todo ?? 0) + (taskOverview?.in_progress ?? 0) + (taskOverview?.done ?? 0);
+
+  const taskTiles = [
+    { key: 'todo', label: t('tasks.todo'), value: taskOverview?.todo ?? 0, tone: 'text-ink' },
+    { key: 'inProgress', label: t('tasks.inProgress'), value: taskOverview?.in_progress ?? 0, tone: 'text-copper' },
+    { key: 'done', label: t('tasks.done'), value: taskOverview?.done ?? 0, tone: 'text-ok' },
+  ];
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      background: '#f8f9fa',
-      display: 'flex',
-      flexDirection: 'column',
-    }}>
-      {/* Header */}
-      <header style={{
-        background: '#fff',
-        borderBottom: '1px solid #e5e7eb',
-        padding: '16px 32px',
-      }}>
-        <div style={{ maxWidth: 960, margin: '0 auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>
-                {t('brand')}
-              </div>
-              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>
-                {project.name}
-              </h1>
-            </div>
-            <span style={{
-              display: 'inline-block',
-              padding: '4px 14px',
-              borderRadius: 9999,
-              fontSize: 13,
-              fontWeight: 500,
-              background: (STATUS_COLORS[project.status] || STATUS_COLORS.active).bg,
-              color: (STATUS_COLORS[project.status] || STATUS_COLORS.active).fg,
-            }}>
-              {statusLabel('project', project.status || 'active')}
-            </span>
-          </div>
+    <PortalFrame>
+      <PageBody>
+        <PageHeader
+          title={project.name}
+          kicker={t('kicker')}
+          meta={<StatusBadge domain="project" value={project.status || 'active'} />}
+        />
 
-          {/* Progress bar */}
-          <div style={{ marginTop: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-              <span>{t('progress')}</span>
-              <span>{project.progress ?? 0}%</span>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('progress')}</CardTitle>
+            <span className="tnum text-[13px] text-muted">{t('progressValue', { percent: progress })}</span>
+          </CardHeader>
+          <CardContent>
+            <div
+              role="progressbar"
+              aria-label={t('progress')}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+              className="h-2.5 overflow-hidden rounded-full bg-line-soft"
+            >
+              {/* The one permitted inline style: a width only known at runtime. */}
+              <div
+                className={cn(
+                  'h-full rounded-full',
+                  progressWidth >= 100 ? 'bg-ok' : progressWidth >= 50 ? 'bg-copper' : 'bg-warn',
+                )}
+                style={{ width: `${progressWidth}%` }}
+              />
             </div>
-            <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
-              <div style={{
-                width: `${project.progress ?? 0}%`,
-                height: '100%',
-                background: '#2563eb',
-                borderRadius: 4,
-                transition: 'width 0.3s',
-              }} />
-            </div>
-          </div>
-        </div>
-      </header>
+          </CardContent>
+        </Card>
 
-      {/* Content */}
-      <main style={{ flex: 1, padding: '24px 32px', maxWidth: 960, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-        {/* Task Overview */}
-        {totalTasks > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: '0 0 12px' }}>{t('tasks.title')}</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              <div style={{
-                background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #e5e7eb',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#6b7280' }}>{data.taskOverview.todo}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', marginTop: 4 }}>{t('tasks.todo')}</div>
-              </div>
-              <div style={{
-                background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #e5e7eb',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#2563eb' }}>{data.taskOverview.in_progress}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', marginTop: 4 }}>{t('tasks.inProgress')}</div>
-              </div>
-              <div style={{
-                background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #e5e7eb',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 28, fontWeight: 700, color: '#16a34a' }}>{data.taskOverview.done}</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', marginTop: 4 }}>{t('tasks.done')}</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Lots */}
-        {data.lots && data.lots.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: '0 0 12px' }}>{t('lots.title')}</h2>
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-              {data.lots.map((lot, i) => (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {t('tasks.title')}
+              <CardCount>{totalTasks}</CardCount>
+            </CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={portal.isPending}
+            error={loadError}
+            onRetry={() => portal.refetch()}
+            isEmpty={totalTasks === 0}
+            loading={
+              <CardContent className="flex flex-wrap gap-3">
+                {taskTiles.map((tile) => (
+                  <Skeleton key={tile.key} className="h-[66px] min-w-[138px] flex-1" />
+                ))}
+              </CardContent>
+            }
+            empty={
+              <EmptyState
+                icon={<ListChecks className="size-5" />}
+                title={t('tasks.empty')}
+                description={t('tasks.emptyHelp')}
+              />
+            }
+          >
+            <CardContent className="flex flex-wrap gap-3">
+              {taskTiles.map((tile) => (
                 <div
-                  key={lot.id}
-                  style={{
-                    padding: '12px 16px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
-                  }}
+                  key={tile.key}
+                  className="min-w-[138px] flex-1 rounded-md border border-line bg-paper-2 px-3.5 py-3"
                 >
-                  <span style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>{lot.name}</span>
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>{t('lots.taskCount', { count: lot.taskCount })}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Milestones */}
-        {data.milestones && data.milestones.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: '0 0 12px' }}>{t('milestones.title')}</h2>
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-              {data.milestones.map((ms, i) => (
-                <div
-                  key={ms.id}
-                  style={{
-                    padding: '12px 16px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
-                  }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>{ms.name}</span>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#6b7280' }}>
-                      {ms.dueDate ? formatDate(ms.dueDate) : ''}
-                    </span>
-                    <span style={{
-                      display: 'inline-block',
-                      padding: '2px 10px',
-                      borderRadius: 9999,
-                      fontSize: 12,
-                      fontWeight: 500,
-                      background: (STATUS_COLORS[ms.status] || STATUS_COLORS.not_started).bg,
-                      color: (STATUS_COLORS[ms.status] || STATUS_COLORS.not_started).fg,
-                    }}>
-                      {statusLabel('milestone', ms.status)}
-                    </span>
+                  <div className="text-xs text-muted">{tile.label}</div>
+                  <div className={cn('tnum mt-1 font-display text-xl font-semibold', tile.tone)}>
+                    {tile.value}
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
+            </CardContent>
+          </DataState>
+        </Card>
 
-        {/* Recent Updates */}
-        {data.recentReports && data.recentReports.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: '0 0 12px' }}>{t('reports.title')}</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {data.recentReports.map(report => (
-                <div
-                  key={report.id}
-                  style={{
-                    background: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 8,
-                    padding: 16,
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    {formatDate(report.date)}
-                  </div>
-                  <div style={{ fontSize: 14, color: '#111827', lineHeight: 1.5 }}>
-                    {report.summary}
-                  </div>
-                </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {t('lots.title')}
+              <CardCount>{lots.length}</CardCount>
+            </CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={portal.isPending}
+            error={loadError}
+            onRetry={() => portal.refetch()}
+            isEmpty={lots.length === 0}
+            loading={<TableSkeleton rows={3} cols={2} />}
+            empty={
+              <EmptyState
+                icon={<Layers className="size-5" />}
+                title={t('lots.empty')}
+                description={t('lots.emptyHelp')}
+              />
+            }
+          >
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>{t('lots.table.name')}</TH>
+                    <TH numeric>{t('lots.table.tasks')}</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {lots.map((lot) => (
+                    <TR key={lot.id}>
+                      <TD className="font-medium">{lot.name}</TD>
+                      <TD numeric className="text-muted">{lot.taskCount}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </TableWrap>
+          </DataState>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {t('milestones.title')}
+              <CardCount>{milestones.length}</CardCount>
+            </CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={portal.isPending}
+            error={loadError}
+            onRetry={() => portal.refetch()}
+            isEmpty={milestones.length === 0}
+            loading={<TableSkeleton rows={3} cols={3} />}
+            empty={
+              <EmptyState
+                icon={<Flag className="size-5" />}
+                title={t('milestones.empty')}
+                description={t('milestones.emptyHelp')}
+              />
+            }
+          >
+            <TableWrap>
+              <Table>
+                <THead>
+                  <tr>
+                    <TH>{t('milestones.table.name')}</TH>
+                    <TH>{t('milestones.table.targetDate')}</TH>
+                    <TH>{t('milestones.table.status')}</TH>
+                  </tr>
+                </THead>
+                <TBody>
+                  {milestones.map((milestone) => (
+                    <TR key={milestone.id}>
+                      <TD className="font-medium">{milestone.name}</TD>
+                      <TD className="tnum text-muted">{formatDate(milestone.dueDate)}</TD>
+                      <TD>
+                        <StatusBadge domain="milestone" value={milestone.status} />
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </TableWrap>
+          </DataState>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {t('reports.title')}
+              <CardCount>{recentReports.length}</CardCount>
+            </CardTitle>
+          </CardHeader>
+          <DataState
+            isLoading={portal.isPending}
+            error={loadError}
+            onRetry={() => portal.refetch()}
+            isEmpty={recentReports.length === 0}
+            loading={<TableSkeleton rows={3} cols={2} />}
+            empty={
+              <EmptyState
+                icon={<Newspaper className="size-5" />}
+                title={t('reports.empty')}
+                description={t('reports.emptyHelp')}
+              />
+            }
+          >
+            <ul className="grid grid-cols-[minmax(0,1fr)]">
+              {recentReports.map((report) => (
+                <li key={report.id} className="grid grid-cols-[minmax(0,1fr)] gap-1 border-b border-line-soft p-4 last:border-b-0">
+                  <span className="tnum text-[13px] text-muted">{formatDate(report.date)}</span>
+                  <p className={cn('text-[13.5px]', report.summary ? 'text-ink' : 'text-muted')}>
+                    {report.summary || t('reports.noDetail')}
+                  </p>
+                </li>
               ))}
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* Footer */}
-      <footer style={{
-        padding: '16px 32px',
-        borderTop: '1px solid #e5e7eb',
-        textAlign: 'center',
-        background: '#fff',
-      }}>
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>{t('footer.poweredBy')}</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>OXACAN</span>
-      </footer>
-    </div>
+            </ul>
+          </DataState>
+        </Card>
+      </PageBody>
+    </PortalFrame>
   );
 }
