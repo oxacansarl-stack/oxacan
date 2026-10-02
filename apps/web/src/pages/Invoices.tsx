@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiList, apiPost, apiPatch, apiDownload } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { enumLabel, formatAmount, formatDate, formatMoney, formatNumber, statusLabel } from '../lib/format';
+import { enumLabel, formatAmount, formatDate, formatMoney, formatNumber, statusLabel, todayIso } from '../lib/format';
 import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
 import {
   Card,
@@ -284,7 +284,7 @@ export default function Invoices() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amountCents: 0,
-    paymentDate: new Date().toISOString().slice(0, 10),
+    paymentDate: todayIso(),
     paymentMethod: 'bank_transfer',
     reference: '',
   });
@@ -588,7 +588,7 @@ export default function Invoices() {
         ...(paymentForm.reference.trim() ? { reference: paymentForm.reference.trim() } : {}),
       });
       setShowPayment(false);
-      setPaymentForm({ amountCents: 0, paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: 'bank_transfer', reference: '' });
+      setPaymentForm({ amountCents: 0, paymentDate: todayIso(), paymentMethod: 'bank_transfer', reference: '' });
       void loadDetail(detail.id);
       fetchInvoices();
     } catch (e) {

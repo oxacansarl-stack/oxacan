@@ -44,6 +44,21 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   return Number.isNaN(date.getTime()) ? '—' : dateTimeFmt.format(date);
 }
 
+/**
+ * Today's date in Switzerland as YYYY-MM-DD.
+ *
+ * `new Date().toISOString().slice(0, 10)` gives the UTC date, so between midnight and
+ * 01:00 (02:00 in summer) Swiss time it returns YESTERDAY — a daily report, expense or
+ * payment filed late in the evening would be dated a day early. The business day is
+ * Europe/Zurich regardless of where the user's device is (PRD §23.5); 'sv-SE' formats
+ * as YYYY-MM-DD.
+ */
+const isoDateInZurich = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Zurich' });
+
+export function todayIso(): string {
+  return isoDateInZurich.format(new Date());
+}
+
 /** 450 → "7:30". */
 export function formatMinutes(minutes: number | null | undefined): string {
   const m = Math.max(0, Math.round(minutes ?? 0));

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { MoreHorizontal, Plus, Receipt, Trash2 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { enumLabel, formatDate, formatMoney, statusLabel } from '../lib/format';
+import { enumLabel, formatDate, formatMoney, statusLabel, todayIso } from '../lib/format';
 import { useCurrentUser, type Role } from '../lib/current-user';
 import { MetaDivider, PageBody, PageHeader } from '@/components/page-header';
 import { Card, CardFooter } from '@/components/ui/card';
@@ -73,7 +73,7 @@ const APPROVER_ROLES: Role[] = ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER'];
 /** Only an own expense in one of these states may be submitted for approval. */
 const SUBMITTABLE = new Set(['draft', 'rejected']);
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayIso();
 
 /** Keeps a control inside a row from also toggling the row's selection. */
 const stopRowActivation = (event: SyntheticEvent) => event.stopPropagation();
