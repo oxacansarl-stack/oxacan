@@ -251,23 +251,126 @@ describe('The PDF reader itself', () => {
 });
 
 describe('Importing a soumission PDF through the API', () => {
-  it('imports the positions and reads the document details off the page', async () => {
+  /** Uploads, then walks the draft through to a confirmed import. */
+  async function importPdf(pdf: Buffer, filename: string, body: Record<string, unknown> = {}) {
+    const up = await upload(pdf, filename);
+    if (up.status >= 300) return { ...up, draft: null };
+    const confirmed = await admin.post(`/catalogue/drafts/${up.data.id}/confirm`, body);
+    return { status: confirmed.status, data: confirmed.data, error: confirmed.error, draft: up.data };
+  }
+
+  it('parks what it read for review instead of importing it straight away', async () => {
     const pdf = await buildSoumissionPdf({ lines: SAMPLE_LINES, reference: '000777' });
     const res = await upload(pdf, 'Soumission_000777_Vinet.pdf');
     expect(res.status).toBe(201);
-    expect(res.data).toMatchObject({ totalRows: 3, matchedRows: 0, unmatchedRows: 3 });
-    expect(res.data.source).toMatchObject({ reference: '000777', pageCount: 1, documentDate: '2025-04-17' });
-    expect(res.data.document).toMatchObject({ projectName: 'Rénovation école Vinet, Lausanne' });
+    expect(res.data).toMatchObject({
+      status: 'pending',
+      source: 'pdf',
+      rowCount: 3,
+      documentReference: '000777',
+      projectName: 'Rénovation école Vinet, Lausanne',
+      pageCount: 1,
+    });
+    expect(String(res.data.documentDate)).toMatch(/^2025-04-17/);
+    expect(res.data.rows).toHaveLength(3);
+    expect(res.data.rows[0]).toMatchObject({ npkNumber: '571.201', quantity: 1250, unit: 'm', reviewStatus: 'pending' });
+
+    // Nothing has reached the catalogue yet: that is the whole point of the step.
+    const docs = await admin.get('/catalogue/drafts?status=pending');
+    expect(docs.data.some((d: any) => d.id === res.data.id)).toBe(true);
   });
 
-  it('turns the prices of a known article into price history', async () => {
+  it('flags the lines that deserve a look and leaves the rest clean', async () => {
+    const res = await upload(
+      await buildSoumissionPdf({
+        reference: '000778',
+        lines: [
+          // Priced, coded, consistent — but its code is not in the catalogue yet.
+          { kind: 'position', code: '571.201', text: 'Tube TT', qte: '100.00', unite: 'm', pu: '4.85', total: '485.00' },
+          // 10 x 50.00 is 500.00, not 900.00: a figure came out of the wrong column.
+          { kind: 'position', code: '573.112', text: 'Prise T13', qte: '10.00', unite: 'pce', pu: '50.00', total: '900.00' },
+          // Nothing to price it by.
+          { kind: 'position', code: '575.021', text: 'Luminaire', qte: '5.00', unite: 'pce' },
+          // A number that means something only inside its own soumission.
+          { kind: 'position', code: '00000012', text: 'Poste interne', qte: '1.00', unite: 'forfait', pu: '100.00', total: '100.00' },
+        ],
+      }),
+      'flags.pdf',
+    );
+    expect(res.status).toBe(201);
+    const flagsOf = (code: string) => res.data.rows.find((r: any) => r.npkNumber === code).flags;
+    expect(flagsOf('571.201')).toEqual(['UNKNOWN_CODE']);
+    expect(flagsOf('573.112')).toEqual(expect.arrayContaining(['TOTAL_MISMATCH']));
+    expect(flagsOf('575.021')).toEqual(expect.arrayContaining(['MISSING_PRICE']));
+    expect(flagsOf('00000012')).toEqual(expect.arrayContaining(['INTERNAL_CODE']));
+    expect(res.data.flaggedCount).toBe(4);
+  });
+
+  it('refuses to confirm while lines still carry a warning, unless the reviewer says so', async () => {
+    const pdf = await buildSoumissionPdf({
+      reference: '000779',
+      lines: [{ kind: 'position', code: '573.112', text: 'Prise T13', qte: '10.00', unite: 'pce', pu: '50.00', total: '900.00' }],
+    });
+    const draft = (await upload(pdf, 'blocked.pdf')).data;
+    const blocked = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, {});
+    expect(blocked.error?.details?.rule).toBe('DRAFT_HAS_FLAGS');
+    expect(blocked.error?.details?.flaggedLines?.[0]?.flags).toEqual(expect.arrayContaining(['TOTAL_MISMATCH']));
+
+    // Saying "I looked and it is fine" is a different act from not having looked.
+    const accepted = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, { acceptFlagged: true });
+    expect(accepted.status).toBe(201);
+    expect(accepted.data).toMatchObject({ totalRows: 1, acceptedWithFlags: 1 });
+  });
+
+  it('lets the reviewer correct a misread line, which clears its warning', async () => {
+    const pdf = await buildSoumissionPdf({
+      reference: '000780',
+      lines: [{ kind: 'position', code: '573.112', text: 'Prise T13', qte: '10.00', unite: 'pce', pu: '50.00', total: '900.00' }],
+    });
+    const draft = (await upload(pdf, 'corrected.pdf')).data;
+    const row = draft.rows[0];
+    expect(row.flags).toEqual(expect.arrayContaining(['TOTAL_MISMATCH']));
+
+    const fixed = await admin.patch(`/catalogue/drafts/${draft.id}/rows/${row.id}`, { totalPriceCents: 50000 });
+    expect(fixed.status).toBe(200);
+    expect(fixed.data.rows[0]).toMatchObject({ reviewStatus: 'edited', totalPriceCents: 50000 });
+    expect(fixed.data.rows[0].flags).not.toContain('TOTAL_MISMATCH');
+
+    // No warnings left, so it confirms without anyone having to override anything.
+    const confirmed = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, {});
+    expect(confirmed.status).toBe(201);
+    expect(confirmed.data).toMatchObject({ totalRows: 1, correctedRows: 1, acceptedWithFlags: 0 });
+  });
+
+  it('leaves an excluded line out of the import entirely', async () => {
+    const pdf = await buildSoumissionPdf({
+      reference: '000781',
+      lines: [
+        { kind: 'position', code: '571.201', text: 'Tube TT', qte: '100.00', unite: 'm', pu: '4.85', total: '485.00' },
+        { kind: 'position', code: '999.999', text: 'Ligne parasite', qte: '1.00', unite: 'pce', pu: '1.00', total: '1.00' },
+      ],
+    });
+    const draft = (await upload(pdf, 'excluded.pdf')).data;
+    const junk = draft.rows.find((r: any) => r.npkNumber === '999.999');
+    await admin.patch(`/catalogue/drafts/${draft.id}/rows/${junk.id}`, { excluded: true });
+
+    const confirmed = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, { acceptFlagged: true });
+    expect(confirmed.status).toBe(201);
+    expect(confirmed.data).toMatchObject({ totalRows: 1, excludedRows: 1 });
+  });
+
+  it('turns the prices of a known article into price history, once confirmed', async () => {
     const code = `585 771.${String(Date.now()).slice(-3)}`;
     await admin.post('/catalogue/articles', { npkNumber: code, description: 'Tube TT 20 mm, posé encastré', unit: 'm' });
     const pdf = await buildSoumissionPdf({
       reference: `0008${String(Date.now()).slice(-2)}`,
       lines: [{ kind: 'position', code, text: 'Tube TT 20 mm, posé encastré', qte: '100.00', unite: 'm', pu: '5.20', total: '520.00' }],
     });
-    const res = await upload(pdf, `tube-${code}.pdf`);
+    const draft = (await upload(pdf, `tube-${code}.pdf`)).data;
+    // A code the catalogue knows, with a matching unit and consistent arithmetic: no warnings.
+    expect(draft.rows[0].flags).toEqual([]);
+
+    const res = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, {});
     expect(res.status).toBe(201);
     expect(res.data.matchedRows).toBe(1);
 
@@ -278,12 +381,33 @@ describe('Importing a soumission PDF through the API', () => {
     expect(String(stats.lastPriceDate)).toMatch(/^2025-04-17/);
   });
 
-  it('says plainly when a PDF holds no positions instead of importing nothing silently', async () => {
+  it('cannot be confirmed twice, nor after being discarded', async () => {
+    // Distinct content: the catalogue de-duplicates on the rows themselves, so reusing another
+    // test's figures would be refused as an already-imported document rather than a second confirm.
+    const code = `585 782.${String(Date.now()).slice(-3)}`;
+    const pdf = await buildSoumissionPdf({
+      reference: '000782',
+      lines: [{ kind: 'position', code, text: 'Tube TT confirmé deux fois', qte: '13.00', unite: 'm', pu: '7.70', total: '100.10' }],
+    });
+    const draft = (await upload(pdf, 'twice.pdf')).data;
+    expect((await admin.post(`/catalogue/drafts/${draft.id}/confirm`, { acceptFlagged: true })).status).toBe(201);
+    const again = await admin.post(`/catalogue/drafts/${draft.id}/confirm`, { acceptFlagged: true });
+    expect(again.error?.details?.rule).toBe('DRAFT_NOT_PENDING');
+
+    const other = (await upload(
+      await buildSoumissionPdf({ reference: '000783', lines: [{ kind: 'position', code: '571.202', text: 'Tube', qte: '1.00', unite: 'm', pu: '1.00', total: '1.00' }] }),
+      'discarded.pdf',
+    )).data;
+    expect((await admin.post(`/catalogue/drafts/${other.id}/discard`, {})).data.status).toBe('discarded');
+    expect((await admin.post(`/catalogue/drafts/${other.id}/confirm`, { acceptFlagged: true })).error?.details?.rule).toBe('DRAFT_NOT_PENDING');
+  });
+
+  it('says plainly when a PDF holds no positions instead of parking an empty draft', async () => {
     const res = await upload(await buildSoumissionPdf({ lines: SAMPLE_LINES, scanned: true }), 'scan.pdf');
     expect(res.error?.details?.rule).toBe('PDF_NO_POSITIONS');
   });
 
-  it('rejects a file that is not a PDF, an empty upload and a second import of the same file', async () => {
+  it('rejects a file that is not a PDF, an empty upload and the same file twice', async () => {
     expect((await upload(Buffer.from('<html>not a pdf</html>'), 'fake.pdf')).status).toBe(400);
 
     const form = new FormData();
@@ -301,8 +425,10 @@ describe('Importing a soumission PDF through the API', () => {
     expect((await upload(pdf, name)).error?.details?.rule).toBe('DUPLICATE_IMPORT');
   });
 
-  it('is office-only', async () => {
+  it('is office-only, from upload through to confirmation', async () => {
     const pdf = await buildSoumissionPdf({ lines: SAMPLE_LINES, reference: '000998' });
     expect((await upload(pdf, 'worker.pdf', {}, tokenFor(WORKER_1_A.authId))).status).toBe(403);
+    const worker = apiClient(tokenFor(WORKER_1_A.authId));
+    expect((await worker.get('/catalogue/drafts')).status).toBe(403);
   });
 });

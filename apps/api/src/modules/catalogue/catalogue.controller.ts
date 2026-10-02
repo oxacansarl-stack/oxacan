@@ -17,6 +17,13 @@ import { CatalogueService } from './catalogue.service';
 import { MatchingService } from './matching.service';
 import { hidesMoneyFor, stripMoney } from '../../common/util/strip-money';
 import { CreateArticleDto, UpdateArticleDto, ImportCsvDto, ImportPdfDto } from './dto/catalogue.dto';
+import {
+  ConfirmDraftDto,
+  ListDraftsQueryDto,
+  UpdateDraftDto,
+  UpdateDraftRowDto,
+} from './dto/import-review.dto';
+import { ImportReviewService } from './import-review.service';
 import { PDF_LIMITS } from './pdf-text.extractor';
 
 @Controller('catalogue')
@@ -24,6 +31,7 @@ export class CatalogueController {
   constructor(
     private readonly catalogueService: CatalogueService,
     private readonly matching: MatchingService,
+    private readonly review: ImportReviewService,
   ) {}
 
   /**
@@ -104,8 +112,14 @@ export class CatalogueController {
   }
 
   /**
-   * A soumission PDF imported as is (multipart/form-data, field "file"). Kept in memory only,
-   * one file, 10 MB at most; the content must be a real PDF whatever its name or MIME type says.
+   * A soumission PDF read into a draft for review (multipart/form-data, field "file"). Kept in
+   * memory only, one file, 10 MB at most; the content must be a real PDF whatever its name or MIME
+   * type says.
+   *
+   * This does NOT import anything. What the reader made of the document is parked, with a flag on
+   * every line that deserves a look, until a human confirms it (PRD §7.3 step 10). A reading of a
+   * printed layout is the one place in the product where the data can be wrong without anybody
+   * having typed it wrong, so it is the one place that gets a second pair of eyes by default.
    */
   @Post('import/pdf')
   @Roles(...OFFICE_ROLES)
@@ -120,7 +134,66 @@ export class CatalogueController {
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
     @Body() body: ImportPdfDto,
   ) {
-    return this.catalogueService.importPdf(companyId, user.id, file, body);
+    return this.review.draftFromPdf(companyId, user.id, file, body);
+  }
+
+  /* ───────────── Import review (PRD §7.3 step 10) ───────────── */
+
+  @Get('drafts')
+  @Roles(...OFFICE_ROLES)
+  async listDrafts(@CompanyId() companyId: string, @Query() query: ListDraftsQueryDto) {
+    return this.review.list(companyId, query.status);
+  }
+
+  @Get('drafts/:id')
+  @Roles(...OFFICE_ROLES)
+  async getDraft(@CompanyId() companyId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.review.get(companyId, id);
+  }
+
+  /** Corrects what the document said about itself (project, year, date) before confirming. */
+  @Patch('drafts/:id')
+  @Roles(...OFFICE_ROLES)
+  async updateDraft(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateDraftDto,
+  ) {
+    return this.review.updateDraft(companyId, id, body);
+  }
+
+  /** Corrects one read line, or drops it from the import. */
+  @Patch('drafts/:id/rows/:rowId')
+  @Roles(...OFFICE_ROLES)
+  async updateDraftRow(
+    @CompanyId() companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('rowId', ParseUUIDPipe) rowId: string,
+    @Body() body: UpdateDraftRowDto,
+  ) {
+    return this.review.updateRow(companyId, id, rowId, body);
+  }
+
+  /** Imports the reviewed lines: the only path by which a read document reaches the catalogue. */
+  @Post('drafts/:id/confirm')
+  @Roles(...OFFICE_ROLES)
+  async confirmDraft(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: ConfirmDraftDto,
+  ) {
+    return this.review.confirm(companyId, user.id, id, body);
+  }
+
+  @Post('drafts/:id/discard')
+  @Roles(...OFFICE_ROLES)
+  async discardDraft(
+    @CompanyId() companyId: string,
+    @CurrentUser() user: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.review.discard(companyId, id, user.id);
   }
 
   @Get('articles/:id/prices')

@@ -8,6 +8,9 @@ import { PriceObservation } from './entities/price-observation.entity';
 import { CatalogueService } from './catalogue.service';
 import { CatalogueController } from './catalogue.controller';
 import { MatchingService } from './matching.service';
+import { ImportReviewService } from './import-review.service';
+import { ImportDraft } from './entities/import-draft.entity';
+import { ImportDraftRow } from './entities/import-draft-row.entity';
 
 @Module({
   imports: [
@@ -17,10 +20,12 @@ import { MatchingService } from './matching.service';
       SourceDocument,
       SourceOccurrence,
       PriceObservation,
+      ImportDraft,
+      ImportDraftRow,
     ]),
   ],
-  providers: [CatalogueService, MatchingService],
+  providers: [CatalogueService, MatchingService, ImportReviewService],
   controllers: [CatalogueController],
-  exports: [CatalogueService, MatchingService],
+  exports: [CatalogueService, MatchingService, ImportReviewService],
 })
 export class CatalogueModule {}
