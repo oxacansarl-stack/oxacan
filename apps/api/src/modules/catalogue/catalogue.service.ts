@@ -131,16 +131,23 @@ export class CatalogueService {
     companyId: string,
     dto: CreateArticleDto,
   ): Promise<CanonicalArticle> {
-    const article = this.articleRepo.create({
-      companyId,
-      npkNumber: dto.npkNumber || null,
-      description: dto.description,
-      unit: dto.unit,
-      category: dto.category || null,
-      isComposed: dto.isComposed ?? false,
-      composedComponents: dto.composedComponents || null,
+    return this.articleRepo.manager.transaction(async (m) => {
+      const article = await m.save(
+        m.create(CanonicalArticle, {
+          companyId,
+          npkNumber: dto.npkNumber || null,
+          description: dto.description,
+          unit: dto.unit,
+          category: dto.category || null,
+          isComposed: dto.isComposed ?? false,
+          composedComponents: dto.composedComponents || null,
+        }),
+      );
+      // Soumissions are usually imported before the catalogue is built: the lines carrying this
+      // code are already in the database, unmatched, and nothing would ever look at them again.
+      await this.adoptOrphanOccurrences(m, companyId, article);
+      return m.findOneOrFail(CanonicalArticle, { where: { id: article.id, companyId } });
     });
-    return this.articleRepo.save(article);
   }
 
   async updateArticle(
@@ -148,13 +155,24 @@ export class CatalogueService {
     id: string,
     dto: UpdateArticleDto,
   ): Promise<CanonicalArticle> {
-    const article = await this.articleRepo.findOne({
-      where: { id, companyId },
-    });
-    if (!article) throw new NotFoundError('CanonicalArticle', id);
+    return this.articleRepo.manager.transaction(async (m) => {
+      const article = await m.findOne(CanonicalArticle, { where: { id, companyId } });
+      if (!article) throw new NotFoundError('CanonicalArticle', id);
 
-    Object.assign(article, dto);
-    return this.articleRepo.save(article);
+      const was = { npkNumber: article.npkNumber, isActive: article.isActive };
+      // A DTO instance carries its declared-but-unset fields as own `undefined` properties, which
+      // Object.assign would copy straight over the stored values.
+      for (const [k, v] of Object.entries(dto)) {
+        if (v !== undefined) (article as Record<string, unknown>)[k] = v;
+      }
+      const saved = await m.save(article);
+      // Correcting a code, or putting an article back in service, exposes the same orphans a
+      // freshly created article does.
+      if (saved.npkNumber !== was.npkNumber || (saved.isActive && !was.isActive)) {
+        await this.adoptOrphanOccurrences(m, companyId, saved);
+      }
+      return m.findOneOrFail(CanonicalArticle, { where: { id, companyId } });
+    });
   }
 
   /* ───────────── Price stats ───────────── */
@@ -387,6 +405,88 @@ export class CatalogueService {
       [...texts.values()].map((aliasText) => m.create(ArticleAlias, { canonicalArticleId, companyId, aliasText, source, matchConfidence: 1.0 })),
     );
     if (fresh.length) await m.save(fresh);
+  }
+
+  /**
+   * Soumissions are normally imported before the catalogue is built, and the import can only match
+   * against articles that already exist: without this, every price in those documents stays
+   * invisible to the pricing engine for good (§7.4 history strategies, §7.7 confidence).
+   *
+   * `source_occurrence` is the verbatim record of what a document said and is immutable by
+   * trigger, so the lines keep their own `unmatched` status; what is recovered here is the derived
+   * data — the price observations and the wordings. The import's rules still apply: a
+   * project-internal code is never merged on the code alone (R003), a line whose unit differs is
+   * not the same article (§6.1), only a positive base-scope price is a reference (R004), and it is
+   * dated by its soumission rather than by today (R001). Returns the number of prices recovered.
+   */
+  private async adoptOrphanOccurrences(
+    m: EntityManager,
+    companyId: string,
+    article: CanonicalArticle,
+  ): Promise<number> {
+    if (!article.npkNumber || !article.isActive || isProjectInternalCode(article.npkNumber)) return 0;
+
+    const orphans: {
+      id: string;
+      description: string | null;
+      unit: string | null;
+      unitPriceCents: string | number | null;
+      documentDate: string | null;
+      importDate: Date;
+      projectName: string | null;
+    }[] = await m.query(
+      // An occurrence feeds at most one article, so one that already has an observation is done.
+      `SELECT o.id, o.description, o.unit, o.unit_price_cents AS "unitPriceCents",
+              d.document_date::text AS "documentDate", d.import_date AS "importDate",
+              d.project_name AS "projectName"
+         FROM source_occurrence o
+         JOIN source_document d ON d.company_id = o.company_id AND d.id = o.source_document_id
+        WHERE o.company_id = $1 AND o.npk_number = $2 AND o.canonical_article_id IS NULL
+          AND NOT o.is_variant
+          AND NOT EXISTS (SELECT 1 FROM price_observation p WHERE p.source_occurrence_id = o.id)
+        ORDER BY o.created_at`,
+      [companyId, article.npkNumber],
+    );
+    const usable = orphans.filter(
+      (o) => sameUnit(article.unit, o.unit) && o.unitPriceCents != null && Number(o.unitPriceCents) > 0,
+    );
+    if (usable.length === 0) return 0;
+
+    await m.save(
+      usable.map((o) =>
+        m.create(PriceObservation, {
+          canonicalArticleId: article.id,
+          companyId,
+          sourceOccurrenceId: o.id,
+          unitPriceCents: Number(o.unitPriceCents),
+          observationDate: o.documentDate ? new Date(`${o.documentDate}T00:00:00Z`) : o.importDate,
+          projectName: o.projectName,
+        }),
+      ),
+    );
+    await this.refreshArticlePriceStats(companyId, article.id, m);
+
+    // Every wording the code was seen with stays searchable as an alias of the article (R002).
+    const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+    const own = norm(article.description).toLowerCase();
+    const texts = new Map<string, string>();
+    for (const o of usable) {
+      if (!o.description) continue;
+      const text = norm(o.description);
+      if (text.toLowerCase() !== own) texts.set(text.toLowerCase(), text);
+    }
+    if (texts.size) {
+      const existing = await m.find(ArticleAlias, { where: { companyId, canonicalArticleId: article.id } });
+      for (const a of existing) texts.delete(norm(a.aliasText).toLowerCase());
+      if (texts.size) {
+        await m.save(
+          [...texts.values()].map((aliasText) =>
+            m.create(ArticleAlias, { canonicalArticleId: article.id, companyId, aliasText, source: 'backfill', matchConfidence: 1.0 }),
+          ),
+        );
+      }
+    }
+    return usable.length;
   }
 
   private async refreshArticlePriceStats(

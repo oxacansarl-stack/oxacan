@@ -385,3 +385,104 @@ describe('Task dependencies under RLS', () => {
     expect(rows[0].n).toBe(1);
   });
 });
+
+describe('Catalogue backfill', () => {
+  const row = (lineNumber: number, npkNumber: string, over: Record<string, unknown> = {}) => ({
+    lineNumber,
+    rawText: `${npkNumber} ligne ${lineNumber}`,
+    npkNumber,
+    description: 'Tube TT 20 mm, posé encastré',
+    unit: 'm',
+    quantity: 10,
+    unitPriceCents: 1250,
+    ...over,
+  });
+
+  it('recovers the prices of soumissions imported before the article existed', async () => {
+    const code = `585 991.${String(Date.now()).slice(-3)}`;
+    const imported = await ok(admin.post('/catalogue/import', {
+      filename: `backfill-${code}.pdf`,
+      projectName: 'Chantier antérieur',
+      documentDate: '2025-04-17',
+      rows: [
+        row(1, code),
+        row(2, code, { unitPriceCents: 1450, description: 'Tube TT Ø20 encastré sous crépi' }),
+        row(3, code, { unitPriceCents: 9900, isVariant: true }),
+        row(4, code, { unitPriceCents: 0 }),
+        row(5, code, { unit: 'pce', unitPriceCents: 1300 }),
+      ],
+    }));
+    expect(imported.matchedRows).toBe(0);
+
+    const article = await ok(admin.post('/catalogue/articles', {
+      npkNumber: code, description: 'Tube TT 20 mm, posé encastré', unit: 'm',
+    }));
+
+    // Only the two positive base-scope prices in the article's own unit are references: not the
+    // variant (R004), not the zero, not the "pce" line (§6.1).
+    const stats = await ok(admin.get(`/catalogue/articles/${article.id}/prices`));
+    expect(stats.observationCount).toBe(2);
+    expect(stats.medianPriceCents).toBe(1350);
+    expect(stats.minPriceCents).toBe(1250);
+    expect(stats.maxPriceCents).toBe(1450);
+    // Dated by the soumission, not by the day the article was created (R001).
+    expect(String(stats.lastPriceDate)).toMatch(/^2025-04-17/);
+
+    // The other wording the code was seen with stays searchable (R002).
+    const { rows: aliases } = await db.query(
+      `SELECT alias_text FROM article_alias WHERE company_id = $1 AND canonical_article_id = $2`,
+      [COMPANY_A, article.id],
+    );
+    expect(aliases.map((a) => a.alias_text)).toEqual(['Tube TT Ø20 encastré sous crépi']);
+
+    // The source lines are the verbatim record of the document and stay untouched.
+    const { rows: occ } = await db.query(
+      `SELECT DISTINCT status, canonical_article_id FROM source_occurrence
+        WHERE company_id = $1 AND npk_number = $2`,
+      [COMPANY_A, code],
+    );
+    expect(occ).toEqual([{ status: 'unmatched', canonical_article_id: null }]);
+  });
+
+  it('does not count the same price twice when the article is saved again', async () => {
+    const code = `585 993.${String(Date.now()).slice(-3)}`;
+    await ok(admin.post('/catalogue/import', {
+      filename: `once-${code}.pdf`, documentDate: '2025-05-02', rows: [row(1, code)],
+    }));
+    const article = await ok(admin.post('/catalogue/articles', {
+      npkNumber: code, description: 'Tube TT 20 mm, posé encastré', unit: 'm',
+    }));
+    expect((await ok(admin.get(`/catalogue/articles/${article.id}/prices`))).observationCount).toBe(1);
+
+    await ok(admin.patch(`/catalogue/articles/${article.id}`, { isActive: false }));
+    await ok(admin.patch(`/catalogue/articles/${article.id}`, { isActive: true }));
+    expect((await ok(admin.get(`/catalogue/articles/${article.id}/prices`))).observationCount).toBe(1);
+  });
+
+  it('backfills when a mistyped code is corrected, and leaves other companies alone', async () => {
+    const code = `585 992.${String(Date.now()).slice(-3)}`;
+    await ok(admin.post('/catalogue/import', {
+      filename: `typo-${code}.pdf`, documentDate: '2025-06-01', rows: [row(1, code)],
+    }));
+    const other = apiClient(tokenFor(USER_B.authId));
+    await ok(other.post('/catalogue/import', {
+      filename: `typo-other-${code}.pdf`, documentDate: '2025-06-01', rows: [row(1, code, { unitPriceCents: 7777 })],
+    }));
+
+    const article = await ok(admin.post('/catalogue/articles', {
+      npkNumber: `${code}-typo`, description: 'Tube TT 20 mm, posé encastré', unit: 'm',
+    }));
+    expect((await ok(admin.get(`/catalogue/articles/${article.id}/prices`))).observationCount).toBe(0);
+
+    await ok(admin.patch(`/catalogue/articles/${article.id}`, { npkNumber: code }));
+    const stats = await ok(admin.get(`/catalogue/articles/${article.id}/prices`));
+    expect(stats.observationCount).toBe(1);
+    // The other company's line carries the same code and must not feed this catalogue.
+    expect(stats.medianPriceCents).toBe(1250);
+
+    const { rows } = await db.query(
+      `SELECT company_id FROM price_observation WHERE canonical_article_id = $1`, [article.id],
+    );
+    expect(rows.every((r) => r.company_id === COMPANY_A)).toBe(true);
+  });
+});
