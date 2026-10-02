@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { ClipboardList, MoreHorizontal, Pencil, Plus, StickyNote, Trash2 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { formatDate } from '../lib/format';
+import { formatDate, todayIso } from '../lib/format';
 import { PageBody, PageHeader } from '@/components/page-header';
 import { Card, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -89,7 +89,7 @@ const PAGE_LIMIT = 100;
 /** The API rejects anything outside this range (DailyReportFieldsDto). */
 const TEMPERATURE_LIMIT = 60;
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayIso();
 
 const emptyForm = (): ReportForm => ({
   projectId: '',

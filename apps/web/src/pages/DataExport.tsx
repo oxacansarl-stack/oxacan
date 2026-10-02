@@ -3,7 +3,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Database, Download, FileJson, ListChecks, ShieldCheck } from 'lucide-react';
 import { apiGet, ApiError } from '../lib/api';
 import { errorMessage } from '../lib/errors';
-import { formatNumber } from '../lib/format';
+import { formatNumber, todayIso } from '../lib/format';
 import type { PageProps } from '../lib/page-props';
 import { PageBody, PageHeader } from '@/components/page-header';
 import {
@@ -93,7 +93,7 @@ export default function DataExport({ embedded = false }: PageProps) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `oxacan-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `oxacan-data-export-${todayIso()}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

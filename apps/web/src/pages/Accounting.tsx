@@ -15,7 +15,7 @@ import {
 import { apiGet, apiList, apiPost } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
 import { errorMessage } from '../lib/errors';
-import { enumLabel, formatAmount, formatDate, formatMoney } from '../lib/format';
+import { enumLabel, formatAmount, formatDate, formatMoney, todayIso } from '../lib/format';
 import { PageBody, PageHeader } from '@/components/page-header';
 import { Card, CardCount, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -338,7 +338,7 @@ export default function Accounting() {
   const [entryPostedFilter, setEntryPostedFilter] = useState<'' | 'true' | 'false'>('');
   const [entryFormOpen, setEntryFormOpen] = useState(false);
   const [entryForm, setEntryForm] = useState({
-    entryDate: new Date().toISOString().slice(0, 10),
+    entryDate: todayIso(),
     description: '',
     referenceType: '',
   });
@@ -532,7 +532,7 @@ export default function Accounting() {
       queryClient.invalidateQueries({ queryKey: ['accounting', 'entries'] });
       queryClient.invalidateQueries({ queryKey: ['accounting', 'trial-balance'] });
       setEntryFormOpen(false);
-      setEntryForm({ entryDate: new Date().toISOString().slice(0, 10), description: '', referenceType: '' });
+      setEntryForm({ entryDate: todayIso(), description: '', referenceType: '' });
       setEntryLines(blankEntryLines());
       setEntryError(null);
     },
