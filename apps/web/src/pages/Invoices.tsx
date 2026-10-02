@@ -696,7 +696,7 @@ export default function Invoices() {
           <DialogDescription>{t('form.help')}</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label={t('form.project')} htmlFor="invoice-project" required>
               <Select
                 id="invoice-project"
@@ -744,8 +744,8 @@ export default function Invoices() {
 
           {/* Situation: offer positions with the server's previously billed quantities */}
           {isSituation ? (
-            <div className="grid gap-2">
-              <div className="grid gap-1">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
                 <h3 className="text-[13px] font-semibold text-ink">
                   {situationPreview
                     ? t('form.situationTitle', { number: situationPreview.situationNumber })
@@ -846,7 +846,7 @@ export default function Invoices() {
           ) : null}
 
           {/* Free lines */}
-          <div className="grid gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
             <h3 className="text-[13px] font-semibold text-ink">
               {isSituation ? t('form.extraLines') : t('form.lines')}
             </h3>
@@ -934,8 +934,8 @@ export default function Invoices() {
           </div>
 
           {/* Totals preview */}
-          <div className="ml-auto grid w-full max-w-[340px] gap-2 rounded-card border border-line bg-paper-2 p-3.5">
-            <dl className="grid gap-2">
+          <div className="ml-auto grid grid-cols-[minmax(0,1fr)] w-full max-w-[340px] gap-2 rounded-card border border-line bg-paper-2 p-3.5">
+            <dl className="grid grid-cols-[minmax(0,1fr)] gap-2">
               <SummaryRow label={t('summary.subtotalHt')} value={formatMoney(subtotalHt)} />
               <SummaryRow label={t('summary.vat', { rate: vatRate.toFixed(2) })} value={formatMoney(vatAmount)} />
               {acomptesAreDeducted ? (
@@ -1099,8 +1099,8 @@ export default function Invoices() {
         ) : null}
 
         {inv ? (
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="grid min-w-0 content-start gap-5">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
               {/* Lines */}
               <Card>
                 <CardHeader>
@@ -1180,7 +1180,7 @@ export default function Invoices() {
                     </Button>
                   ) : null}
                 </CardHeader>
-                <CardContent className="grid gap-1.5">
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
                     <span className="text-muted">
                       {t('detail.paidAmount', { amount: formatMoney(inv.amountPaidCents ?? 0) })}
@@ -1250,20 +1250,20 @@ export default function Invoices() {
             </div>
 
             {/* The numbers */}
-            <aside className="grid content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_20px)] lg:self-start">
+            <aside className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_20px)] lg:self-start">
               <Card>
                 <CardHeader>
                   <CardTitle>{t('detail.summaryTitle')}</CardTitle>
                 </CardHeader>
-                <CardContent className="grid gap-4">
-                  <div className="grid gap-1">
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+                  <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
                     <span className="text-xs text-muted">{t('summary.totalTtc')}</span>
                     <span className="tnum text-[26px] font-semibold leading-none tracking-[-0.01em]">
                       {formatMoney(inv.totalTtcCents)}
                     </span>
                   </div>
 
-                  <dl className="grid gap-2 border-t border-line-soft pt-3.5">
+                  <dl className="grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-line-soft pt-3.5">
                     <SummaryRow label={t('summary.subtotalHt')} value={formatMoney(inv.subtotalHtCents)} />
                     <SummaryRow
                       label={t('summary.vat', { rate: (inv.vatRate / 100).toFixed(2) })}
@@ -1310,7 +1310,7 @@ export default function Invoices() {
               <DialogDescription>{t('payment.help')}</DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('payment.amount')} htmlFor="payment-amount" required>
                   <Input
                     id="payment-amount"
@@ -1404,7 +1404,7 @@ export default function Invoices() {
       <Tabs
         value={activeSection}
         onValueChange={value => setActiveSection(value as Section)}
-        className="grid gap-5"
+        className="grid grid-cols-[minmax(0,1fr)] gap-5"
       >
         <TabsList aria-label={t('tabs.label')}>
           <TabsTrigger value="invoices">{t('tabs.invoices')}</TabsTrigger>

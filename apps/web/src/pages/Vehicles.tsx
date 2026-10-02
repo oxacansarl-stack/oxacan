@@ -411,7 +411,7 @@ export default function Vehicles({ embedded = false }: PageProps) {
                 />
               </Field>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('form.make')} htmlFor="vehicle-make">
                   <Input
                     id="vehicle-make"
@@ -461,7 +461,7 @@ export default function Vehicles({ embedded = false }: PageProps) {
 
               {/* The API accepts the maintenance fields on update only. */}
               {editingId ? (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                   <Field label={t('form.odometer')} htmlFor="vehicle-odometer">
                     <Input
                       id="vehicle-odometer"

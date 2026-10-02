@@ -705,7 +705,7 @@ export default function Accounting() {
         meta={<span>{isAdmin ? t('subtitle') : t('subtitleExportOnly')}</span>}
       />
 
-      <Tabs value={activeTab} onValueChange={selectTab} className="grid gap-5">
+      <Tabs value={activeTab} onValueChange={selectTab} className="grid grid-cols-[minmax(0,1fr)] gap-5">
         {visibleTabs.length > 1 ? (
           <TabsList aria-label={t('tabsLabel')}>
             {visibleTabs.map(tab => (
@@ -1196,12 +1196,12 @@ export default function Accounting() {
         {/* ============================================================ */}
         {/*  EXPORT FIDUCIAIRE — the one section a project manager sees   */}
         {/* ============================================================ */}
-        <TabsContent value="export" className="grid gap-5">
+        <TabsContent value="export" className="grid grid-cols-[minmax(0,1fr)] gap-5">
           <Card>
             <CardHeader>
               <CardTitle>{t('export.title')}</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
               <p className="max-w-[80ch] text-[13.5px] text-muted">
                 {isAdmin ? t('export.help') : t('export.helpOwnProjects')}
               </p>
@@ -1437,7 +1437,7 @@ export default function Accounting() {
                 <DialogDescription>{t('accounts.createHelp')}</DialogDescription>
               </DialogHeader>
               <DialogBody>
-                <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[150px_minmax(0,1fr)]">
                   <Field label={t('accounts.accountNumber')} htmlFor="accounting-account-number" required>
                     <Input
                       id="accounting-account-number"
@@ -1515,7 +1515,7 @@ export default function Accounting() {
                 <DialogDescription>{t('entries.createHelp')}</DialogDescription>
               </DialogHeader>
               <DialogBody>
-                <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)_180px]">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[160px_minmax(0,1fr)_180px]">
                   <Field label={t('entries.date')} htmlFor="accounting-entry-date" required>
                     <Input
                       id="accounting-entry-date"
@@ -1542,7 +1542,7 @@ export default function Accounting() {
                   </Field>
                 </div>
 
-                <div className="grid gap-2">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
                   <h3 className="text-[13px] font-semibold text-ink-2">{t('entries.lines')}</h3>
                   <div className="overflow-hidden rounded-card border border-line">
                     <TableWrap>

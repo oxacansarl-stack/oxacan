@@ -335,7 +335,7 @@ export default function Suppliers({ embedded = false }: PageProps) {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field label={t('form.contactPerson')} htmlFor="supplier-contact">
                 <Input
                   id="supplier-contact"

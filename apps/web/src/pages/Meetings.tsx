@@ -430,8 +430,8 @@ export default function Meetings() {
   };
 
   const detailPanel = detail ? (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="grid min-w-0 content-start gap-5">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
         {detail.agenda ? <AgendaCard agenda={detail.agenda} /> : null}
 
         <AttendeesCard
@@ -464,7 +464,7 @@ export default function Meetings() {
         />
       </div>
 
-      <div className="grid content-start gap-5 lg:sticky lg:top-5 lg:self-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-5 lg:self-start">
         <MeetingSummaryCard
           meeting={detail}
           alert={meetingAlert}
@@ -534,7 +534,7 @@ export default function Meetings() {
             </Select>
           </Field>
 
-          <div className="grid gap-1.5">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
             <span className="text-[13px] font-medium text-ink-2">{t('filters.status')}</span>
             <div className="flex flex-wrap gap-0.5" role="group" aria-label={t('filters.status')}>
               {STATUS_FILTERS.map((value) => (
@@ -663,7 +663,7 @@ export default function Meetings() {
           id="meeting-detail"
           aria-label={t('detail.region')}
           aria-busy={detailLoading || undefined}
-          className="grid gap-5"
+          className="grid grid-cols-[minmax(0,1fr)] gap-5"
         >
           <DataState
             isLoading={!detail && !detailError}
@@ -672,7 +672,7 @@ export default function Meetings() {
             isEmpty={!detail}
             loading={
               <Card>
-                <CardContent className="grid gap-3" role="status" aria-live="polite" aria-busy="true">
+                <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3" role="status" aria-live="polite" aria-busy="true">
                   <span className="sr-only">{t('detail.loading')}</span>
                   <Skeleton className="h-3 w-44" />
                   <Skeleton className="h-3 w-64" />
@@ -723,7 +723,7 @@ export default function Meetings() {
                   ))}
                 </Select>
               </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('form.date')} htmlFor="meeting-date" required>
                   <Input
                     id="meeting-date"
@@ -874,8 +874,8 @@ function AttendeesCard({
         </TableWrap>
       )}
 
-      <CardContent className="grid gap-3 border-t border-line-soft">
-        <div className="grid gap-3 sm:grid-cols-3">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t border-line-soft">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
           <Field label={t('detail.attendees.nameLabel')} htmlFor="meeting-attendee-name" required>
             <Input
               id="meeting-attendee-name"
@@ -1031,8 +1031,8 @@ function ActionsCard({
         </TableWrap>
       )}
 
-      <CardContent className="grid gap-3 border-t border-line-soft">
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_150px]">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t border-line-soft">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_150px]">
           <Field
             label={t('detail.actions.descriptionLabel')}
             htmlFor="meeting-action-description"
@@ -1115,7 +1115,7 @@ function MinutesCard({
           <span className="text-[13px] text-muted">{t('detail.minutes.unsaved')}</span>
         ) : null}
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
         <Field label={t('detail.minutes.label')} htmlFor="meeting-minutes">
           <Textarea
             id="meeting-minutes"
@@ -1143,7 +1143,7 @@ function MinutesCard({
 
 function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid gap-0.5">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
       <dt className="text-xs text-muted">{label}</dt>
       <dd className="text-[13.5px] text-ink">{children}</dd>
     </div>
@@ -1188,7 +1188,7 @@ function MeetingSummaryCard({
       </CardHeader>
 
       <CardContent>
-        <dl className="grid gap-3">
+        <dl className="grid grid-cols-[minmax(0,1fr)] gap-3">
           <SummaryRow label={t('detail.project')}>
             <span className="font-medium">{meeting.project?.name ?? '—'}</span>
             {meeting.project?.reference ? (

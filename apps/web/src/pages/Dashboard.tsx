@@ -49,6 +49,22 @@ interface TimeEntry {
 /*  Helpers: API responses are already unwrapped (lists are arrays)    */
 /* ------------------------------------------------------------------ */
 
+interface OfferStats {
+  byStatus: Record<string, { count: number; totalTtcCents: number }>;
+  open: { count: number; totalTtcCents: number };
+}
+
+interface InvoiceStats {
+  year: number;
+  invoicedTtcCents: number;
+  paidTtcCents: number;
+  outstandingTtcCents: number;
+  pendingCount: number;
+  pendingTtcCents: number;
+  overdueCount: number;
+  paidThisMonthCents: number;
+}
+
 type ListResult = { items: unknown[]; meta: PageMeta };
 
 function unwrapArray<T>(res: T[] | undefined): T[] {
@@ -114,23 +130,18 @@ export default function Dashboard() {
     retry: false,
   });
 
-  const openOffers = useQuery<ListResult, ApiError>({
-    queryKey: ['dash-offers'],
-    queryFn: () => apiList('/offers?status=draft&limit=1'),
+  // Company-wide aggregates. These replace counting a one-row list and summing a capped page
+  // of invoices: the figures below cover the whole company for the current financial year.
+  const offerStats = useQuery<OfferStats, ApiError>({
+    queryKey: ['dash-offer-stats'],
+    queryFn: () => apiGet<OfferStats>('/offers/stats'),
     enabled: isOffice,
     retry: false,
   });
 
-  const pendingInvoices = useQuery<ListResult, ApiError>({
-    queryKey: ['dash-invoices-pending'],
-    queryFn: () => apiList('/invoices?status=sent&limit=1'),
-    enabled: isOffice,
-    retry: false,
-  });
-
-  const paidInvoices = useQuery<Invoice[], ApiError>({
-    queryKey: ['dash-invoices-paid'],
-    queryFn: () => apiGet<Invoice[]>('/invoices?status=paid&limit=100'),
+  const invoiceStats = useQuery<InvoiceStats, ApiError>({
+    queryKey: ['dash-invoice-stats'],
+    queryFn: () => apiGet<InvoiceStats>('/invoices/stats'),
     enabled: isOffice,
     retry: false,
   });
@@ -189,24 +200,12 @@ export default function Dashboard() {
   const canSeeOffers = isOffice && !isForbidden(recentOffers.error);
   const canSeeInvoices = isOffice && !isForbidden(recentInvoices.error);
 
-  // Revenue calculation — sum of paid invoices this month
-  const paidList = unwrapArray<Invoice>(paidInvoices.data);
-  const now = new Date();
-  const thisMonthRevenue = paidList
-    .filter((inv) => {
-      if (!inv.createdAt) return false;
-      const d = new Date(inv.createdAt);
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    })
-    .reduce((sum, inv) => sum + (inv.paidCents || 0), 0);
-
-  // Financial overview — all invoices for bar comparison
-  const allInvoices = unwrapArray<Invoice>(recentInvoices.data);
-  const totalInvoiced = allInvoices.reduce((s, i) => s + (i.totalTtcCents || 0), 0);
-  const totalPaid = allInvoices.reduce((s, i) => s + (i.paidCents || 0), 0);
-  const outstanding = totalInvoiced - totalPaid;
-  const maxBar = Math.max(totalInvoiced, 1); // avoid division by zero
-  const paidPercent = Math.round((totalPaid / maxBar) * 100);
+  const money = invoiceStats.data;
+  const thisMonthRevenue = money?.paidThisMonthCents ?? 0;
+  const totalInvoiced = money?.invoicedTtcCents ?? 0;
+  const totalPaid = money?.paidTtcCents ?? 0;
+  const outstanding = money?.outstandingTtcCents ?? 0;
+  const paidPercent = Math.round((totalPaid / Math.max(totalInvoiced, 1)) * 100);
 
   /* --- Recent rows --- */
   const offerRows = unwrapArray<Offer>(recentOffers.data).slice(0, 5);
@@ -232,25 +231,25 @@ export default function Dashboard() {
   const offersStat: Stat = {
     key: 'openOffers',
     label: t('stats.openOffers'),
-    value: statValue(openOffers, getCount(openOffers)),
-    loading: openOffers.isLoading,
-    error: getError(openOffers),
+    value: statValue(offerStats, offerStats.data?.open.count ?? 0),
+    loading: offerStats.isLoading,
+    error: getError(offerStats),
   };
 
   const invoicesStat: Stat = {
     key: 'pendingInvoices',
     label: t('stats.pendingInvoices'),
-    value: statValue(pendingInvoices, getCount(pendingInvoices)),
-    loading: pendingInvoices.isLoading,
-    error: getError(pendingInvoices),
+    value: statValue(invoiceStats, money?.pendingCount ?? 0),
+    loading: invoiceStats.isLoading,
+    error: getError(invoiceStats),
   };
 
   const revenueStat: Stat = {
     key: 'monthRevenue',
     label: t('stats.monthRevenue'),
-    value: statValue(paidInvoices, formatMoney(thisMonthRevenue)),
-    loading: paidInvoices.isLoading,
-    error: getError(paidInvoices),
+    value: statValue(invoiceStats, formatMoney(thisMonthRevenue)),
+    loading: invoiceStats.isLoading,
+    error: getError(invoiceStats),
   };
 
   // Offers, invoices and revenue are office figures and are never requested for a field role:
@@ -329,14 +328,14 @@ export default function Dashboard() {
             <CardTitle>{t('financial.title')}</CardTitle>
           </CardHeader>
           <DataState
-            isLoading={recentInvoices.isLoading}
-            error={listError(recentInvoices, t('financial.loadFailed'))}
-            onRetry={() => recentInvoices.refetch()}
+            isLoading={invoiceStats.isLoading}
+            error={getError(invoiceStats) ? t('financial.loadFailed') : null}
+            onRetry={() => invoiceStats.refetch()}
             loading={<TableSkeleton rows={3} cols={2} />}
           >
-            <CardContent className="grid gap-4">
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
               {/* Invoiced — the reference bar, always full width */}
-              <div className="grid gap-1.5">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
                   <span className="text-muted">{t('financial.totalInvoiced')}</span>
                   <span className="tnum font-semibold">{formatMoney(totalInvoiced)}</span>
@@ -347,7 +346,7 @@ export default function Dashboard() {
               </div>
 
               {/* Paid — share of the invoiced total */}
-              <div className="grid gap-1.5">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
                   <span className="text-muted">{t('financial.totalPaid')}</span>
                   <span className="tnum font-semibold text-ok">{formatMoney(totalPaid)}</span>
@@ -369,7 +368,7 @@ export default function Dashboard() {
               </div>
             </CardContent>
             <CardFooter>
-              <span>{t('financial.basis', { count: allInvoices.length })}</span>
+              <span>{t('financial.basis', { year: money?.year ?? '' })}</span>
             </CardFooter>
           </DataState>
         </Card>
@@ -378,7 +377,7 @@ export default function Dashboard() {
       {/* ============================================================ */}
       {/*  Recent Activity                                              */}
       {/* ============================================================ */}
-      <section aria-labelledby="dash-recent" className="grid gap-3">
+      <section aria-labelledby="dash-recent" className="grid grid-cols-[minmax(0,1fr)] gap-3">
         <h2
           id="dash-recent"
           className="font-display text-[15px] font-semibold tracking-[-0.01em] text-ink"
@@ -386,7 +385,7 @@ export default function Dashboard() {
           {t('recent.title')}
         </h2>
 
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2">
           {/* Recent Offers */}
           {canSeeOffers && (
             <Card>

@@ -635,7 +635,7 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
               <DialogDescription>{t('form.help')}</DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('form.supplier')} htmlFor="po-supplier" required>
                   <Select
                     id="po-supplier"
@@ -666,7 +666,7 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
                 </Field>
               </div>
 
-              <div className="grid gap-2.5">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[13px] font-medium text-ink-2">{t('form.lines')}</span>
                   <Button
@@ -684,7 +684,7 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
                   return (
                     <div
                       key={idx}
-                      className="grid gap-3 rounded-md border border-line-soft bg-paper-2 p-3"
+                      className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-md border border-line-soft bg-paper-2 p-3"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-[13px] font-medium text-ink-2">
@@ -715,7 +715,7 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
                         />
                       </Field>
 
-                      <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
                         <Field label={t('form.quantity')} htmlFor={`po-line-${idx}-quantity`}>
                           <Input
                             id={`po-line-${idx}-quantity`}
@@ -813,7 +813,7 @@ export default function PurchaseOrders({ embedded = false }: PageProps) {
                   onChange={(e) => setAddLineDesc(e.target.value)}
                 />
               </Field>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
                 <Field
                   label={t('form.quantity')}
                   htmlFor="po-new-line-quantity"
@@ -918,24 +918,24 @@ function OrderDetail({
   const canCancel = po.status !== 'delivered' && po.status !== 'cancelled';
 
   return (
-    <div className="grid gap-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <Card>
-        <dl className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="grid gap-1">
+        <dl className="grid grid-cols-[minmax(0,1fr)] gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <dt className="text-xs text-muted">{t('detail.reference')}</dt>
             <dd>
               <Ref>{po.reference}</Ref>
             </dd>
           </div>
-          <div className="grid gap-1">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <dt className="text-xs text-muted">{t('detail.supplier')}</dt>
             <dd className="text-[13.5px] font-medium text-ink">{po.supplier?.name ?? '—'}</dd>
           </div>
-          <div className="grid gap-1">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <dt className="text-xs text-muted">{t('detail.project')}</dt>
             <dd className="text-[13.5px] text-ink">{projectLong(po)}</dd>
           </div>
-          <div className="grid gap-1">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
             <dt className="text-xs text-muted">{t('detail.status')}</dt>
             <dd>
               <StatusBadge domain="purchaseOrder" value={po.status} />

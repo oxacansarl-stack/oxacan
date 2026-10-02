@@ -407,9 +407,9 @@ export default function PortalView() {
               />
             }
           >
-            <ul className="grid">
+            <ul className="grid grid-cols-[minmax(0,1fr)]">
               {recentReports.map((report) => (
-                <li key={report.id} className="grid gap-1 border-b border-line-soft p-4 last:border-b-0">
+                <li key={report.id} className="grid grid-cols-[minmax(0,1fr)] gap-1 border-b border-line-soft p-4 last:border-b-0">
                   <span className="tnum text-[13px] text-muted">{formatDate(report.date)}</span>
                   <p className={cn('text-[13.5px]', report.summary ? 'text-ink' : 'text-muted')}>
                     {report.summary || t('reports.noDetail')}

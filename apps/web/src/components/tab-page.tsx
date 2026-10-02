@@ -49,7 +49,7 @@ export function TabbedPage({
           next.set('tab', value);
           setParams(next, { replace: true });
         }}
-        className="grid gap-5"
+        className="grid grid-cols-[minmax(0,1fr)] gap-5"
       >
         {visible.length > 1 ? (
           <TabsList>

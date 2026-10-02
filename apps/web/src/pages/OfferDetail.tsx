@@ -584,9 +584,9 @@ export default function OfferDetail() {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         {/* ----- Left: the work ----- */}
-        <div className="grid min-w-0 content-start gap-5">
+        <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
           <LifecycleCard status={offer.status} editable={editable} nextStatuses={nextStatuses} />
 
           <Card>
@@ -869,13 +869,13 @@ export default function OfferDetail() {
         </div>
 
         {/* ----- Right: the numbers ----- */}
-        <aside className="grid content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_20px)] lg:self-start">
+        <aside className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_20px)] lg:self-start">
           <Card>
             <CardHeader>
               <CardTitle>{t('summary.title')}</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-1">
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
                 <span className="text-xs text-muted">{t('summary.totalTtc')}</span>
                 <span className="tnum text-[26px] font-semibold leading-none tracking-[-0.01em]">
                   {formatMoney(offer.totalTtcCents ?? 0)}
@@ -883,7 +883,7 @@ export default function OfferDetail() {
                 <span className="text-xs text-muted">{t('summary.totalTtcHint')}</span>
               </div>
 
-              <dl className="grid gap-2 border-t border-line-soft pt-3.5">
+              <dl className="grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-line-soft pt-3.5">
                 <SummaryRow
                   label={t('summary.countedCost')}
                   value={formatMoney(countedCostCents)}
@@ -943,7 +943,7 @@ export default function OfferDetail() {
                 onChange={(e) => setLineForm({ ...lineForm, description: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
               <Field label={t('lines.form.unit')} htmlFor="line-unit" hint={t('lines.form.unitHint')}>
                 <Input
                   id="line-unit"
@@ -976,7 +976,7 @@ export default function OfferDetail() {
                 />
               </Field>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field
                 label={t('lines.form.variantType')}
                 htmlFor="line-variant"
@@ -1142,7 +1142,7 @@ function LifecycleCard({
           {editable ? t('lifecycle.editable') : t('lifecycle.locked')}
         </Tag>
       </CardHeader>
-      <CardContent className="grid gap-3">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-2.5">
           {LIFECYCLE_STEPS.map((step, i) => {
             const done = i < reached;
@@ -1248,8 +1248,8 @@ function ChecklistCard({
           {ready ? t('checklist.readyTag') : t('checklist.blockedTag')}
         </Badge>
       </CardHeader>
-      <CardContent className="grid gap-3">
-        <ul className="grid gap-2">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3">
+        <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
           <ChecklistItem ok={unpricedCount === 0}>
             {unpricedCount === 0
               ? t('checklist.priced.ok')

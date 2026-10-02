@@ -208,7 +208,7 @@ export default function Catalogue() {
             importFailed ? 'bg-bad-bg text-bad' : 'bg-ok-bg text-ok',
           )}
         >
-          <div className="grid min-w-0 gap-1">
+          <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
             {importFailed ? (
               importResult.errors.map((message) => <span key={message}>{message}</span>)
             ) : (

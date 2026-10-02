@@ -26,7 +26,7 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
   return (
     <div className="p-3.5" role="status" aria-live="polite" aria-busy="true">
       <span className="sr-only">{t('state.loading')}</span>
-      <div className="grid gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
         {Array.from({ length: rows }).map((_, r) => (
           <div key={r} className="flex items-center gap-4">
             {Array.from({ length: cols }).map((_, c) => (
@@ -46,7 +46,7 @@ export function TableSkeleton({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
 export function LoadingState({ label }: { label?: string }) {
   const { t } = useTranslation();
   return (
-    <div className="grid justify-items-center gap-3 p-10 text-muted" role="status" aria-live="polite">
+    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-center gap-3 p-10 text-muted" role="status" aria-live="polite">
       <Skeleton className="h-3 w-40" />
       <span className="text-[13.5px]">{label ?? t('state.loading')}</span>
     </div>
@@ -65,7 +65,7 @@ export function EmptyState({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="grid justify-items-center gap-2.5 px-5 py-12 text-center">
+    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-center gap-2.5 px-5 py-12 text-center">
       <span aria-hidden className="grid size-11 place-items-center rounded-xl bg-neu-bg text-muted">
         {icon ?? <Inbox className="size-5" />}
       </span>
@@ -82,7 +82,7 @@ export function EmptyState({
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="grid justify-items-center gap-2.5 px-5 py-12 text-center" role="alert">
+    <div className="grid grid-cols-[minmax(0,1fr)] justify-items-center gap-2.5 px-5 py-12 text-center" role="alert">
       <span aria-hidden className="grid size-11 place-items-center rounded-xl bg-bad-bg text-bad">
         <CircleAlert className="size-5" />
       </span>

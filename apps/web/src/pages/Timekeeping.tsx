@@ -482,7 +482,7 @@ export default function Timekeeping() {
           error={myDraftsError || null}
           onRetry={() => loadMyDrafts(true)}
           loading={
-            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_160px_minmax(0,1fr)_auto]">
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_160px_minmax(0,1fr)_auto]">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-[58px]" />
               ))}
@@ -492,7 +492,7 @@ export default function Timekeeping() {
           <CardContent>
             {activeEntry ? (
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="grid min-w-0 gap-1">
+                <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className="text-[15px] font-semibold">
                       {activeEntry.project?.name || t('clock.projectFallback')}
@@ -505,7 +505,7 @@ export default function Timekeeping() {
                     {t('clock.startedAt', { time: formatTime(activeEntry.startTime) })}
                   </p>
                 </div>
-                <div className="grid justify-items-center gap-0.5">
+                <div className="grid grid-cols-[minmax(0,1fr)] justify-items-center gap-0.5">
                   <span className="tnum font-display text-[32px] font-semibold leading-none tracking-[-0.02em]">
                     {elapsed}
                   </span>
@@ -517,7 +517,7 @@ export default function Timekeeping() {
                 </Button>
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_160px_minmax(0,1fr)_auto] lg:items-end">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.2fr)_160px_minmax(0,1fr)_auto] lg:items-end">
                 <Field label={t('clock.project')} htmlFor="tk-project" error={projectsError || undefined}>
                   <Select
                     id="tk-project"
@@ -757,7 +757,7 @@ export default function Timekeeping() {
                         {formatMinutes(entry.travelMinutes)}
                       </TD>
                       <TD>
-                        <div className="grid gap-1">
+                        <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
                           <StatusBadge domain="timeEntry" value={entry.status} />
                           {entry.status === 'rejected' && entry.rejectionReason ? (
                             <span className="max-w-[260px] text-xs text-bad">

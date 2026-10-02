@@ -132,7 +132,7 @@ export function TopBar({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <div className="mb-1 grid border-b border-line-soft p-2.5">
+            <div className="mb-1 grid grid-cols-[minmax(0,1fr)] border-b border-line-soft p-2.5">
               <span className="font-semibold">{fullName}</span>
               <span className="text-xs text-muted">{t(`role.${me.role}`)}</span>
             </div>

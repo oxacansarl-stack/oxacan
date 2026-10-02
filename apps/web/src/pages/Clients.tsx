@@ -309,16 +309,16 @@ export default function Clients() {
                               onRetry={() => detail.refetch()}
                               loading={<TableSkeleton rows={3} cols={2} />}
                             >
-                              <div className="grid gap-5 px-3.5 py-4 md:grid-cols-2">
-                                <section className="grid content-start gap-2">
+                              <div className="grid grid-cols-[minmax(0,1fr)] gap-5 px-3.5 py-4 md:grid-cols-2">
+                                <section className="grid grid-cols-[minmax(0,1fr)] content-start gap-2">
                                   <h3 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                                     {t('detail.contacts')}
                                     <span className="tnum font-normal text-muted">{contacts.length}</span>
                                   </h3>
                                   {contacts.length > 0 ? (
-                                    <ul className="grid gap-2">
+                                    <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                                       {contacts.map((contact) => (
-                                        <li key={contact.id} className="grid gap-0.5 text-[13px]">
+                                        <li key={contact.id} className="grid grid-cols-[minmax(0,1fr)] gap-0.5 text-[13px]">
                                           <span className="font-medium text-ink">
                                             {contact.firstName} {contact.lastName}
                                             {contact.role ? (
@@ -336,15 +336,15 @@ export default function Clients() {
                                   )}
                                 </section>
 
-                                <section className="grid content-start gap-2">
+                                <section className="grid grid-cols-[minmax(0,1fr)] content-start gap-2">
                                   <h3 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                                     {t('detail.interactions')}
                                     <span className="tnum font-normal text-muted">{interactions.length}</span>
                                   </h3>
                                   {interactions.length > 0 ? (
-                                    <ul className="grid gap-2">
+                                    <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                                       {interactions.map((interaction) => (
-                                        <li key={interaction.id} className="grid gap-0.5 text-[13px]">
+                                        <li key={interaction.id} className="grid grid-cols-[minmax(0,1fr)] gap-0.5 text-[13px]">
                                           <span className="flex flex-wrap items-center gap-2">
                                             <Tag>{enumLabel('interactionType', interaction.type)}</Tag>
                                             <span className="tnum text-muted">
@@ -393,7 +393,7 @@ export default function Clients() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field label={t('form.type')} htmlFor="client-type">
                 <Select
                   id="client-type"

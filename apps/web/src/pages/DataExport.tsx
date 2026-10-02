@@ -154,7 +154,7 @@ export default function DataExport({ embedded = false }: PageProps) {
                   aria-hidden
                   className="mt-[7px] size-1.5 shrink-0 rounded-full bg-copper"
                 />
-                <span className="grid min-w-0 gap-0.5">
+                <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-0.5">
                   <span className="text-[13.5px] font-medium text-ink">{section.label}</span>
                   <span className="text-xs text-muted">{section.description}</span>
                 </span>

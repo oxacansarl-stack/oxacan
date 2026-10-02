@@ -479,7 +479,7 @@ export default function ProjectDetail() {
   if (project.isPending) {
     return (
       <PageBody>
-        <div className="grid gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-7 w-72" />
           <Skeleton className="h-3 w-56" />
@@ -552,11 +552,11 @@ export default function ProjectDetail() {
         actions={backToProjects}
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Tabs
           value={activeTab}
           onValueChange={openTab}
-          className="grid min-w-0 content-start gap-5"
+          className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5"
         >
           <TabsList>
             <TabsTrigger value="lots">
@@ -1003,13 +1003,13 @@ export default function ProjectDetail() {
         </Tabs>
 
         {/* ---------------- Sticky summary ---------------- */}
-        <aside className="grid content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_1.5rem)] lg:self-start">
+        <aside className="grid grid-cols-[minmax(0,1fr)] content-start gap-5 lg:sticky lg:top-[calc(var(--spacing-topbar)_+_1.5rem)] lg:self-start">
           <Card>
             <CardHeader>
               <CardTitle>{t('summary.title')}</CardTitle>
             </CardHeader>
-            <div className="grid gap-4 p-4">
-              <div className="grid gap-1.5">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 p-4">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[13px] font-medium text-ink-2">{t('progress')}</span>
                   <span className="tnum text-[13px] font-medium">
@@ -1035,7 +1035,7 @@ export default function ProjectDetail() {
                 </div>
               </div>
 
-              <dl className="grid gap-2.5 border-t border-line-soft pt-3.5 text-[13.5px]">
+              <dl className="grid grid-cols-[minmax(0,1fr)] gap-2.5 border-t border-line-soft pt-3.5 text-[13.5px]">
                 {canSeeFinancials ? (
                   <>
                     <SummaryRow
@@ -1179,7 +1179,7 @@ export default function ProjectDetail() {
                 onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field label={t('tasks.form.lot')} htmlFor="task-lot">
                 <Select
                   id="task-lot"
@@ -1215,7 +1215,7 @@ export default function ProjectDetail() {
                 onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
               <Field label={t('tasks.form.plannedStart')} htmlFor="task-start">
                 <Input
                   id="task-start"

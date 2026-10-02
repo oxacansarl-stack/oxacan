@@ -62,7 +62,9 @@ export function AppShell({
       {(detailCrumb) => (
         <div
           className={cn(
-            'grid min-h-dvh',
+            // The column is pinned to minmax(0,1fr) so a wide table scrolls inside its own
+            // container instead of stretching the whole page sideways on a phone.
+            'grid min-h-dvh grid-cols-[minmax(0,1fr)]',
             railed ? 'md:grid-cols-[var(--spacing-rail)_minmax(0,1fr)]' : 'md:grid-cols-[var(--spacing-sidebar)_minmax(0,1fr)]',
           )}
         >

@@ -158,7 +158,7 @@ export default function Notifications() {
             )
           }
         >
-          <ul className="grid">
+          <ul className="grid grid-cols-[minmax(0,1fr)]">
             {rows.map((n) => {
               // A row is always a <button>, so its content stays phrasing-only: spans, no <div>/<p>.
               const content = (
@@ -170,7 +170,7 @@ export default function Notifications() {
                       n.isRead ? 'bg-transparent' : 'bg-copper',
                     )}
                   />
-                  <span className="grid min-w-0 gap-1">
+                  <span className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
                     {/* The API already writes these in French (PRD wording) — shown verbatim. */}
                     <span className={cn('block', n.isRead ? 'text-ink-2' : 'font-semibold text-ink')}>
                       {n.title}

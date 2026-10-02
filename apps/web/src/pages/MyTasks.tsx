@@ -114,13 +114,13 @@ export default function MyTasks() {
             />
           }
         >
-          <ul className="grid">
+          <ul className="grid grid-cols-[minmax(0,1fr)]">
             {items.map((task) => (
               <li
                 key={task.id}
-                className="grid gap-3 border-b border-line-soft p-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                className="grid grid-cols-[minmax(0,1fr)] gap-3 border-b border-line-soft p-4 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
               >
-                <div className="grid min-w-0 gap-1">
+                <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{task.title}</span>
                     <StatusBadge domain="task" value={task.status} />

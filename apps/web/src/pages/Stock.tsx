@@ -95,7 +95,7 @@ function useLocationOptions() {
 /** Skeleton shaped like the card grid the emplacements tab loads into. */
 function CardGridSkeleton() {
   return (
-    <div className="grid gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: 3 }).map((_, i) => (
         <Skeleton key={i} className="h-[88px]" />
       ))}
@@ -196,11 +196,11 @@ function LocationsTab() {
             />
           }
         >
-          <ul className="grid gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="grid grid-cols-[minmax(0,1fr)] gap-3 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map((location) => (
               <li
                 key={location.id}
-                className="grid content-start gap-1.5 rounded-md border border-line bg-paper-2 p-3.5"
+                className="grid grid-cols-[minmax(0,1fr)] content-start gap-1.5 rounded-md border border-line bg-paper-2 p-3.5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <span className="min-w-0 font-medium text-ink">{location.name}</span>
@@ -234,7 +234,7 @@ function LocationsTab() {
                   placeholder={t('locations.namePlaceholder')}
                 />
               </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('locations.type')} htmlFor="stock-location-type" required>
                   <Select
                     id="stock-location-type"
@@ -520,7 +520,7 @@ function ItemsTab() {
                   ))}
                 </Select>
               </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('items.quantity')} htmlFor="stock-item-quantity">
                   <Input
                     id="stock-item-quantity"
@@ -782,7 +782,7 @@ function MovementsTab() {
                   ))}
                 </Select>
               </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('movements.type')} htmlFor="stock-movement-type" required>
                   <Select
                     id="stock-movement-type"
@@ -830,7 +830,7 @@ function MovementsTab() {
                   </Select>
                 </Field>
               ) : null}
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 <Field label={t('movements.reference')} htmlFor="stock-movement-reference">
                   <Input
                     id="stock-movement-reference"
@@ -895,7 +895,7 @@ export default function Stock({ embedded = false }: PageProps) {
         />
       )}
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as StockTab)} className="grid gap-5">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as StockTab)} className="grid grid-cols-[minmax(0,1fr)] gap-5">
         <TabsList aria-label={t('tabs.label')}>
           <TabsTrigger value="locations">
             <Warehouse />

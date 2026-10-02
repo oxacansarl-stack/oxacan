@@ -257,13 +257,13 @@ export default function Plans() {
                               onRetry={() => detail.refetch()}
                               loading={<TableSkeleton rows={2} cols={2} />}
                             >
-                              <section className="grid content-start gap-2 px-3.5 py-4">
+                              <section className="grid grid-cols-[minmax(0,1fr)] content-start gap-2 px-3.5 py-4">
                                 <h3 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                                   {t('annotations.title')}
                                   <span className="tnum font-normal text-muted">{annotations.length}</span>
                                 </h3>
                                 {annotations.length > 0 ? (
-                                  <ul className="grid gap-2">
+                                  <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
                                     {annotations.map((annotation) => (
                                       <li
                                         key={annotation.id}
@@ -320,7 +320,7 @@ export default function Plans() {
                 onChange={(e) => setForm({ ...form, fileUrl: e.target.value })}
               />
             </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <Field label={t('form.fileType')} htmlFor="plan-file-type">
                 <Select
                   id="plan-file-type"

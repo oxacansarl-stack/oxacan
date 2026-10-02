@@ -73,7 +73,7 @@ function formatIban(value: string): string {
 /** One read-only label/value pair in a details grid. */
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 gap-1">
+    <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 gap-1">
       <dt className="text-xs font-medium text-muted">{label}</dt>
       <dd className="min-w-0 break-words text-[13.5px] text-ink">{children}</dd>
     </div>
@@ -272,7 +272,7 @@ export default function Settings({ embedded = false }: PageProps) {
           loading={<LoadingState label={t('state.loading')} />}
         >
           <CardContent>
-            <dl className="grid gap-4 sm:grid-cols-2">
+            <dl className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
               <Detail label={t('company.name')}>{settings.companyName || '—'}</Detail>
               <Detail label={t('company.legalName')}>{settings.legalName || '—'}</Detail>
               <Detail label={t('company.address')}>{settings.address || '—'}</Detail>
@@ -297,8 +297,8 @@ export default function Settings({ embedded = false }: PageProps) {
           onRetry={() => void fetchSettings()}
           loading={<LoadingState label={t('state.loading')} />}
         >
-          <CardContent className="grid gap-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label={t('defaults.vatRate')} htmlFor="settings-vat" hint={t('defaults.vatRateHint')}>
                 <Input
                   id="settings-vat"
@@ -348,7 +348,7 @@ export default function Settings({ embedded = false }: PageProps) {
               </Field>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <Field label={t('billing.iban')} htmlFor="settings-iban" hint={t('billing.ibanHint')}>
                 <Input
                   id="settings-iban"
@@ -378,7 +378,7 @@ export default function Settings({ embedded = false }: PageProps) {
               </Field>
             </div>
 
-            <div className="grid gap-1.5">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
               <label
                 htmlFor="settings-geo"
                 className={cn(
@@ -441,8 +441,8 @@ export default function Settings({ embedded = false }: PageProps) {
               />
             }
           >
-            <CardContent className="grid gap-5">
-              <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-5">
+              <dl className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <Detail label={t('subscription.tierLabel')}>
                   {subscription.tier ? <Tag>{enumLabel('subscriptionTier', subscription.tier)}</Tag> : '—'}
                 </Detail>
@@ -461,7 +461,7 @@ export default function Settings({ embedded = false }: PageProps) {
               </dl>
 
               {seats.total > 0 ? (
-                <div className="grid gap-1.5">
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-1.5">
                   <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px]">
                     <span className="text-muted">
                       {t('subscription.seatUsage', { used: seats.used, count: seats.total })}

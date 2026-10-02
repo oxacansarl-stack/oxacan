@@ -268,8 +268,8 @@ export default function Contracts() {
         ) : null}
 
         {c ? (
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="grid min-w-0 content-start gap-5">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] min-w-0 content-start gap-5">
               {/* Amendments */}
               <Card>
                 <CardHeader>
@@ -364,7 +364,7 @@ export default function Contracts() {
               <CardHeader>
                 <CardTitle>{t('detail.summary.title')}</CardTitle>
               </CardHeader>
-              <CardContent className="grid gap-4">
+              <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-4">
                 <SummaryRow
                   label={t('detail.summary.totalTtc')}
                   value={
@@ -695,7 +695,7 @@ export default function Contracts() {
 
 function SummaryRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="grid gap-1">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
       <span className="text-xs text-muted">{label}</span>
       <span className="text-[13.5px] text-ink">{value}</span>
     </div>
