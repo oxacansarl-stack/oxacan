@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { todayInZurich } from '../../common/util/business-date';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
@@ -33,7 +34,7 @@ export const PORTAL_COMMENTS_PER_HOUR = 20;
 /** The client is not an app user: the offer's updated_by stays empty, the decision row names the signer. */
 const NO_APP_USER = null as unknown as string;
 
-const today = () => new Date().toISOString().slice(0, 10);
+
 const isUniqueViolation = (err: unknown) => (err as { driverError?: { code?: string } })?.driverError?.code === '23505';
 
 @Injectable()
@@ -234,7 +235,7 @@ export class PortalClientService {
       .addOrderBy('i.invoiceNumber', 'DESC')
       .getMany();
     const termsDays = await this.paymentTermsDays(ctx.companyId);
-    const now = today();
+    const now = todayInZurich();
 
     return invoices.map((i) => {
       const isCredit = i.type === 'credit_note';
@@ -487,7 +488,7 @@ function consentText(o: Offer, decision: OfferDecision): string {
 }
 
 function isExpired(validUntil: string | null): boolean {
-  return validUntil != null && today() > validUntil;
+  return validUntil != null && todayInZurich() > validUntil;
 }
 
 function paymentStatus(i: Invoice, dueDate: string | null, now: string) {

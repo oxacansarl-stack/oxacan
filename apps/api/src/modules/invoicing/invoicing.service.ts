@@ -13,6 +13,7 @@ import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/share
 import { DEFAULT_VAT_RATE, DEFAULT_RETENTION_RATE } from '@oxacan/shared-types';
 import { assertProjectExists } from '../../common/util/assert-project';
 import { swissRound } from '../../common/util/money';
+import { todayInZurich } from '../../common/util/business-date';
 import { sellingUnitCents } from '../offers/offer-pricing';
 import { CreateInvoiceDto, CreatePlusValueDto, RecordPaymentDto } from './dto/invoice.dto';
 import {
@@ -636,7 +637,7 @@ export class InvoicingService {
         invoiceNumber,
         situationNumber,
         status: 'draft',
-        issueDate: new Date(),
+        issueDate: todayInZurich() as unknown as Date, // DATE column; Zurich business day (PRD §23.5)
         vatRate,
         subtotalHtCents,
         vatAmountCents,
@@ -743,7 +744,7 @@ export class InvoicingService {
         invoiceNumber,
         referenceInvoiceId: original.id,
         status: 'draft',
-        issueDate: new Date(),
+        issueDate: todayInZurich() as unknown as Date, // DATE column; Zurich business day (PRD §23.5)
         vatRate: original.vatRate,
         subtotalHtCents: -original.subtotalHtCents,
         vatAmountCents: -original.vatAmountCents,

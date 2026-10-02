@@ -5,6 +5,7 @@ import { TimeEntry } from './entities/time-entry.entity';
 import { AppUser } from '../auth/entities/app-user.entity';
 import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
 import { AccessScopeService, ScopeUser } from './access-scope.service';
+import { APP_TIME_ZONE, todayInZurich } from '../../common/util/business-date';
 import { NotificationsService } from '../notifications/notifications.service';
 import { notifyOwners } from './approval-notifications';
 import { ClockInDto, UpdateTimeEntryDto } from './dto/time-entry.dto';
@@ -21,7 +22,6 @@ interface TimeEntryFilters {
 
 const NORMAL_DAY_MINUTES = 480; // 8h (CCT)
 
-const APP_TIME_ZONE = 'Europe/Zurich';
 /** A rejected entry goes back to its owner, who corrects and resubmits it. */
 const SUBMITTABLE = ['draft', 'rejected'];
 
@@ -492,8 +492,9 @@ export class TimekeepingService {
         throw new ValidationError('weekStart must be a date in YYYY-MM-DD format.');
       }
     } else {
-      const today = new Date();
-      weekStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+      // Seed from the Zurich calendar day: after midnight local, the UTC day is still yesterday
+      // and would shift the whole week (PRD §23.5).
+      weekStart = new Date(`${todayInZurich()}T00:00:00Z`);
       weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7));
     }
     const weekEnd = new Date(weekStart);

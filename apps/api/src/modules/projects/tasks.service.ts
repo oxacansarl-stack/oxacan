@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
+import { todayInZurich } from '../../common/util/business-date';
 import { TaskDependency } from './entities/task-dependency.entity';
 import { Project } from './entities/project.entity';
 import { NotFoundError, BusinessRuleError, ValidationError } from '@oxacan/shared-types';
@@ -29,9 +30,7 @@ interface Actor {
 /** DATE columns are exchanged as YYYY-MM-DD strings (the pg driver returns them as strings too). */
 const asDate = (v: string | null | undefined): Date | null => (v ? (v as unknown as Date) : null);
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+
 
 @Injectable()
 export class TasksService {
@@ -144,7 +143,7 @@ export class TasksService {
 
     // If status changes to 'done', set actualEnd = today
     if (dto.status === 'done' && task.status !== 'done') {
-      dto.actualEnd = todayIso();
+      dto.actualEnd = todayInZurich();
     }
 
     Object.assign(task, dto);
