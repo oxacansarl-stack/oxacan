@@ -83,7 +83,15 @@ export class PortalClientService {
       return {
         ...document,
         decision: decision
-          ? { decision: decision.decision, signerName: decision.signerName, comment: decision.comment, decidedAt: decision.decidedAt }
+          ? {
+              decision: decision.decision,
+              signerName: decision.signerName,
+              comment: decision.comment,
+              decidedAt: decision.decidedAt,
+              // The declaration that was agreed to: without it an answered offer cannot show the
+              // client what their signature covered (§8.2).
+              consentText: decision.consentText,
+            }
           : null,
         canRespond,
         canAccept: canRespond && !isExpired(document.validUntil),
@@ -183,6 +191,7 @@ export class PortalClientService {
       signerName: decision.signerName,
       comment: decision.comment,
       decidedAt: decision.decidedAt,
+      consentText: decision.consentText,
       offerStatus: updated.status,
     };
   }
@@ -494,6 +503,10 @@ function isExpired(validUntil: string | null): boolean {
 function paymentStatus(i: Invoice, dueDate: string | null, now: string) {
   if (i.type === 'credit_note') return 'credit_note';
   if (i.status === 'paid') return 'paid';
+  // A situation whose prior acomptes exceed the work billed claims nothing: the balance is in the
+  // client's favour and comes off the next invoice. Reporting it as unpaid (or overdue, once its
+  // due date passes) would tell the client to pay a negative amount.
+  if (i.totalTtcCents <= 0) return 'nothing_due';
   if (i.status === 'overdue' || (dueDate != null && dueDate < now)) return 'overdue';
   if ((i.amountPaidCents ?? 0) > 0) return 'partially_paid';
   return 'unpaid';

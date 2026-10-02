@@ -88,6 +88,17 @@ beforeAll(async () => {
   await ok(admin.patch(`/invoices/${credited.id}/status`, { status: 'sent' }));
   fx.creditNote = (await ok(admin.post(`/invoices/${credited.id}/credit-note`))).id;
   fx.invoiceDraft = (await invoice(fx.project, fx.client, 5000)).id;
+  // A situation whose prior acomptes exceed the work billed: the total is negative, so it claims
+  // nothing and the balance comes off the next invoice. The amounts are set directly rather than
+  // rebuilt through the whole acompte chain; its due date is past, to prove it is not 'overdue'.
+  const inFavour = await invoice(fx.project, fx.client, 10000);
+  await ok(admin.patch(`/invoices/${inFavour.id}/status`, { status: 'sent' }));
+  await db.query(
+    `UPDATE invoice SET total_ttc_cents = -138330, prior_acomptes_cents = 1621500,
+            due_date = (now() - interval '20 days')::date WHERE id = $1`,
+    [inFavour.id],
+  );
+  fx.situationInFavour = inFavour.id;
   const otherClient = (await ok(admin.get(`/projects/${fx.otherProject}`))).clientId;
   const other = await invoice(fx.otherProject, otherClient, 7000);
   await ok(admin.patch(`/invoices/${other.id}/status`, { status: 'sent' }));
@@ -199,6 +210,7 @@ describe('Portal offers', () => {
     });
     expect(res.status).toBe(201);
     expect(res.data).toMatchObject({ decision: 'accepted', signerName: 'Marie Muster', offerStatus: 'accepted' });
+    expect(res.data.consentText).toMatch(/^J'accepte l'offre/);
 
     const offer = await ok(admin.get(`/offers/${fx.offer}`));
     expect(offer.status).toBe('accepted');
@@ -227,6 +239,9 @@ describe('Portal offers', () => {
     expect(again.status).toBe(422);
     const listed = (await portal('GET', `${fx.token}/offers`)).data.find((o: any) => o.id === fx.offer);
     expect(listed).toMatchObject({ status: 'accepted', canRespond: false, decision: { decision: 'accepted', signerName: 'Marie Muster' } });
+    // The declaration that was signed stays readable after the answer, though the consent box is gone.
+    expect(listed.decision.consentText).toBe(rows[0].consent_text);
+    expect(listed.consentTexts).toBeNull();
   });
 
   it('refuses a sent offer with a comment', async () => {
@@ -270,6 +285,10 @@ describe('Portal invoices', () => {
     expect(paid).toMatchObject({ paymentStatus: 'partially_paid', amountPaidCents: 30000, amountDueCents: paid.totalTtcCents - 30000 });
     expect(paid.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(res.data.find((i: any) => i.id === fx.creditNote)).toMatchObject({ type: 'credit_note', paymentStatus: 'credit_note' });
+
+    // A negative total asks for nothing: never 'unpaid', and never 'overdue' once its date passes.
+    const inFavour = res.data.find((i: any) => i.id === fx.situationInFavour);
+    expect(inFavour).toMatchObject({ paymentStatus: 'nothing_due', amountDueCents: 0, totalTtcCents: -138330 });
     expect(JSON.stringify(res.data)).not.toMatch(/"notes"|createdBy|pdfUrl/);
   });
 
