@@ -9,12 +9,24 @@ config({ path: join(__dirname, '../../../.env') });
 // Shared by migrations (key sync), the spawned API and direct DB checks in the tests.
 process.env.RLS_CONTEXT_SECRET ??= 'oxacan-test-rls-context-signing-secret-000';
 
-export const MOCK_SUPABASE_PORT = 3199;
+/**
+ * Several Claude/dev sessions plus CI share this machine, so the suite's port and database are
+ * overridable per session (e.g. TEST_PORT=3301 TEST_DB=oxacan_test_ui npm test). Defaults are
+ * unchanged for CI and existing habits. The DB name is interpolated into CREATE/DROP DATABASE,
+ * hence the strict pattern.
+ */
+function envPort(name: string, fallback: number): number {
+  const n = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(n) || n < 1024 || n > 65535) throw new Error(`${name} must be a port number`);
+  return n;
+}
+export const MOCK_SUPABASE_PORT = envPort('MOCK_SUPABASE_PORT', 3199);
 export const MOCK_SUPABASE_URL = `http://localhost:${MOCK_SUPABASE_PORT}`;
-export const MOCK_SUPABASE_KEY_FILE = join(tmpdir(), 'oxacan-test-supabase-key.json');
+export const MOCK_SUPABASE_KEY_FILE = join(tmpdir(), `oxacan-test-supabase-key-${MOCK_SUPABASE_PORT}.json`);
 
-export const TEST_DB = 'oxacan_test';
-export const TEST_PORT = 3101;
+export const TEST_DB = process.env.TEST_DB ?? 'oxacan_test';
+if (!/^[a-z][a-z0-9_]{0,40}$/.test(TEST_DB)) throw new Error('TEST_DB must match ^[a-z][a-z0-9_]{0,40}$');
+export const TEST_PORT = envPort('TEST_PORT', 3101);
 export const BASE_URL = `http://localhost:${TEST_PORT}`;
 
 export const COMPANY_A = 'aaaaaaaa-0000-4000-8000-000000000001';
