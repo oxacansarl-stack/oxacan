@@ -161,10 +161,8 @@ export class CatalogueService {
 
       const was = { npkNumber: article.npkNumber, isActive: article.isActive };
       // A DTO instance carries its declared-but-unset fields as own `undefined` properties, which
-      // Object.assign would copy straight over the stored values.
-      for (const [k, v] of Object.entries(dto)) {
-        if (v !== undefined) (article as Record<string, unknown>)[k] = v;
-      }
+      // a plain Object.assign would copy straight over the stored values.
+      Object.assign(article, Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined)));
       const saved = await m.save(article);
       // Correcting a code, or putting an article back in service, exposes the same orphans a
       // freshly created article does.
