@@ -22,7 +22,8 @@
     "totalPaid": "Total encaissé",
     "outstanding": "Solde ouvert",
     "loadFailed": "Impossible de charger l'aperçu financier.",
-    "basis": "Exercice {{year}} · toutes les factures émises"
+    "basis": "Exercice {{year}} · toutes les factures émises",
+    "clientCredit": "Crédit client"
   },
   "recent": {
     "title": "Activité récente",

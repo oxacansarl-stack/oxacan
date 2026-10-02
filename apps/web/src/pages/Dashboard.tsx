@@ -205,7 +205,8 @@ export default function Dashboard() {
   const totalInvoiced = money?.invoicedTtcCents ?? 0;
   const totalPaid = money?.paidTtcCents ?? 0;
   const outstanding = money?.outstandingTtcCents ?? 0;
-  const paidPercent = Math.round((totalPaid / Math.max(totalInvoiced, 1)) * 100);
+  // Clamped: an advance payment can exceed what has been invoiced so far.
+  const paidPercent = Math.min(100, Math.round((totalPaid / Math.max(totalInvoiced, 1)) * 100));
 
   /* --- Recent rows --- */
   const offerRows = unwrapArray<Offer>(recentOffers.data).slice(0, 5);
@@ -361,9 +362,22 @@ export default function Dashboard() {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-x-3 border-t border-line-soft pt-3 text-[13.5px]">
-                <span className="text-muted">{t('financial.outstanding')}</span>
-                <span className={cn('tnum font-semibold', outstanding > 0 ? 'text-bad' : 'text-ok')}>
-                  {formatMoney(outstanding)}
+                {/*
+                 * Three distinct cases, because a negative balance is not good news: the
+                 * company has been paid more than it has invoiced (a deposit ahead of the
+                 * work) and owes the client the difference. Showing that in green read as
+                 * "nothing to collect".
+                 */}
+                <span className="text-muted">
+                  {outstanding < 0 ? t('financial.clientCredit') : t('financial.outstanding')}
+                </span>
+                <span
+                  className={cn(
+                    'tnum font-semibold',
+                    outstanding > 0 ? 'text-bad' : outstanding < 0 ? 'text-copper' : 'text-ok',
+                  )}
+                >
+                  {formatMoney(Math.abs(outstanding))}
                 </span>
               </div>
             </CardContent>
